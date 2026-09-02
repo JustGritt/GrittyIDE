@@ -37,8 +37,11 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
 
-      # Honors rust-toolchain.toml when no `toolchain` input is given.
-      - uses: dtolnay/rust-toolchain@master
+      # Runners ship rustup; this installs the exact toolchain pinned in rust-toolchain.toml.
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 2>/dev/null || cargo --version
+          rustup show
 
       - uses: Swatinem/rust-cache@v2
 
@@ -66,7 +69,11 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
 
-      - uses: dtolnay/rust-toolchain@master
+      # Runners ship rustup; this installs the exact toolchain pinned in rust-toolchain.toml.
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 2>/dev/null || cargo --version
+          rustup show
 
       - uses: Swatinem/rust-cache@v2
 
