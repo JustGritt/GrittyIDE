@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  linux:
+    name: Linux (check + build)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev \
+            libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # Honors rust-toolchain.toml when no `toolchain` input is given.
+      - uses: dtolnay/rust-toolchain@master
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm check
+
+      - name: Build desktop app (no bundling; packaging is Phase 7)
+        run: pnpm tauri build --no-bundle
+
+  macos:
+    name: macOS (check + app bundle)
+    runs-on: macos-15
+    timeout-minutes: 45
+    # macOS minutes are expensive on a private repo: run on main, manual dispatch,
+    # or pull requests labelled `ci:macos`. macOS is also verified locally.
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:macos')
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@master
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm check
+
+      - name: Build macOS app bundle
+        run: pnpm tauri build --bundles app --ci
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Gritty.app-macos-arm64
+          path: target/release/bundle/macos/Gritty.app
+          retention-days: 7
