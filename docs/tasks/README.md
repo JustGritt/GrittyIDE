@@ -7,7 +7,7 @@ domain abstraction before its upstream contract exists.
 | ID | Task | Phase | Depends on | Status |
 |---|---|---|---|---|
 | [T000](T000-bootstrap-workspace.md) | Bootstrap workspace | 0 | – | review |
-| [T010](T010-core-protocol.md) | Core protocol + operation/event/error conventions (Gate A) | 0 | T000 | todo |
+| [T010](T010-core-protocol.md) | Core protocol + operation/event/error conventions (Gate A) | 0 | T000 | in-progress |
 | [T020](T020-workspace-open-list.md) | Workspace open/list + fixtures | 0/1A | T010 | todo |
 | [T030](T030-file-io-documents.md) | File I/O + document/buffer contract (Gate B) | 0/1A | T020 | todo |
 | [T040](T040-monaco-shell.md) | Monaco shell | 0/1A | T030 | todo |

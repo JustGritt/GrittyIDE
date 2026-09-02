@@ -1,7 +1,7 @@
 # Task T010 — Core protocol + operation/event/error conventions (Gate A)
 
 - **Phase:** 0
-- **Status:** todo
+- **Status:** in-progress
 - **Depends on:** T000
 
 ## Objective
