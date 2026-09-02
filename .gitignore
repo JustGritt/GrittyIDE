@@ -1,0 +1,22 @@
+# Dependencies and build output
+node_modules/
+dist/
+/target/
+**/src-tauri/gen/
+*.tsbuildinfo
+.vite/
+coverage/
+
+# Logs and environment
+*.log
+.env
+.env.*
+
+# OS and editors
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Local tool state
+.claude/settings.local.json

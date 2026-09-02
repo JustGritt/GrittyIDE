@@ -1,0 +1,30 @@
+{
+  "name": "gritty",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @gritty/desktop tauri dev",
+    "build": "pnpm --filter @gritty/desktop tauri build",
+    "tauri": "pnpm --filter @gritty/desktop tauri",
+    "web": "pnpm --filter @gritty/desktop dev",
+    "lint": "biome check .",
+    "format": "biome check --write . && cargo fmt --all",
+    "typecheck": "tsc --noEmit -p tsconfig.json && pnpm -r run typecheck",
+    "test": "vitest run",
+    "check:ts": "pnpm lint && pnpm typecheck && pnpm test",
+    "check:rust": "cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
+    "check": "pnpm check:ts && pnpm check:rust"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "catalog:",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}
