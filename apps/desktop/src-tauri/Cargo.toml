@@ -1,0 +1,26 @@
+[package]
+name = "gritty-desktop"
+description = "Gritty desktop shell: thin Tauri composition root over gritty-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+# Distinct lib name avoids bin/lib collisions (Tauri template convention).
+name = "gritty_desktop_lib"
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+gritty-core = { workspace = true }
+tauri = { workspace = true }
+serde = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true
