@@ -97,7 +97,7 @@ documentation set including task specs for T010–T090.
 | `pnpm dev` (scripted) | Vite on 1420; Rust log `health requested by webview` 7 s after start under the dev CSP; WebKit `21624.4.5.11.5`; HMR update observed 2 s after editing `App.tsx`; clean shutdown, no leftover processes |
 | `pnpm tauri build --bundles app` | release build 1 m 34 s; `target/release/bundle/macos/Gritty.app` (6.1 MB) |
 | release binary launched directly | `health requested by webview` after 3 s under the production CSP with `debug=false` |
-| CI | pending: runs on the pull request (Linux always, macOS via the `ci:macos` label) |
+| CI (PR #1, run 33643517200) | Linux: `pnpm check` + `tauri build --no-bundle` green; macOS: `pnpm check` + app bundle green with the `Gritty.app` artifact. First run failed because `dtolnay/rust-toolchain@master` needs an explicit toolchain input; replaced by rustup reading `rust-toolchain.toml` |
 
 Not executed: the negative UI check (renaming the command to see the error
 envelope rendered) because the WebView cannot be observed from the CLI; DMG
