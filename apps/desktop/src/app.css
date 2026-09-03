@@ -93,3 +93,164 @@ body {
 .shell__facts dd {
   margin: 0;
 }
+
+/* Error envelope */
+
+.envelope {
+  border: 1px solid var(--error);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin: 0.75rem 0;
+  max-width: 40rem;
+}
+
+.envelope__fields {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0 0 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+}
+
+.envelope__fields dt {
+  color: var(--muted);
+}
+
+.envelope__fields dd,
+.envelope__fields pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Development operations panel */
+
+.panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  max-width: 40rem;
+}
+
+.panel h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.panel__form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  margin-bottom: 0.75rem;
+}
+
+.panel__form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.panel__form input {
+  width: 5.5rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+}
+
+button {
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.panel__empty {
+  color: var(--muted);
+  margin: 0;
+}
+
+.ops {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ops__row {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+}
+
+.ops__status {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+}
+
+.ops__row--completed .ops__status {
+  color: var(--ok);
+}
+
+.ops__row--failed .ops__status,
+.ops__error {
+  color: var(--error);
+}
+
+.ops__row--cancelled .ops__status {
+  color: var(--muted);
+}
+
+.ops__head {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.ops__kind {
+  font-weight: 600;
+}
+
+.ops__id {
+  color: var(--muted);
+  margin-left: auto;
+}
+
+.ops__progress {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.ops__progress progress {
+  flex: 1;
+}
+
+.ops__error,
+.ops__meta {
+  margin: 0.3rem 0 0;
+  font-size: 0.8rem;
+}
+
+.ops__meta {
+  color: var(--muted);
+}

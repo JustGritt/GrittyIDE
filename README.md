@@ -35,7 +35,7 @@ for the current checklist.
 | `pnpm install` | Install the JS workspace (lockfile is committed) |
 | `pnpm dev` | Run the desktop app with hot reload (`tauri dev`) |
 | `pnpm web` | Run only the Vite frontend in a browser (no core, health call fails by design) |
-| `pnpm check` | Every gate: Biome, tsc, vitest, rustfmt, clippy `-D warnings`, cargo test |
+| `pnpm check` | Every gate: Biome, tsc, vitest, rustfmt, clippy `-D warnings`, cargo test, generated protocol types fresh |
 | `pnpm format` | Apply Biome and rustfmt fixes |
 | `pnpm build` | Release build and bundles under `target/release/bundle/` |
 | `pnpm tauri <args>` | Any Tauri CLI command, executed inside the app package |
@@ -48,7 +48,8 @@ Logging: `GRITTY_LOG=debug pnpm dev` (a `tracing` env filter).
 apps/desktop/          Tauri app: React frontend (src/) + Rust shell (src-tauri/)
 crates/gritty-core/    Application core; never depends on Tauri
 crates/*               Further domain crates arrive with their tasks (workspace, persistence, terminal, ...)
-packages/*             Frontend packages arrive with their tasks (protocol, editor, markdown, ...)
+packages/protocol/     Typed core client; src/generated is written by `cargo test -p gritty-core`
+packages/*             Further frontend packages arrive with their tasks (editor, markdown, ...)
 docs/                  Planning docs, architecture, ADRs, plans, task specs, test matrices
 .github/workflows/     CI (Linux always, macOS gated)
 ```

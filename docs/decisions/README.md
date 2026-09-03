@@ -14,6 +14,7 @@ requires updating the relevant ADR.
 | [ADR-006](ADR-006-markdown.md) | Markdown is a first-class portable planning format | Accepted |
 | [ADR-007](ADR-007-git-workstreams.md) | Branch/worktree per workstream for parallel work | Accepted |
 | [ADR-008](ADR-008-repository-tooling.md) | Repository tooling and type sharing | Accepted |
+| [ADR-009](ADR-009-core-protocol-conventions.md) | Core protocol conventions: ids, envelopes, events, versioning | Accepted |
 
 Template:
 

@@ -20,3 +20,4 @@ coverage/
 
 # Local tool state
 .claude/settings.local.json
+HANDOFF.md

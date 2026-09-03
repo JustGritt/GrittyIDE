@@ -7,7 +7,9 @@
 //! - The WebView is never handed raw filesystem or process APIs.
 
 mod commands;
+pub mod core;
 
+use tauri::Manager;
 use tracing_subscriber::EnvFilter;
 
 /// Environment variable controlling log filtering, e.g. `GRITTY_LOG=debug`.
@@ -19,13 +21,41 @@ pub fn run() {
     tracing::info!(
         app_version = env!("CARGO_PKG_VERSION"),
         core_version = gritty_core::VERSION,
+        protocol_version = gritty_core::PROTOCOL_VERSION,
         "starting Gritty"
     );
 
-    tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![commands::health])
-        .run(tauri::generate_context!())
-        .expect("error while running Gritty");
+    let app = configure(tauri::Builder::default())
+        .build(tauri::generate_context!())
+        .expect("error while building Gritty");
+
+    app.run(|app, event| {
+        if let tauri::RunEvent::Exit = event {
+            app.state::<core::Core>().shutdown();
+        }
+    });
+}
+
+/// Register every command adapter and schedule [`attach_core`] for setup.
+/// Generic over the runtime so tests can drive the same wiring on Tauri's mock
+/// runtime (which never runs `setup`; tests call [`attach_core`] themselves).
+pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+    builder
+        .setup(|app| {
+            attach_core(app.handle());
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::core_health,
+            commands::operations_list,
+            commands::operations_cancel,
+            commands::operations_start_demo,
+        ])
+}
+
+/// Build the core (event bus + operation registry) and manage it as app state.
+pub fn attach_core<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    app.manage(core::Core::new(app.clone()));
 }
 
 fn init_tracing() {

@@ -1,34 +1,161 @@
-//! Tauri command adapters.
+//! Tauri command adapters: `<domain>.<verb>` in TypeScript maps to
+//! `<domain>_<snake_verb>` here. Adapters validate, delegate to the core and
+//! map every failure into the `CoreError` envelope; no domain logic lives here.
 //!
-//! Temporary surface for T000. T010 replaces this with the typed core protocol
-//! (command/event/error envelope) and the `health` command keeps its name so
-//! the protocol client can map onto it without changes here.
+//! Every command body runs through [`guard`], which attaches a correlation id,
+//! a tracing span, and turns a panic into an `Internal` error instead of a
+//! promise that never settles.
 
-use serde::Serialize;
+use std::future::Future;
 
-/// Health information returned to the WebView by the `health` command.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AppHealth {
-    /// Version of the desktop app (Cargo package version).
-    pub app_version: String,
-    /// Version of the `tauri` runtime crate.
-    pub tauri_version: &'static str,
-    /// Version string of the system WebView, when detectable (Phase 0 evidence).
-    pub webview_version: Option<String>,
-    /// Facts reported by `gritty-core`.
-    pub core: gritty_core::HealthReport,
+use gritty_core::health::ShellInfo;
+use gritty_core::operation::demo::{StartDemoRequest, start_demo};
+use gritty_core::operation::{CancelOperationRequest, Operation};
+use gritty_core::protocol::actor::Actor;
+use gritty_core::protocol::ids::CorrelationId;
+use gritty_core::{CoreError, HealthReport};
+use serde::de::DeserializeOwned;
+use tauri::State;
+use tracing::Instrument;
+
+use crate::core::Core;
+
+/// `core.health`
+#[tauri::command]
+pub async fn core_health<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<HealthReport, CoreError> {
+    guard("core.health", move |_| async move {
+        let shell = ShellInfo {
+            app_version: app.package_info().version.to_string(),
+            runtime: "tauri".to_owned(),
+            runtime_version: tauri::VERSION.to_owned(),
+            webview_version: tauri::webview_version().ok(),
+        };
+        let report = gritty_core::health(shell);
+        tracing::info!(?report, "health requested by webview");
+        Ok(report)
+    })
+    .await
 }
 
-/// Round-trip probe proving the WebView <-> core IPC path works.
+/// `operations.list`
 #[tauri::command]
-pub fn health(app: tauri::AppHandle) -> AppHealth {
-    let report = AppHealth {
-        app_version: app.package_info().version.to_string(),
-        tauri_version: tauri::VERSION,
-        webview_version: tauri::webview_version().ok(),
-        core: gritty_core::health(),
-    };
-    tracing::info!(?report, "health requested by webview");
-    report
+pub async fn operations_list(core: State<'_, Core>) -> Result<Vec<Operation>, CoreError> {
+    let registry = core.registry.clone();
+    guard(
+        "operations.list",
+        move |_| async move { Ok(registry.list()) },
+    )
+    .await
+}
+
+/// `operations.cancel`
+#[tauri::command]
+pub async fn operations_cancel(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Operation, CoreError> {
+    let registry = core.registry.clone();
+    guard("operations.cancel", move |_| async move {
+        let request: CancelOperationRequest = parse_request(request)?;
+        registry.cancel(&request.operation_id)
+    })
+    .await
+}
+
+/// `operations.startDemo`
+#[tauri::command]
+pub async fn operations_start_demo(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Operation, CoreError> {
+    let registry = core.registry.clone();
+    guard("operations.startDemo", move |correlation| async move {
+        let request: StartDemoRequest = parse_request(request)?;
+        start_demo(&registry, request, Actor::User, correlation)
+    })
+    .await
+}
+
+/// Deserialize the single `request` argument; a malformed one is `InvalidInput`
+/// rather than Tauri's opaque string rejection.
+fn parse_request<T: DeserializeOwned>(request: serde_json::Value) -> Result<T, CoreError> {
+    serde_json::from_value(request)
+        .map_err(|error| CoreError::invalid_input("request", error.to_string()))
+}
+
+/// Run a command body on the async runtime with a correlation id and a span.
+/// A panic inside the body surfaces as `Internal` carrying that correlation id.
+async fn guard<T, F, Fut>(command: &'static str, body: F) -> Result<T, CoreError>
+where
+    T: Send + 'static,
+    F: FnOnce(CorrelationId) -> Fut + Send + 'static,
+    Fut: Future<Output = Result<T, CoreError>> + Send + 'static,
+{
+    let correlation = CorrelationId::new();
+    let span = tracing::debug_span!("command", command, correlation_id = %correlation);
+    let task_correlation = correlation.clone();
+    let joined =
+        tauri::async_runtime::spawn(async move { body(task_correlation).await }.instrument(span))
+            .await;
+    match joined {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(error)) => {
+            tracing::warn!(command, correlation_id = %correlation, code = %error.code, message = %error.message, "command failed");
+            Err(error.or_correlation(&correlation))
+        }
+        Err(join) => {
+            tracing::error!(command, correlation_id = %correlation, error = %join, "command panicked");
+            Err(CoreError::internal(format!("command {command} panicked"))
+                .with_correlation(correlation))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gritty_core::CoreErrorCode;
+
+    use super::*;
+
+    #[test]
+    fn guard_turns_a_panic_into_an_internal_error_with_correlation() {
+        let result: Result<(), CoreError> =
+            tauri::async_runtime::block_on(guard("test.panic", |_| async {
+                panic!("adapter bug");
+            }));
+        let error = result.unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::Internal);
+        assert!(error.message.contains("test.panic"));
+        assert!(error.correlation_id.is_some());
+    }
+
+    #[test]
+    fn guard_attaches_the_correlation_id_to_core_errors() {
+        let result: Result<(), CoreError> =
+            tauri::async_runtime::block_on(guard("test.fail", |_| async {
+                Err(CoreError::not_found("nothing"))
+            }));
+        let error = result.unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::NotFound);
+        assert!(error.correlation_id.is_some());
+    }
+
+    #[test]
+    fn guard_hands_the_same_correlation_id_to_the_body() {
+        let result = tauri::async_runtime::block_on(guard("test.ok", |correlation| async move {
+            Err::<(), _>(CoreError::internal("x").with_correlation(correlation))
+        }));
+        let error = result.unwrap_err();
+        assert!(error.correlation_id.unwrap().is_well_formed());
+    }
+
+    #[test]
+    fn malformed_request_is_invalid_input() {
+        let error =
+            parse_request::<StartDemoRequest>(serde_json::json!({ "steps": "x" })).unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+        assert_eq!(error.details.unwrap()["field"], "request");
+    }
 }
