@@ -13,11 +13,14 @@
 //! - [`operation`]: the asynchronous operation model (state machine, registry
 //!   with cooperative cancellation, progress reporting, demo operation).
 //! - [`health`]: the `core.health` report.
+//! - [`workspace`]: workspace lifecycle and directory listing (T020) over
+//!   the `gritty-workspace` crate.
 
 pub mod event;
 pub mod health;
 pub mod operation;
 pub mod protocol;
+pub mod workspace;
 
 pub use health::{HealthReport, ShellInfo, health};
 pub use protocol::error::{CoreError, CoreErrorCode};

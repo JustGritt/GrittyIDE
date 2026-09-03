@@ -7,12 +7,19 @@ import type { EventMeta } from './generated/EventMeta';
 export type { Actor } from './generated/Actor';
 export type { AgentRunId } from './generated/AgentRunId';
 export type { CancelOperationRequest } from './generated/CancelOperationRequest';
+export type { CloseWorkspaceRequest } from './generated/CloseWorkspaceRequest';
 export type { CoreError as CoreErrorShape } from './generated/CoreError';
 export type { CoreErrorCode } from './generated/CoreErrorCode';
 export type { CoreEvent } from './generated/CoreEvent';
 export type { CorrelationId } from './generated/CorrelationId';
+export type { DirEntry } from './generated/DirEntry';
+export type { DirEntryKind } from './generated/DirEntryKind';
+export type { DirectoryPage } from './generated/DirectoryPage';
 export type { EventMeta } from './generated/EventMeta';
 export type { HealthReport } from './generated/HealthReport';
+export type { ListDirectoryRequest } from './generated/ListDirectoryRequest';
+export type { ListDirectoryResponse } from './generated/ListDirectoryResponse';
+export type { OpenWorkspaceRequest } from './generated/OpenWorkspaceRequest';
 export type { Operation } from './generated/Operation';
 export type { OperationCancelledPayload } from './generated/OperationCancelledPayload';
 export type { OperationCompletedPayload } from './generated/OperationCompletedPayload';
@@ -25,10 +32,16 @@ export type { OperationStartedPayload } from './generated/OperationStartedPayloa
 export type { OperationStatus } from './generated/OperationStatus';
 export type { ShellInfo } from './generated/ShellInfo';
 export type { StartDemoRequest } from './generated/StartDemoRequest';
+export type { SymlinkInfo } from './generated/SymlinkInfo';
 export type { JsonValue } from './generated/serde_json/JsonValue';
 export type { Timestamp } from './generated/Timestamp';
 export { CORE_EVENT_CHANNEL, PROTOCOL_VERSION } from './generated/version';
+export type { Workspace } from './generated/Workspace';
+export type { WorkspaceClosedPayload } from './generated/WorkspaceClosedPayload';
+export type { WorkspaceClosedReason } from './generated/WorkspaceClosedReason';
 export type { WorkspaceId } from './generated/WorkspaceId';
+export type { WorkspaceOpenedPayload } from './generated/WorkspaceOpenedPayload';
+export type { WorkspacePath } from './generated/WorkspacePath';
 
 /**
  * What arrives on the event channel: `{ name, seq, workspaceId?, correlationId?, actor, payload }`.

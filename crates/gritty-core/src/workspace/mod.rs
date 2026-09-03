@@ -1,0 +1,858 @@
+//! Workspace lifecycle (T020): one open workspace at a time, identified by a
+//! [`WorkspaceId`], announced through `WorkspaceOpened` / `WorkspaceClosed`,
+//! and listed one directory level per command.
+//!
+//! The filesystem work lives in `gritty-workspace`; this module owns identity,
+//! events, error mapping and the decision to run a listing as an operation:
+//! `list` runs the listing on the blocking pool and waits up to a budget
+//! (`DEFAULT_LIST_BUDGET`); when the directory is not done by then the same
+//! job continues as a cancellable `workspace.list` operation whose completion
+//! event carries the page. Wire types are exported to TypeScript from here.
+
+use std::path::Path;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
+
+use gritty_workspace::{
+    DirectoryPage, ListOptions, Listing, MAX_PAGE_SIZE, WorkspaceError, WorkspacePath,
+    WorkspaceRoot, list_directory,
+};
+use serde::{Deserialize, Serialize};
+use tokio::runtime::Handle;
+use tokio::task::JoinError;
+use tokio_util::sync::CancellationToken;
+use ts_rs::TS;
+
+use crate::event::{
+    CoreEvent, EventBus, EventOrigin, WorkspaceClosedPayload, WorkspaceOpenedPayload,
+};
+use crate::operation::{Operation, OperationKind, OperationRegistry, OperationSpec};
+use crate::protocol::actor::Actor;
+use crate::protocol::error::{CoreError, CoreErrorCode};
+use crate::protocol::ids::{CorrelationId, WorkspaceId};
+use crate::protocol::time::Timestamp;
+
+/// Operation kind of a listing that outlived its budget.
+pub const LIST_KIND: &str = "workspace.list";
+/// How long `workspace.list` waits before handing the listing over to an operation.
+pub const DEFAULT_LIST_BUDGET: Duration = Duration::from_millis(100);
+
+/// An open workspace as the UI sees it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct Workspace {
+    pub id: WorkspaceId,
+    /// Canonical absolute root in the platform's native form. Display only:
+    /// commands address files with workspace-relative `WorkspacePath`s.
+    pub root: String,
+    /// Last component of the root (the whole root for a drive root).
+    pub name: String,
+    pub opened_at: Timestamp,
+}
+
+/// `workspace.open`. Without `path` the shell shows the native directory picker.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenWorkspaceRequest {
+    /// Absolute native path of the directory to open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub path: Option<String>,
+}
+
+/// `workspace.close`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CloseWorkspaceRequest {
+    pub workspace_id: WorkspaceId,
+}
+
+/// `workspace.list`: one level of `path` (`""` is the root).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ListDirectoryRequest {
+    pub workspace_id: WorkspaceId,
+    pub path: WorkspacePath,
+    /// Continue a truncated listing (`DirectoryPage.cursor`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cursor: Option<String>,
+    /// Entries per page, `1..=5000`; defaults to 5000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub page_size: Option<u32>,
+}
+
+/// What `workspace.list` returns: the page when the directory was read within
+/// the budget, otherwise the operation that will complete with the page in
+/// `OperationCompleted.result` (or end `CANCELLED` / `FAILED`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum ListDirectoryResponse {
+    Ready { page: DirectoryPage },
+    Pending { operation: Box<Operation> },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum WorkspaceClosedReason {
+    /// `workspace.close`.
+    User,
+    /// Another workspace was opened (one at a time for now).
+    Replaced,
+    /// The root directory disappeared while the workspace was open.
+    RootMissing,
+}
+
+struct OpenWorkspace {
+    workspace: Workspace,
+    root: Arc<WorkspaceRoot>,
+}
+
+pub struct WorkspaceManager {
+    current: Mutex<Option<OpenWorkspace>>,
+    events: Arc<EventBus>,
+    registry: Arc<OperationRegistry>,
+    handle: Handle,
+    /// Tests slow the blocking listing down so the budget hand-over and its
+    /// cancellation can be exercised deterministically.
+    #[cfg(test)]
+    listing_delay: Mutex<Duration>,
+}
+
+impl WorkspaceManager {
+    pub fn new(
+        handle: Handle,
+        events: Arc<EventBus>,
+        registry: Arc<OperationRegistry>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            current: Mutex::new(None),
+            events,
+            registry,
+            handle,
+            #[cfg(test)]
+            listing_delay: Mutex::new(Duration::ZERO),
+        })
+    }
+
+    /// Open `path` (absolute). Reopening the current root returns it unchanged;
+    /// opening another root closes the current one first (`REPLACED`). A
+    /// failure leaves the current workspace untouched.
+    pub fn open(
+        &self,
+        path: &Path,
+        actor: Actor,
+        correlation: CorrelationId,
+    ) -> Result<Workspace, CoreError> {
+        let root = WorkspaceRoot::open(path)?;
+        let mut current = self.lock();
+        if let Some(open) = current.as_ref()
+            && open.root.path() == root.path()
+        {
+            return Ok(open.workspace.clone());
+        }
+        if let Some(previous) = current.take() {
+            self.emit_closed(
+                &previous,
+                WorkspaceClosedReason::Replaced,
+                actor.clone(),
+                Some(correlation.clone()),
+            );
+        }
+        let workspace = Workspace {
+            id: WorkspaceId::new(),
+            root: root.path().to_string_lossy().into_owned(),
+            name: root.name(),
+            opened_at: Timestamp::now(),
+        };
+        tracing::info!(workspace = %workspace.id, root = %workspace.root, "workspace opened");
+        self.events.emit(
+            &EventOrigin {
+                workspace_id: Some(workspace.id.clone()),
+                correlation_id: Some(correlation),
+                actor,
+            },
+            CoreEvent::WorkspaceOpened(WorkspaceOpenedPayload {
+                workspace: workspace.clone(),
+            }),
+        );
+        *current = Some(OpenWorkspace {
+            workspace: workspace.clone(),
+            root: Arc::new(root),
+        });
+        Ok(workspace)
+    }
+
+    /// Close the workspace with this id; `NotFound` when it is not the open one.
+    pub fn close(
+        &self,
+        id: &WorkspaceId,
+        actor: Actor,
+        correlation: CorrelationId,
+    ) -> Result<Workspace, CoreError> {
+        let mut current = self.lock();
+        if !current
+            .as_ref()
+            .is_some_and(|open| open.workspace.id == *id)
+        {
+            return Err(CoreError::not_found(format!("workspace {id} is not open")));
+        }
+        let open = current.take().expect("checked above");
+        self.emit_closed(&open, WorkspaceClosedReason::User, actor, Some(correlation));
+        Ok(open.workspace)
+    }
+
+    /// The open workspace, or `None`. A root that disappeared closes the
+    /// workspace (`ROOT_MISSING`) and yields `None`.
+    pub fn current(&self, correlation: &CorrelationId) -> Option<Workspace> {
+        let mut current = self.lock();
+        let present = current.as_ref().is_some_and(|open| open.root.is_present());
+        if !present && let Some(gone) = current.take() {
+            self.emit_closed(
+                &gone,
+                WorkspaceClosedReason::RootMissing,
+                Actor::System,
+                Some(correlation.clone()),
+            );
+        }
+        current.as_ref().map(|open| open.workspace.clone())
+    }
+
+    /// List one directory level. Runs off the caller's thread; see the module
+    /// documentation for the budget / operation hand-over.
+    pub async fn list(
+        self: &Arc<Self>,
+        request: ListDirectoryRequest,
+        actor: Actor,
+        correlation: CorrelationId,
+        budget: Duration,
+    ) -> Result<ListDirectoryResponse, CoreError> {
+        let (workspace, root) = self.require(&request.workspace_id, &correlation)?;
+        let page_size = match request.page_size {
+            None => MAX_PAGE_SIZE,
+            Some(size) if (1..=MAX_PAGE_SIZE).contains(&(size as usize)) => size as usize,
+            Some(_) => {
+                return Err(CoreError::invalid_input(
+                    "pageSize",
+                    format!("must be between 1 and {MAX_PAGE_SIZE}"),
+                ));
+            }
+        };
+        let options = ListOptions {
+            page_size,
+            cursor: request.cursor.clone(),
+        };
+        let token = CancellationToken::new();
+        #[cfg(test)]
+        let delay = *self
+            .listing_delay
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let mut job = {
+            let root = Arc::clone(&root);
+            let path = request.path.clone();
+            let token = token.clone();
+            self.handle.spawn_blocking(move || {
+                #[cfg(test)]
+                std::thread::sleep(delay);
+                list_directory(&root, &path, &options, &|| token.is_cancelled())
+            })
+        };
+        match tokio::time::timeout(budget, &mut job).await {
+            Ok(joined) => Ok(ListDirectoryResponse::Ready {
+                page: finish_listing(joined, &request.path)?,
+            }),
+            Err(_elapsed) => {
+                tracing::debug!(
+                    workspace = %workspace.id,
+                    path = %request.path,
+                    budget_ms = budget.as_millis() as u64,
+                    "listing exceeded its budget; continuing as an operation"
+                );
+                let spec = OperationSpec {
+                    kind: OperationKind::new(LIST_KIND),
+                    actor,
+                    workspace_id: Some(workspace.id),
+                    correlation_id: correlation,
+                };
+                let path = request.path.clone();
+                let operation = self.registry.start(spec, move |ctx| async move {
+                    // Stops the blocking job when the body finishes, is
+                    // cancelled, or is aborted at an await point.
+                    let job_token = CancelOnDrop(token);
+                    tokio::select! {
+                        biased;
+                        () = ctx.cancelled() => {
+                            job_token.0.cancel();
+                            Err(CoreError::cancelled("directory listing cancelled"))
+                        }
+                        joined = &mut job => {
+                            let page = finish_listing(joined, &path)?;
+                            Ok(Some(serde_json::to_value(page)?))
+                        }
+                    }
+                });
+                Ok(ListDirectoryResponse::Pending {
+                    operation: Box::new(operation),
+                })
+            }
+        }
+    }
+
+    fn require(
+        &self,
+        id: &WorkspaceId,
+        correlation: &CorrelationId,
+    ) -> Result<(Workspace, Arc<WorkspaceRoot>), CoreError> {
+        let mut current = self.lock();
+        if !current
+            .as_ref()
+            .is_some_and(|open| open.workspace.id == *id)
+        {
+            return Err(CoreError::not_found(format!("workspace {id} is not open")));
+        }
+        let present = current.as_ref().is_some_and(|open| open.root.is_present());
+        if !present {
+            let gone = current.take().expect("checked above");
+            self.emit_closed(
+                &gone,
+                WorkspaceClosedReason::RootMissing,
+                Actor::System,
+                Some(correlation.clone()),
+            );
+            return Err(CoreError::not_found(format!(
+                "workspace root {} no longer exists",
+                gone.workspace.root
+            ))
+            .with_details(serde_json::json!({
+                "reason": WorkspaceClosedReason::RootMissing,
+                "workspaceId": id,
+            })));
+        }
+        let open = current.as_ref().expect("checked above");
+        Ok((open.workspace.clone(), Arc::clone(&open.root)))
+    }
+
+    fn emit_closed(
+        &self,
+        open: &OpenWorkspace,
+        reason: WorkspaceClosedReason,
+        actor: Actor,
+        correlation_id: Option<CorrelationId>,
+    ) {
+        tracing::info!(workspace = %open.workspace.id, ?reason, "workspace closed");
+        self.events.emit(
+            &EventOrigin {
+                workspace_id: Some(open.workspace.id.clone()),
+                correlation_id,
+                actor,
+            },
+            CoreEvent::WorkspaceClosed(WorkspaceClosedPayload {
+                workspace_id: open.workspace.id.clone(),
+                root: open.workspace.root.clone(),
+                reason,
+            }),
+        );
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<OpenWorkspace>> {
+        self.current.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+struct CancelOnDrop(CancellationToken);
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
+
+fn finish_listing(
+    joined: Result<Result<Listing, WorkspaceError>, JoinError>,
+    path: &WorkspacePath,
+) -> Result<DirectoryPage, CoreError> {
+    let listing = joined
+        .map_err(|join| CoreError::internal(format!("directory listing task failed: {join}")))??;
+    tracing::debug!(
+        %path,
+        entries = listing.page.entries.len(),
+        total = listing.page.total,
+        truncated = listing.page.truncated,
+        directories_read = listing.stats.directories_read,
+        elapsed_ms = listing.stats.elapsed.as_millis() as u64,
+        "directory listed"
+    );
+    Ok(listing.page)
+}
+
+impl From<WorkspaceError> for CoreError {
+    fn from(error: WorkspaceError) -> Self {
+        match error {
+            WorkspaceError::InvalidPath { field, reason } => Self::invalid_input(field, reason),
+            WorkspaceError::NotFound(message) => Self::not_found(message),
+            WorkspaceError::PermissionDenied(message) => {
+                Self::new(CoreErrorCode::PermissionDenied, message)
+            }
+            WorkspaceError::NotADirectory(message) => Self::invalid_input("path", message),
+            WorkspaceError::Io { context, source } => {
+                let mut mapped = Self::from(source);
+                mapped.message = format!("{context}: {}", mapped.message);
+                mapped
+            }
+            WorkspaceError::Cancelled => Self::cancelled("directory listing cancelled"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use tokio::sync::mpsc;
+    use tokio::time::timeout;
+
+    use super::*;
+    use crate::event::EventEnvelope;
+    use crate::event::testing::RecordingSink;
+    use crate::operation::OperationStatus;
+
+    struct Harness {
+        manager: Arc<WorkspaceManager>,
+        registry: Arc<OperationRegistry>,
+        sink: Arc<RecordingSink>,
+        rx: mpsc::UnboundedReceiver<EventEnvelope>,
+    }
+
+    fn harness() -> Harness {
+        let (sink, rx) = RecordingSink::with_channel();
+        let events = EventBus::new(sink.clone());
+        let registry = OperationRegistry::new(Handle::current(), events.clone());
+        let manager = WorkspaceManager::new(Handle::current(), events, registry.clone());
+        Harness {
+            manager,
+            registry,
+            sink,
+            rx,
+        }
+    }
+
+    impl Harness {
+        async fn next_named(&mut self, name: &str) -> EventEnvelope {
+            timeout(Duration::from_secs(5), async {
+                loop {
+                    let envelope = self.rx.recv().await.expect("event stream open");
+                    if envelope.event.name() == name {
+                        return envelope;
+                    }
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("timed out waiting for {name}"))
+        }
+    }
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(label: &str) -> Self {
+            static COUNTER: AtomicUsize = AtomicUsize::new(0);
+            let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let path = std::env::temp_dir()
+                .join(format!("gritty-core-ws-{label}-{}-{n}", std::process::id()));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(path.join("src")).unwrap();
+            fs::write(path.join("README.md"), "hi").unwrap();
+            fs::write(path.join("src/main.rs"), "fn main() {}").unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn list_request(workspace: &Workspace, path: &str) -> ListDirectoryRequest {
+        ListDirectoryRequest {
+            workspace_id: workspace.id.clone(),
+            path: WorkspacePath::parse(path).unwrap(),
+            cursor: None,
+            page_size: None,
+        }
+    }
+
+    /// Make every listing take at least `delay` before it touches the disk.
+    fn slow_listings(h: &Harness, delay: Duration) {
+        *h.manager.listing_delay.lock().unwrap() = delay;
+    }
+
+    const SHORT_BUDGET: Duration = Duration::from_millis(10);
+
+    #[tokio::test]
+    async fn open_announces_the_workspace_and_current_returns_it() {
+        let mut h = harness();
+        let dir = TempDir::new("open");
+        let correlation = CorrelationId::new();
+        let workspace = h
+            .manager
+            .open(&dir.0, Actor::User, correlation.clone())
+            .unwrap();
+        assert!(workspace.id.is_well_formed());
+        assert_eq!(workspace.name, dir.0.file_name().unwrap().to_string_lossy());
+        assert!(PathBuf::from(&workspace.root).is_absolute());
+        let opened = h.next_named("WorkspaceOpened").await;
+        assert_eq!(opened.meta.workspace_id, Some(workspace.id.clone()));
+        assert_eq!(opened.meta.correlation_id, Some(correlation));
+        let CoreEvent::WorkspaceOpened(payload) = opened.event else {
+            panic!("expected WorkspaceOpened");
+        };
+        assert_eq!(payload.workspace, workspace);
+        assert_eq!(h.manager.current(&CorrelationId::new()), Some(workspace));
+    }
+
+    #[tokio::test]
+    async fn reopening_the_same_root_is_idempotent_and_another_root_replaces_it() {
+        let mut h = harness();
+        let first = TempDir::new("first");
+        let second = TempDir::new("second");
+        let a = h
+            .manager
+            .open(&first.0, Actor::User, CorrelationId::new())
+            .unwrap();
+        let again = h
+            .manager
+            .open(&first.0, Actor::User, CorrelationId::new())
+            .unwrap();
+        assert_eq!(a, again);
+        let b = h
+            .manager
+            .open(&second.0, Actor::User, CorrelationId::new())
+            .unwrap();
+        assert_ne!(a.id, b.id);
+        assert_eq!(
+            h.sink.names(),
+            vec!["WorkspaceOpened", "WorkspaceClosed", "WorkspaceOpened"]
+        );
+        let closed = h.next_named("WorkspaceClosed").await;
+        let CoreEvent::WorkspaceClosed(payload) = closed.event else {
+            panic!("expected WorkspaceClosed");
+        };
+        assert_eq!(payload.workspace_id, a.id);
+        assert_eq!(payload.reason, WorkspaceClosedReason::Replaced);
+        assert_eq!(h.manager.current(&CorrelationId::new()), Some(b));
+    }
+
+    #[tokio::test]
+    async fn open_failures_leave_state_untouched() {
+        let h = harness();
+        let dir = TempDir::new("failures");
+        let workspace = h
+            .manager
+            .open(&dir.0, Actor::User, CorrelationId::new())
+            .unwrap();
+        let missing = std::env::temp_dir().join("gritty-core-ws-does-not-exist");
+        let error = h
+            .manager
+            .open(&missing, Actor::User, CorrelationId::new())
+            .unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::NotFound);
+        let file = dir.0.join("README.md");
+        let error = h
+            .manager
+            .open(&file, Actor::User, CorrelationId::new())
+            .unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+        let error = h
+            .manager
+            .open(Path::new("relative"), Actor::User, CorrelationId::new())
+            .unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+        assert_eq!(h.manager.current(&CorrelationId::new()), Some(workspace));
+        assert_eq!(h.sink.names(), vec!["WorkspaceOpened"]);
+    }
+
+    #[tokio::test]
+    async fn close_requires_the_open_workspace_id() {
+        let mut h = harness();
+        let dir = TempDir::new("close");
+        let error = h
+            .manager
+            .close(&WorkspaceId::new(), Actor::User, CorrelationId::new())
+            .unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::NotFound);
+        let workspace = h
+            .manager
+            .open(&dir.0, Actor::User, CorrelationId::new())
+            .unwrap();
+        let error = h
+            .manager
+            .close(&WorkspaceId::new(), Actor::User, CorrelationId::new())
+            .unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::NotFound);
+        let closed = h
+            .manager
+            .close(&workspace.id, Actor::User, CorrelationId::new())
+            .unwrap();
+        assert_eq!(closed, workspace);
+        let event = h.next_named("WorkspaceClosed").await;
+        let CoreEvent::WorkspaceClosed(payload) = event.event else {
+            panic!("expected WorkspaceClosed");
+        };
+        assert_eq!(payload.reason, WorkspaceClosedReason::User);
+        assert_eq!(h.manager.current(&CorrelationId::new()), None);
+        let error = h
+            .manager
+            .close(&workspace.id, Actor::User, CorrelationId::new())
+            .unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::NotFound);
+    }
+
+    #[tokio::test]
+    async fn listing_within_budget_returns_the_page_directly() {
+        let h = harness();
+        let dir = TempDir::new("list");
+        let workspace = h
+            .manager
+            .open(&dir.0, Actor::User, CorrelationId::new())
+            .unwrap();
+        let response = h
+            .manager
+            .list(
+                list_request(&workspace, ""),
+                Actor::User,
+                CorrelationId::new(),
+                Duration::from_secs(5),
+            )
+            .await
+            .unwrap();
+        let ListDirectoryResponse::Ready { page } = response else {
+            panic!("expected a ready page, got {response:?}");
+        };
+        let names: Vec<&str> = page.entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["src", "README.md"]);
+        assert!(h.registry.list().is_empty(), "no operation was needed");
+
+        let error = h
+            .manager
+            .list(
+                list_request(&workspace, "nope"),
+                Actor::User,
+                CorrelationId::new(),
+                Duration::from_secs(5),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::NotFound);
+        let error = h
+            .manager
+            .list(
+                ListDirectoryRequest {
+                    page_size: Some(0),
+                    ..list_request(&workspace, "")
+                },
+                Actor::User,
+                CorrelationId::new(),
+                Duration::from_secs(5),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+        assert_eq!(error.details.unwrap()["field"], "pageSize");
+    }
+
+    #[tokio::test]
+    async fn listing_over_budget_becomes_an_operation_that_completes_with_the_page() {
+        let mut h = harness();
+        let dir = TempDir::new("pending");
+        let workspace = h
+            .manager
+            .open(&dir.0, Actor::User, CorrelationId::new())
+            .unwrap();
+        slow_listings(&h, Duration::from_millis(150));
+        let correlation = CorrelationId::new();
+        let started = std::time::Instant::now();
+        let response = h
+            .manager
+            .list(
+                list_request(&workspace, "src"),
+                Actor::User,
+                correlation.clone(),
+                SHORT_BUDGET,
+            )
+            .await
+            .unwrap();
+        assert!(
+            started.elapsed() < Duration::from_millis(140),
+            "the command returned within its budget, not after the listing ({:?})",
+            started.elapsed()
+        );
+        let ListDirectoryResponse::Pending { operation } = response else {
+            panic!("expected a pending operation, got {response:?}");
+        };
+        assert_eq!(operation.kind.as_str(), LIST_KIND);
+        assert_eq!(operation.workspace_id, Some(workspace.id.clone()));
+        assert_eq!(operation.correlation_id, correlation);
+        let completed = h.next_named("OperationCompleted").await;
+        let CoreEvent::OperationCompleted(payload) = completed.event else {
+            panic!("expected OperationCompleted");
+        };
+        assert_eq!(payload.operation.id, operation.id);
+        let page: DirectoryPage = serde_json::from_value(payload.result.unwrap()).unwrap();
+        assert_eq!(page.path.as_str(), "src");
+        assert_eq!(page.entries[0].name, "main.rs");
+    }
+
+    #[tokio::test]
+    async fn pending_listing_can_be_cancelled_and_its_page_is_discarded() {
+        let mut h = harness();
+        let dir = TempDir::new("cancel");
+        let workspace = h
+            .manager
+            .open(&dir.0, Actor::User, CorrelationId::new())
+            .unwrap();
+        slow_listings(&h, Duration::from_millis(300));
+        let response = h
+            .manager
+            .list(
+                list_request(&workspace, ""),
+                Actor::User,
+                CorrelationId::new(),
+                SHORT_BUDGET,
+            )
+            .await
+            .unwrap();
+        let ListDirectoryResponse::Pending { operation } = response else {
+            panic!("expected a pending operation, got {response:?}");
+        };
+        h.next_named("OperationStarted").await;
+        let cancelled = h.registry.cancel(&operation.id).unwrap();
+        assert!(cancelled.cancellation_requested);
+        let bound = std::time::Instant::now();
+        h.next_named("OperationCancelled").await;
+        assert!(
+            bound.elapsed() < Duration::from_millis(250),
+            "cancellation did not wait for the listing ({:?})",
+            bound.elapsed()
+        );
+        // Let the blocking job run past its delay: it observes the cancelled
+        // token and its result never surfaces.
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let names = h.sink.names();
+        assert!(!names.contains(&"OperationCompleted"), "{names:?}");
+        assert_eq!(names.last(), Some(&"OperationCancelled"));
+        assert_eq!(
+            h.registry.get(&operation.id).unwrap().status,
+            OperationStatus::Cancelled
+        );
+
+        // Cancelling before the runner even started is immediate as well.
+        let response = h
+            .manager
+            .list(
+                list_request(&workspace, ""),
+                Actor::User,
+                CorrelationId::new(),
+                SHORT_BUDGET,
+            )
+            .await
+            .unwrap();
+        let ListDirectoryResponse::Pending { operation } = response else {
+            panic!("expected a pending operation, got {response:?}");
+        };
+        let early = h.registry.cancel(&operation.id).unwrap();
+        assert_eq!(early.status, OperationStatus::Cancelled);
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let completed = h
+            .sink
+            .names()
+            .iter()
+            .filter(|n| **n == "OperationCompleted")
+            .count();
+        assert_eq!(completed, 0);
+    }
+
+    #[tokio::test]
+    async fn root_removed_while_open_closes_the_workspace_and_fails_with_not_found() {
+        let mut h = harness();
+        let dir = TempDir::new("removed");
+        let workspace = h
+            .manager
+            .open(&dir.0, Actor::User, CorrelationId::new())
+            .unwrap();
+        fs::remove_dir_all(&dir.0).unwrap();
+        let error = h
+            .manager
+            .list(
+                list_request(&workspace, ""),
+                Actor::User,
+                CorrelationId::new(),
+                Duration::from_secs(5),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::NotFound);
+        assert_eq!(error.details.unwrap()["reason"], "ROOT_MISSING");
+        let closed = h.next_named("WorkspaceClosed").await;
+        assert_eq!(closed.meta.actor, Actor::System);
+        let CoreEvent::WorkspaceClosed(payload) = closed.event else {
+            panic!("expected WorkspaceClosed");
+        };
+        assert_eq!(payload.reason, WorkspaceClosedReason::RootMissing);
+        assert_eq!(payload.workspace_id, workspace.id);
+        assert_eq!(h.manager.current(&CorrelationId::new()), None);
+        assert_eq!(h.sink.names().len(), 2, "closed exactly once");
+
+        let dir = TempDir::new("removed-current");
+        let workspace = h
+            .manager
+            .open(&dir.0, Actor::User, CorrelationId::new())
+            .unwrap();
+        fs::remove_dir_all(&dir.0).unwrap();
+        assert_eq!(h.manager.current(&CorrelationId::new()), None);
+        let closed = h.next_named("WorkspaceClosed").await;
+        assert_eq!(closed.meta.workspace_id, Some(workspace.id));
+    }
+
+    #[test]
+    fn wire_types_serialize_as_documented() {
+        let response = ListDirectoryResponse::Ready {
+            page: DirectoryPage {
+                path: WorkspacePath::root(),
+                entries: vec![],
+                total: 0,
+                truncated: false,
+                cursor: None,
+            },
+        };
+        assert_eq!(
+            serde_json::to_value(&response).unwrap(),
+            serde_json::json!({
+                "status": "ready",
+                "page": { "path": "", "entries": [], "total": 0, "truncated": false }
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(WorkspaceClosedReason::RootMissing).unwrap(),
+            "ROOT_MISSING"
+        );
+        let request: ListDirectoryRequest = serde_json::from_value(serde_json::json!({
+            "workspaceId": "ws-1", "path": "src/lib"
+        }))
+        .unwrap();
+        assert_eq!(request.path.as_str(), "src/lib");
+        assert!(request.cursor.is_none());
+        let error = serde_json::from_value::<ListDirectoryRequest>(serde_json::json!({
+            "workspaceId": "ws-1", "path": "../x"
+        }))
+        .unwrap_err();
+        assert!(error.to_string().contains("'..'"), "{error}");
+        let mapped = CoreError::from(WorkspaceError::PermissionDenied("escape".into()));
+        assert_eq!(mapped.code, CoreErrorCode::PermissionDenied);
+        assert!(!mapped.retryable);
+    }
+}

@@ -7,15 +7,21 @@
 //! promise that never settles.
 
 use std::future::Future;
+use std::path::PathBuf;
 
 use gritty_core::health::ShellInfo;
 use gritty_core::operation::demo::{StartDemoRequest, start_demo};
 use gritty_core::operation::{CancelOperationRequest, Operation};
 use gritty_core::protocol::actor::Actor;
 use gritty_core::protocol::ids::CorrelationId;
+use gritty_core::workspace::{
+    CloseWorkspaceRequest, DEFAULT_LIST_BUDGET, ListDirectoryRequest, ListDirectoryResponse,
+    OpenWorkspaceRequest, Workspace,
+};
 use gritty_core::{CoreError, HealthReport};
 use serde::de::DeserializeOwned;
 use tauri::State;
+use tauri_plugin_dialog::DialogExt;
 use tracing::Instrument;
 
 use crate::core::Core;
@@ -76,6 +82,99 @@ pub async fn operations_start_demo(
         start_demo(&registry, request, Actor::User, correlation)
     })
     .await
+}
+
+/// `workspace.open`. Without a path the native directory picker is shown;
+/// `null` means the user dismissed it.
+#[tauri::command]
+pub async fn workspace_open<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Option<Workspace>, CoreError> {
+    let workspaces = core.workspaces.clone();
+    guard("workspace.open", move |correlation| async move {
+        let request: OpenWorkspaceRequest = parse_request(request)?;
+        let path = match request.path {
+            Some(path) => PathBuf::from(path),
+            None => match pick_folder(&app).await? {
+                Some(path) => path,
+                None => {
+                    tracing::info!("directory picker dismissed");
+                    return Ok(None);
+                }
+            },
+        };
+        workspaces.open(&path, Actor::User, correlation).map(Some)
+    })
+    .await
+}
+
+/// `workspace.close`
+#[tauri::command]
+pub async fn workspace_close(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Workspace, CoreError> {
+    let workspaces = core.workspaces.clone();
+    guard("workspace.close", move |correlation| async move {
+        let request: CloseWorkspaceRequest = parse_request(request)?;
+        workspaces.close(&request.workspace_id, Actor::User, correlation)
+    })
+    .await
+}
+
+/// `workspace.current`
+#[tauri::command]
+pub async fn workspace_current(core: State<'_, Core>) -> Result<Option<Workspace>, CoreError> {
+    let workspaces = core.workspaces.clone();
+    guard("workspace.current", move |correlation| async move {
+        Ok(workspaces.current(&correlation))
+    })
+    .await
+}
+
+/// `workspace.list`
+#[tauri::command]
+pub async fn workspace_list(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<ListDirectoryResponse, CoreError> {
+    let workspaces = core.workspaces.clone();
+    guard("workspace.list", move |correlation| async move {
+        let request: ListDirectoryRequest = parse_request(request)?;
+        workspaces
+            .list(request, Actor::User, correlation, DEFAULT_LIST_BUDGET)
+            .await
+    })
+    .await
+}
+
+/// Show the native directory picker from the Rust side. The plugin runs the
+/// dialog on the main thread and calls back from a helper thread, so awaiting
+/// it here never blocks the event loop or the command runtime.
+async fn pick_folder<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<Option<PathBuf>, CoreError> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("Open workspace")
+        .pick_folder(move |folder| {
+            let _ = tx.send(folder);
+        });
+    let folder = rx
+        .await
+        .map_err(|_| CoreError::internal("directory picker closed without a result"))?;
+    match folder {
+        None => Ok(None),
+        Some(location) => location.into_path().map(Some).map_err(|error| {
+            CoreError::invalid_input(
+                "path",
+                format!("picker returned an unsupported location: {error}"),
+            )
+        }),
+    }
 }
 
 /// Deserialize the single `request` argument; a malformed one is `InvalidInput`
@@ -157,5 +256,15 @@ mod tests {
             parse_request::<StartDemoRequest>(serde_json::json!({ "steps": "x" })).unwrap_err();
         assert_eq!(error.code, CoreErrorCode::InvalidInput);
         assert_eq!(error.details.unwrap()["field"], "request");
+    }
+
+    #[test]
+    fn traversal_in_a_list_request_is_rejected_while_parsing() {
+        let error = parse_request::<ListDirectoryRequest>(
+            serde_json::json!({ "workspaceId": "ws", "path": "../secrets" }),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+        assert!(error.message.contains("'..'"), "{error}");
     }
 }

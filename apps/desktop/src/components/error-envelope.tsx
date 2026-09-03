@@ -1,7 +1,13 @@
-import type { CoreError } from '@gritty/protocol';
+import type { CoreErrorShape } from '@gritty/protocol';
 
 /** Renders every field of the error envelope so a failure is always inspectable. */
-export function ErrorEnvelope({ error, onDismiss }: { error: CoreError; onDismiss?: () => void }) {
+export function ErrorEnvelope({
+  error,
+  onDismiss,
+}: {
+  error: CoreErrorShape;
+  onDismiss?: () => void;
+}) {
   return (
     <div className="envelope" role="alert">
       <dl className="envelope__fields">

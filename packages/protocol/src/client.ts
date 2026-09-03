@@ -8,10 +8,15 @@ import {
   type EventName,
   type EventOf,
   type HealthReport,
+  type ListDirectoryRequest,
+  type ListDirectoryResponse,
+  type OpenWorkspaceRequest,
   type Operation,
   type OperationId,
   PROTOCOL_VERSION,
   type StartDemoRequest,
+  type Workspace,
+  type WorkspaceId,
 } from './types';
 import { assertCompatible } from './version';
 
@@ -33,6 +38,21 @@ export interface CoreClient {
     list(): Promise<Operation[]>;
     cancel(operationId: OperationId): Promise<Operation>;
     startDemo(request: StartDemoRequest): Promise<Operation>;
+  };
+  workspace: {
+    /**
+     * Open the directory at `path` (absolute, native form). Without a path the
+     * shell shows the native directory picker; `null` means it was dismissed.
+     */
+    open(path?: string): Promise<Workspace | null>;
+    close(workspaceId: WorkspaceId): Promise<Workspace>;
+    /** The open workspace, for rehydration after a renderer reload. */
+    current(): Promise<Workspace | null>;
+    /**
+     * One directory level. `ready` carries the page; `pending` names the
+     * operation whose `OperationCompleted.result` will carry it.
+     */
+    list(request: ListDirectoryRequest): Promise<ListDirectoryResponse>;
   };
   subscribe<N extends EventName>(name: N, handler: (event: EventOf<N>) => void): Unsubscribe;
   subscribeAll(handler: (event: EventEnvelope) => void): Unsubscribe;
@@ -93,6 +113,15 @@ export function createCoreClient(
       cancel: (operationId) =>
         command<Operation>('operations.cancel', { request: { operationId } }),
       startDemo: (request) => command<Operation>('operations.startDemo', { request }),
+    },
+    workspace: {
+      open: (path) => {
+        const request: OpenWorkspaceRequest = path === undefined ? {} : { path };
+        return command<Workspace | null>('workspace.open', { request });
+      },
+      close: (workspaceId) => command<Workspace>('workspace.close', { request: { workspaceId } }),
+      current: () => command<Workspace | null>('workspace.current'),
+      list: (request) => command<ListDirectoryResponse>('workspace.list', { request }),
     },
     subscribe: (name, handler) => hub.subscribe(name, handler),
     subscribeAll: (handler) => hub.subscribeAll(handler),

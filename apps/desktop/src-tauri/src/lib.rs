@@ -4,7 +4,9 @@
 //! - This crate only wires `gritty-core` into Tauri commands/events and owns
 //!   process-level concerns (tracing, window setup).
 //! - Domain logic lives in `crates/*`, never here.
-//! - The WebView is never handed raw filesystem or process APIs.
+//! - The WebView is never handed raw filesystem or process APIs. The dialog
+//!   plugin is registered so the core can show the native directory picker
+//!   from Rust; the WebView is granted none of its commands.
 
 mod commands;
 pub mod core;
@@ -36,11 +38,13 @@ pub fn run() {
     });
 }
 
-/// Register every command adapter and schedule [`attach_core`] for setup.
-/// Generic over the runtime so tests can drive the same wiring on Tauri's mock
-/// runtime (which never runs `setup`; tests call [`attach_core`] themselves).
+/// Register plugins and every command adapter, and schedule [`attach_core`]
+/// for setup. Generic over the runtime so tests can drive the same wiring on
+/// Tauri's mock runtime (which never runs `setup`; tests call [`attach_core`]
+/// themselves).
 pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             attach_core(app.handle());
             Ok(())
@@ -50,17 +54,23 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::operations_list,
             commands::operations_cancel,
             commands::operations_start_demo,
+            commands::workspace_open,
+            commands::workspace_close,
+            commands::workspace_current,
+            commands::workspace_list,
         ])
 }
 
-/// Build the core (event bus + operation registry) and manage it as app state.
+/// Build the core (event bus, operation registry, workspace manager) and
+/// manage it as app state.
 pub fn attach_core<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     app.manage(core::Core::new(app.clone()));
 }
 
 fn init_tracing() {
-    let filter = EnvFilter::try_from_env(LOG_ENV)
-        .unwrap_or_else(|_| EnvFilter::new("info,gritty_desktop_lib=debug,gritty_core=debug"));
+    let filter = EnvFilter::try_from_env(LOG_ENV).unwrap_or_else(|_| {
+        EnvFilter::new("info,gritty_desktop_lib=debug,gritty_core=debug,gritty_workspace=debug")
+    });
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(true)
