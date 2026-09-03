@@ -5,6 +5,7 @@ export {
   createEditorHost,
   type EditorHost,
   type EditorTheme,
+  type ScrollState,
   setEditorTheme,
 } from './editor-host';
 export { createMonacoModelFactory, modelUri } from './model-factory';
