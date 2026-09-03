@@ -1,7 +1,7 @@
 # Task T030 — File I/O + document/buffer contract (Gate B)
 
 - **Phase:** 0 / 1A
-- **Status:** review
+- **Status:** done
 - **Depends on:** T020
 
 ## Objective

@@ -1,7 +1,7 @@
 # Task T040 — Monaco shell
 
 - **Phase:** 0 / 1A
-- **Status:** todo
+- **Status:** in-progress
 - **Depends on:** T030
 
 ## Objective
