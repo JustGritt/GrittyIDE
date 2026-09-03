@@ -158,6 +158,9 @@ human pass in `docs/testing/platform-matrix.md`.
   21624.4.5.11.5 (Tauri 2.11.5): the bundle with Monaco evaluates and the React tree renders.
   One `tauri_runtime_wry: web content process terminated` DEBUG line preceded the health call.
   No panics or errors on the Rust side; the WebView console is not visible to the agent.
+- Linux CI on PR #5 (2026-09-03, run 33791245161): `pnpm check` and `pnpm tauri build --no-bundle`
+  passed in 4m32s, so the jsdom Monaco test and the Vite production build hold on Linux as well.
+  The macOS job is label-gated (`ci:macos`) and did not run.
 - Not executed (human WKWebView pass): opening `small-repo` ts/rs/json/md and editing, folding,
   bracket matching, Cmd+F / Cmd+Option+F, Cmd+D / Option+click, clipboard, undo, Cmd+S with the
   file on disk verified, dirty dot, close dialog, tab reorder, squiggles from a syntax error in
