@@ -11,6 +11,7 @@ import {
   type DocumentsState,
   displayText,
   documentsReducer,
+  findTabByPath,
   initialDocumentsState,
   isUnsaved,
   pendingExternalState,
@@ -210,6 +211,123 @@ describe('documents reducer', () => {
     expect(state.orphans).toEqual([{ id: 2, path: 'a.md', text: 'hello', reason: 'USER' }]);
     expect(activeTab(state)).toBeNull();
     expect(state.order).toEqual([]);
+  });
+
+  it('marks a touched tab unsaved until the editor text is read into a draft', () => {
+    let state = opened('a');
+    const tab = () => state.tabs.a as NonNullable<DocumentsState['tabs'][string]>;
+    state = documentsReducer(state, { type: 'touched', documentId: A });
+    expect(tab().pending).toBe(true);
+    expect(isUnsaved(tab())).toBe(true);
+    expect(tab().draft).toBeNull();
+    // Idempotent: a keystroke while pending must not re-render anything.
+    expect(documentsReducer(state, { type: 'touched', documentId: A })).toBe(state);
+
+    // The lazy read found the confirmed text again (typed and undone).
+    state = documentsReducer(state, { type: 'edited', documentId: A, text: 'hello' });
+    expect(tab().pending).toBe(false);
+    expect(isUnsaved(tab())).toBe(false);
+
+    state = documentsReducer(state, { type: 'touched', documentId: A });
+    state = documentsReducer(state, { type: 'edited', documentId: A, text: 'hello!' });
+    expect(tab().pending).toBe(false);
+    expect(tab().draft).toBe('hello!');
+    expect(isUnsaved(tab())).toBe(true);
+  });
+
+  it('refuses touches for binary and read-only documents', () => {
+    let state = documentsReducer(initialDocumentsState, {
+      type: 'opened',
+      content: content('bin', null, { binary: true, encoding: 'binary' }),
+      activate: true,
+    });
+    state = documentsReducer(state, {
+      type: 'opened',
+      content: content('big', 'x', { largeFileMode: true, readOnly: true }),
+      activate: true,
+    });
+    expect(documentsReducer(state, { type: 'touched', documentId: 'bin' as DocumentId })).toBe(
+      state,
+    );
+    expect(documentsReducer(state, { type: 'touched', documentId: 'big' as DocumentId })).toBe(
+      state,
+    );
+  });
+
+  it('moves the buffer generation only when text came from the core', () => {
+    let state = opened('a');
+    const tab = () => state.tabs.a as NonNullable<DocumentsState['tabs'][string]>;
+    expect(tab().bufferGeneration).toBe(1);
+
+    state = documentsReducer(state, { type: 'edited', documentId: A, text: 'typed' });
+    state = documentsReducer(state, { type: 'updateStarted', documentId: A });
+    state = documentsReducer(state, {
+      type: 'updateAccepted',
+      documentId: A,
+      document: doc('a', { currentVersion: 2, dirty: true }),
+      text: 'typed',
+    });
+    expect(tab().bufferGeneration).toBe(1);
+    state = documentsReducer(state, {
+      type: 'saveFailed',
+      documentId: A,
+      error: { code: 'Io', message: 'disk full', retryable: true },
+    });
+    expect(tab().bufferGeneration).toBe(1);
+
+    state = documentsReducer(state, { type: 'touched', documentId: A });
+    state = documentsReducer(state, { type: 'reloaded', content: content('a', 'from disk') });
+    expect(tab().bufferGeneration).toBe(2);
+    expect(tab().pending).toBe(false);
+    expect(tab().draft).toBeNull();
+
+    state = documentsReducer(state, {
+      type: 'opened',
+      content: content('a', 'live buffer', { largeFileMode: true }),
+      activate: false,
+    });
+    expect(tab().bufferGeneration).toBe(3);
+    expect(tab().text).toBe('live buffer');
+
+    state = documentsReducer(state, { type: 'touched', documentId: A });
+    state = documentsReducer(state, {
+      type: 'replaced',
+      documentId: A,
+      document: doc('a', { currentVersion: 4, dirty: true }),
+      text: 'normalized\r\n',
+    });
+    expect(tab().bufferGeneration).toBe(4);
+    expect(tab().text).toBe('normalized\r\n');
+    expect(tab().pending).toBe(false);
+    expect(tab().document.currentVersion).toBe(4);
+  });
+
+  it('reorders tabs and clamps the target index', () => {
+    const state = opened('a', 'b', 'c');
+    expect(documentsReducer(state, { type: 'reorder', documentId: A, toIndex: 2 }).order).toEqual([
+      'b',
+      'c',
+      'a',
+    ]);
+    expect(
+      documentsReducer(state, { type: 'reorder', documentId: 'c' as DocumentId, toIndex: 0 }).order,
+    ).toEqual(['c', 'a', 'b']);
+    expect(documentsReducer(state, { type: 'reorder', documentId: B, toIndex: 99 }).order).toEqual([
+      'a',
+      'c',
+      'b',
+    ]);
+    expect(documentsReducer(state, { type: 'reorder', documentId: B, toIndex: 1 })).toBe(state);
+    expect(
+      documentsReducer(state, { type: 'reorder', documentId: 'zzz' as DocumentId, toIndex: 0 }),
+    ).toBe(state);
+  });
+
+  it('finds an open tab by workspace path', () => {
+    const state = opened('a', 'b');
+    expect(findTabByPath(state, WS, 'b.md')?.document.id).toBe('b');
+    expect(findTabByPath(state, WS, 'nope.md')).toBeNull();
+    expect(findTabByPath(state, 'other' as WorkspaceId, 'a.md')).toBeNull();
   });
 
   it('records failures on the tab and clears them', () => {

@@ -3,8 +3,8 @@ import { useEffect, useState } from 'react';
 import { ErrorEnvelope } from './components/error-envelope';
 import { core } from './core/client';
 import { describeHealth } from './core/health';
-import { DocumentPanel } from './features/documents/document-panel';
 import { useDocuments } from './features/documents/use-documents';
+import { EditorPane } from './features/editor/editor-pane';
 import { ExplorerPanel } from './features/explorer/explorer-panel';
 import { OperationsPanel } from './features/operations/operations-panel';
 
@@ -51,11 +51,13 @@ export function App() {
         </section>
       </header>
       <div className="shell__body">
-        <ExplorerPanel
-          onOpenFile={(workspaceId, path) => void documents.openFile(workspaceId, path)}
-        />
-        <DocumentPanel documents={documents} />
-        {import.meta.env.DEV && <OperationsPanel />}
+        <aside className="shell__sidebar">
+          <ExplorerPanel
+            onOpenFile={(workspaceId, path) => void documents.openFile(workspaceId, path)}
+          />
+          {import.meta.env.DEV && <OperationsPanel />}
+        </aside>
+        <EditorPane documents={documents} />
       </div>
     </main>
   );

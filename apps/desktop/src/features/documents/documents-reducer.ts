@@ -6,13 +6,15 @@ import type {
   DocumentId,
   EventEnvelope,
   ExternalModificationState,
+  WorkspaceId,
 } from '@gritty/protocol';
 
 /**
  * Open documents as the UI knows them. The core owns the buffer; this store
  * holds the last text the core confirmed plus the local draft that is still on
- * its way there (debounced `documents.update`). Pure, so it is unit-tested
- * without React or Tauri.
+ * its way there (debounced `documents.update`). The editor (Monaco, T040)
+ * holds the keystrokes between a touch and the next read. Pure, so it is
+ * unit-tested without React or Tauri.
  */
 export interface DocumentTab {
   readonly document: Document;
@@ -20,6 +22,14 @@ export interface DocumentTab {
   readonly text: string | null;
   /** Local edits the core has not accepted yet; `null` when in sync. */
   readonly draft: string | null;
+  /** The editor holds edits that have not been read into a draft yet. */
+  readonly pending: boolean;
+  /**
+   * Moves whenever `text` was replaced by the core (reopen, reload, conflict
+   * refetch, explicit replacement) and never on an accepted update: the editor
+   * pushes `text` into its model only when this changes.
+   */
+  readonly bufferGeneration: number;
   /** A `documents.update` is in flight. */
   readonly syncing: boolean;
   readonly saving: boolean;
@@ -57,6 +67,7 @@ export const initialDocumentsState: DocumentsState = {
 
 export type DocumentsAction =
   | { type: 'opened'; content: DocumentContent; activate: boolean }
+  | { type: 'touched'; documentId: DocumentId }
   | { type: 'edited'; documentId: DocumentId; text: string }
   | { type: 'updateStarted'; documentId: DocumentId }
   | { type: 'updateAccepted'; documentId: DocumentId; document: Document; text: string }
@@ -64,19 +75,21 @@ export type DocumentsAction =
   | { type: 'saveStarted'; documentId: DocumentId }
   | { type: 'saveFinished'; documentId: DocumentId; document: Document }
   | { type: 'saveFailed'; documentId: DocumentId; error: CoreErrorShape }
+  | { type: 'replaced'; documentId: DocumentId; document: Document; text: string }
   | { type: 'reloaded'; content: DocumentContent; notice?: string }
   | { type: 'refreshed'; documents: readonly Document[] }
   | { type: 'closeFailed'; documentId: DocumentId; error: CoreErrorShape }
   | { type: 'closed'; documentId: DocumentId }
   | { type: 'activate'; documentId: DocumentId }
+  | { type: 'reorder'; documentId: DocumentId; toIndex: number }
   | { type: 'acknowledgeExternal'; documentId: DocumentId }
   | { type: 'clearError'; documentId: DocumentId }
   | { type: 'dismissOrphan'; id: number }
   | { type: 'event'; event: EventEnvelope };
 
-/** Unsaved from the user's point of view: the core says dirty, or a draft is pending. */
+/** Unsaved from the user's point of view: the core says dirty, or edits are on their way. */
 export function isUnsaved(tab: DocumentTab): boolean {
-  return tab.document.dirty || tab.draft !== null;
+  return tab.document.dirty || tab.draft !== null || tab.pending;
 }
 
 /** What the editing surface shows. */
@@ -98,11 +111,26 @@ export function activeTab(state: DocumentsState): DocumentTab | null {
   return state.activeId === null ? null : (state.tabs[state.activeId] ?? null);
 }
 
+/** The open tab for a workspace path, if any (documents are one per path). */
+export function findTabByPath(
+  state: DocumentsState,
+  workspaceId: WorkspaceId,
+  path: string,
+): DocumentTab | null {
+  for (const id of state.order) {
+    const tab = state.tabs[id];
+    if (tab && tab.document.workspaceId === workspaceId && tab.document.path === path) return tab;
+  }
+  return null;
+}
+
 function makeTab(content: DocumentContent): DocumentTab {
   return {
     document: content.document,
     text: content.text ?? null,
     draft: null,
+    pending: false,
+    bufferGeneration: 1,
     syncing: false,
     saving: false,
     error: null,
@@ -133,8 +161,16 @@ function withDocument(tab: DocumentTab, document: Document): DocumentTab {
 function open(state: DocumentsState, content: DocumentContent, activate: boolean): DocumentsState {
   const id = content.document.id;
   const existing = state.tabs[id];
+  // Reopening (rehydration, `largeFileEditing`) returns the core's buffer: it
+  // replaces whatever the editor showed.
   const tab: DocumentTab = existing
-    ? { ...withDocument(existing, content.document), text: content.text ?? null }
+    ? {
+        ...withDocument(existing, content.document),
+        text: content.text ?? null,
+        draft: null,
+        pending: false,
+        bufferGeneration: existing.bufferGeneration + 1,
+      }
     : makeTab(content);
   const order = existing ? state.order : [...state.order, id];
   return {
@@ -197,11 +233,19 @@ export function documentsReducer(state: DocumentsState, action: DocumentsAction)
   switch (action.type) {
     case 'opened':
       return open(state, action.content, action.activate);
+    case 'touched':
+      return withTab(state, action.documentId, (tab) =>
+        tab.text === null || tab.document.readOnly || tab.pending
+          ? tab
+          : { ...tab, pending: true, notice: null },
+      );
     case 'edited':
       return withTab(state, action.documentId, (tab) => {
         if (tab.text === null || tab.document.readOnly) return tab;
         const draft = action.text === tab.text ? null : action.text;
-        return draft === tab.draft ? tab : { ...tab, draft, notice: null };
+        return draft === tab.draft && !tab.pending
+          ? tab
+          : { ...tab, draft, pending: false, notice: null };
       });
     case 'updateStarted':
       return withTab(state, action.documentId, (tab) => ({ ...tab, syncing: true, error: null }));
@@ -233,11 +277,22 @@ export function documentsReducer(state: DocumentsState, action: DocumentsAction)
         saving: false,
         error: action.error,
       }));
+    case 'replaced':
+      return withTab(state, action.documentId, (tab) => ({
+        ...withDocument(tab, action.document),
+        text: action.text,
+        draft: null,
+        pending: false,
+        bufferGeneration: tab.bufferGeneration + 1,
+        syncing: false,
+      }));
     case 'reloaded':
       return withTab(state, action.content.document.id, (tab) => ({
         ...withDocument(tab, action.content.document),
         text: action.content.text ?? null,
         draft: null,
+        pending: false,
+        bufferGeneration: tab.bufferGeneration + 1,
         syncing: false,
         acknowledged: null,
         notice: action.notice ?? null,
@@ -255,6 +310,15 @@ export function documentsReducer(state: DocumentsState, action: DocumentsAction)
       return state.tabs[action.documentId] && state.activeId !== action.documentId
         ? { ...state, activeId: action.documentId }
         : state;
+    case 'reorder': {
+      const from = state.order.indexOf(action.documentId);
+      if (from === -1) return state;
+      const toIndex = Math.max(0, Math.min(action.toIndex, state.order.length - 1));
+      if (from === toIndex) return state;
+      const order = state.order.filter((id) => id !== action.documentId);
+      order.splice(toIndex, 0, action.documentId);
+      return { ...state, order };
+    }
     case 'acknowledgeExternal':
       return withTab(state, action.documentId, (tab) => ({
         ...tab,
