@@ -1,0 +1,22 @@
+{
+  "name": "@gritty/protocol",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Typed client for the Gritty core protocol. The only package that imports @tauri-apps/api.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

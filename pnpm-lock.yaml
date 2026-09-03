@@ -65,9 +65,9 @@ importers:
 
   apps/desktop:
     dependencies:
-      '@tauri-apps/api':
-        specifier: 'catalog:'
-        version: 2.11.1
+      '@gritty/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       react:
         specifier: 'catalog:'
         version: 19.2.8
@@ -96,6 +96,22 @@ importers:
       vite:
         specifier: 'catalog:'
         version: 8.2.2(@types/node@24.13.3)
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.11(@types/node@24.13.3)(vite@8.2.2(@types/node@24.13.3))
+
+  packages/protocol:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: 'catalog:'
+        version: 2.11.1
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.13.3
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
       vitest:
         specifier: 'catalog:'
         version: 4.1.11(@types/node@24.13.3)(vite@8.2.2(@types/node@24.13.3))

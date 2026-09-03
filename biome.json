@@ -8,7 +8,13 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!**/dist", "!**/target", "!**/src-tauri/gen"]
+    "includes": [
+      "**",
+      "!**/dist",
+      "!**/target",
+      "!**/src-tauri/gen",
+      "!packages/protocol/src/generated"
+    ]
   },
   "formatter": {
     "enabled": true,
@@ -19,7 +25,20 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "preset": "recommended"
+      "preset": "recommended",
+      "style": {
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "patterns": [
+              {
+                "group": ["@tauri-apps/api", "@tauri-apps/api/**"],
+                "message": "Only packages/protocol/src/transport may import @tauri-apps/api (ADR-003). Use the typed client from @gritty/protocol."
+              }
+            ]
+          }
+        }
+      }
     },
     "domains": {
       "react": "recommended",
@@ -40,5 +59,17 @@
         "organizeImports": "on"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["packages/protocol/src/transport/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": "off"
+          }
+        }
+      }
+    }
+  ]
 }

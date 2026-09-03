@@ -12,7 +12,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@tauri-apps/api": "catalog:",
+    "@gritty/protocol": "workspace:*",
     "react": "catalog:",
     "react-dom": "catalog:"
   },

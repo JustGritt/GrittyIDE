@@ -18,7 +18,8 @@
     "test": "vitest run",
     "check:ts": "pnpm lint && pnpm typecheck && pnpm test",
     "check:rust": "cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
-    "check": "pnpm check:ts && pnpm check:rust"
+    "check": "pnpm check:ts && pnpm check:rust && pnpm check:generated",
+    "check:generated": "test -z \"$(git status --porcelain -- packages/protocol/src/generated)\" || (echo \"packages/protocol/src/generated is stale: run cargo test -p gritty-core and commit\" && git status --short -- packages/protocol/src/generated && exit 1)"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
