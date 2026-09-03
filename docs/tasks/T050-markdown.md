@@ -156,6 +156,9 @@ the browser actually opening are recorded as pending the human pass.
   gzip, +160 KB over T040 for markdown-it and DOMPurify), a 3.6 KB markdown chunk, six worker chunks.
 - `GRITTY_LOG=debug pnpm dev` (2026-09-03): `starting Gritty … protocol_version="1.2.0"`, then
   `health requested by webview` 3.9 s later; no "blocked webview navigation" warnings.
+- Linux CI on PR #6 (2026-09-03, run 33800624675): `pnpm check` and `pnpm tauri build --no-bundle`
+  passed in 8m25s, so the jsdom suites, the shell tests with the recording opener and the Vite
+  build hold on Linux as well. The macOS job is label-gated (`ci:macos`) and did not run.
 - Not executed (human WKWebView pass, rows in the platform matrix): open `fixtures/markdown` as a
   workspace; Source / Split / Preview keep the cursor; typing in `gfm.md` updates the preview
   within ~100 ms (Web Inspector timeline); `long.md` render time in the app and the pause banner +
