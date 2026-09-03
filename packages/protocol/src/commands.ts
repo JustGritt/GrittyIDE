@@ -8,6 +8,10 @@ export const COMMANDS = {
   'operations.list': 'operations_list',
   'operations.cancel': 'operations_cancel',
   'operations.startDemo': 'operations_start_demo',
+  'workspace.open': 'workspace_open',
+  'workspace.close': 'workspace_close',
+  'workspace.current': 'workspace_current',
+  'workspace.list': 'workspace_list',
 } as const;
 
 export type CommandName = keyof typeof COMMANDS;

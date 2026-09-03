@@ -4,9 +4,11 @@ import type { OperationCompletedPayload } from "./OperationCompletedPayload";
 import type { OperationFailedPayload } from "./OperationFailedPayload";
 import type { OperationProgressPayload } from "./OperationProgressPayload";
 import type { OperationStartedPayload } from "./OperationStartedPayload";
+import type { WorkspaceClosedPayload } from "./WorkspaceClosedPayload";
+import type { WorkspaceOpenedPayload } from "./WorkspaceOpenedPayload";
 
 /**
  * The domain event vocabulary, adjacently tagged as `{ name, payload }`.
- * Further families (`Workspace*`, `Document*`, ...) are added by the tasks that own them.
+ * Further families (`Document*`, ...) are added by the tasks that own them.
  */
-export type CoreEvent = { "name": "OperationStarted", "payload": OperationStartedPayload } | { "name": "OperationProgress", "payload": OperationProgressPayload } | { "name": "OperationCompleted", "payload": OperationCompletedPayload } | { "name": "OperationFailed", "payload": OperationFailedPayload } | { "name": "OperationCancelled", "payload": OperationCancelledPayload };
+export type CoreEvent = { "name": "OperationStarted", "payload": OperationStartedPayload } | { "name": "OperationProgress", "payload": OperationProgressPayload } | { "name": "OperationCompleted", "payload": OperationCompletedPayload } | { "name": "OperationFailed", "payload": OperationFailedPayload } | { "name": "OperationCancelled", "payload": OperationCancelledPayload } | { "name": "WorkspaceOpened", "payload": WorkspaceOpenedPayload } | { "name": "WorkspaceClosed", "payload": WorkspaceClosedPayload };

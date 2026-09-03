@@ -1,0 +1,152 @@
+import {
+  type CoreError,
+  type ListDirectoryRequest,
+  toCoreError,
+  type WorkspaceId,
+} from '@gritty/protocol';
+import { useCallback, useEffect, useReducer, useState } from 'react';
+import { core } from '../../core/client';
+import {
+  type ExplorerNode,
+  explorerReducer,
+  initialExplorerState,
+  isExpandable,
+} from './explorer-reducer';
+
+export function useExplorer() {
+  const [state, dispatch] = useReducer(explorerReducer, initialExplorerState);
+  const [error, setError] = useState<CoreError | null>(null);
+
+  useEffect(() => {
+    // Subscribe before asking for the current workspace so nothing emitted in
+    // between is lost; the reducer treats both sources idempotently.
+    const unsubscribe = core.subscribeAll((event) => dispatch({ type: 'event', event }));
+    let active = true;
+    core.workspace.current().then(
+      (workspace) => {
+        if (active) dispatch({ type: 'workspace', workspace });
+      },
+      (cause: unknown) => {
+        if (active) setError(toCoreError(cause));
+      },
+    );
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
+
+  const load = useCallback(
+    async (workspaceId: WorkspaceId, path: string, cursor: string | null) => {
+      const append = cursor !== null;
+      dispatch({ type: 'listStarted', path });
+      try {
+        const request: ListDirectoryRequest = { workspaceId, path };
+        if (cursor !== null) request.cursor = cursor;
+        const response = await core.workspace.list(request);
+        if (response.status === 'ready') {
+          dispatch({ type: 'pageLoaded', path, page: response.page, append });
+        } else {
+          dispatch({ type: 'listPending', path, operationId: response.operation.id, append });
+        }
+      } catch (cause: unknown) {
+        dispatch({ type: 'listFailed', path, error: toCoreError(cause) });
+      }
+    },
+    [],
+  );
+
+  // The root loads itself once a workspace is present; a failure stays on the
+  // node (with a retry) instead of looping.
+  const workspace = state.workspace;
+  const root = state.nodes[''];
+  useEffect(() => {
+    if (workspace && root && root.children === null && !root.loading && root.error === null) {
+      void load(workspace.id, '', null);
+    }
+  }, [workspace, root, load]);
+
+  const run = useCallback(async (action: () => Promise<unknown>) => {
+    try {
+      await action();
+      setError(null);
+    } catch (cause: unknown) {
+      setError(toCoreError(cause));
+    }
+  }, []);
+
+  const toggle = useCallback(
+    (node: ExplorerNode) => {
+      if (!workspace || !isExpandable(node.entry)) return;
+      dispatch({ type: 'toggle', path: node.path });
+      if (!node.expanded && node.children === null && !node.loading) {
+        void load(workspace.id, node.path, null);
+      }
+    },
+    [workspace, load],
+  );
+
+  const reload = useCallback(
+    (node: ExplorerNode) => {
+      if (workspace && !node.loading) void load(workspace.id, node.path, null);
+    },
+    [workspace, load],
+  );
+
+  const loadMore = useCallback(
+    (node: ExplorerNode) => {
+      if (workspace && node.cursor !== null && !node.loading) {
+        void load(workspace.id, node.path, node.cursor);
+      }
+    },
+    [workspace, load],
+  );
+
+  const openFolder = useCallback(
+    (path?: string) =>
+      run(async () => {
+        const opened = await core.workspace.open(path);
+        if (opened) dispatch({ type: 'workspace', workspace: opened });
+      }),
+    [run],
+  );
+
+  const closeWorkspace = useCallback(
+    () =>
+      run(async () => {
+        if (!workspace) return;
+        await core.workspace.close(workspace.id);
+        dispatch({ type: 'workspace', workspace: null });
+      }),
+    [run, workspace],
+  );
+
+  const cancelListing = useCallback(
+    (node: ExplorerNode) =>
+      run(async () => {
+        if (node.pending) await core.operations.cancel(node.pending.operationId);
+      }),
+    [run],
+  );
+
+  const setShowHidden = useCallback(
+    (showHidden: boolean) => dispatch({ type: 'setShowHidden', showHidden }),
+    [],
+  );
+  const dismissNotice = useCallback(() => dispatch({ type: 'dismissNotice' }), []);
+  const clearError = useCallback(() => setError(null), []);
+
+  return {
+    state,
+    error,
+    toggle,
+    reload,
+    loadMore,
+    openFolder,
+    closeWorkspace,
+    cancelListing,
+    setShowHidden,
+    dismissNotice,
+    clearError,
+  };
+}

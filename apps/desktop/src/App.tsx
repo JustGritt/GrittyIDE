@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { ErrorEnvelope } from './components/error-envelope';
 import { core } from './core/client';
 import { describeHealth } from './core/health';
+import { ExplorerPanel } from './features/explorer/explorer-panel';
 import { OperationsPanel } from './features/operations/operations-panel';
 
 type HealthState =
@@ -31,28 +32,33 @@ export function App() {
   return (
     <main className="shell">
       <header className="shell__header">
-        <h1>Gritty</h1>
-        <p className="shell__tagline">Agent-native development environment. Phase 0 shell.</p>
+        <div>
+          <h1>Gritty</h1>
+          <p className="shell__tagline">Agent-native development environment. Phase 0 shell.</p>
+        </div>
+        <section className="shell__status" aria-live="polite">
+          {state.status === 'loading' && <p>Contacting core…</p>}
+          {state.status === 'ready' && <HealthFacts health={state.health} />}
+          {state.status === 'error' && (
+            <>
+              <p className="shell__error">Core unreachable or incompatible.</p>
+              <ErrorEnvelope error={state.error} />
+            </>
+          )}
+        </section>
       </header>
-      <section className="shell__status" aria-live="polite">
-        {state.status === 'loading' && <p>Contacting core…</p>}
-        {state.status === 'ready' && <HealthFacts health={state.health} />}
-        {state.status === 'error' && (
-          <>
-            <p className="shell__error">Core unreachable or incompatible.</p>
-            <ErrorEnvelope error={state.error} />
-          </>
-        )}
-      </section>
-      {import.meta.env.DEV && <OperationsPanel />}
+      <div className="shell__body">
+        <ExplorerPanel />
+        {import.meta.env.DEV && <OperationsPanel />}
+      </div>
     </main>
   );
 }
 
 function HealthFacts({ health }: { health: HealthReport }) {
   return (
-    <>
-      <p className="shell__ok">{describeHealth(health)}</p>
+    <details>
+      <summary className="shell__ok">{describeHealth(health)}</summary>
       <dl className="shell__facts">
         <dt>App</dt>
         <dd>{health.shell.appVersion}</dd>
@@ -73,6 +79,6 @@ function HealthFacts({ health }: { health: HealthReport }) {
         <dt>Build</dt>
         <dd>{health.debug ? 'debug' : 'release'}</dd>
       </dl>
-    </>
+    </details>
   );
 }

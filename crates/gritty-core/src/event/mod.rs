@@ -23,6 +23,7 @@ use crate::operation::{Operation, OperationProgress};
 use crate::protocol::actor::Actor;
 use crate::protocol::error::CoreError;
 use crate::protocol::ids::{CorrelationId, OperationId, WorkspaceId};
+use crate::workspace::{Workspace, WorkspaceClosedReason};
 
 /// Envelope fields that are not the event itself.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -41,7 +42,7 @@ pub struct EventMeta {
 }
 
 /// The domain event vocabulary, adjacently tagged as `{ name, payload }`.
-/// Further families (`Workspace*`, `Document*`, ...) are added by the tasks that own them.
+/// Further families (`Document*`, ...) are added by the tasks that own them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "name", content = "payload")]
 pub enum CoreEvent {
@@ -50,6 +51,8 @@ pub enum CoreEvent {
     OperationCompleted(OperationCompletedPayload),
     OperationFailed(OperationFailedPayload),
     OperationCancelled(OperationCancelledPayload),
+    WorkspaceOpened(WorkspaceOpenedPayload),
+    WorkspaceClosed(WorkspaceClosedPayload),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -87,6 +90,21 @@ pub struct OperationCancelledPayload {
     pub operation: Operation,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceOpenedPayload {
+    pub workspace: Workspace,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceClosedPayload {
+    pub workspace_id: WorkspaceId,
+    /// Root the workspace had, for the UI message after it is gone.
+    pub root: String,
+    pub reason: WorkspaceClosedReason,
+}
+
 impl CoreEvent {
     /// The `name` discriminator as it appears on the wire.
     pub const fn name(&self) -> &'static str {
@@ -96,6 +114,8 @@ impl CoreEvent {
             Self::OperationCompleted(_) => "OperationCompleted",
             Self::OperationFailed(_) => "OperationFailed",
             Self::OperationCancelled(_) => "OperationCancelled",
+            Self::WorkspaceOpened(_) => "WorkspaceOpened",
+            Self::WorkspaceClosed(_) => "WorkspaceClosed",
         }
     }
 
@@ -107,6 +127,7 @@ impl CoreEvent {
             Self::OperationCompleted(p) => Some(&p.operation.id),
             Self::OperationFailed(p) => Some(&p.operation.id),
             Self::OperationCancelled(p) => Some(&p.operation.id),
+            Self::WorkspaceOpened(_) | Self::WorkspaceClosed(_) => None,
         }
     }
 }
@@ -346,6 +367,38 @@ mod tests {
             let back: CoreEvent = serde_json::from_value(json).unwrap();
             assert_eq!(back, event);
         }
+    }
+
+    #[test]
+    fn workspace_events_round_trip_without_an_operation_id() {
+        let workspace = Workspace {
+            id: WorkspaceId::from_raw("ws-1"),
+            root: "/ws".into(),
+            name: "ws".into(),
+            opened_at: Timestamp::from_millis(7),
+        };
+        let events = [
+            CoreEvent::WorkspaceOpened(WorkspaceOpenedPayload { workspace }),
+            CoreEvent::WorkspaceClosed(WorkspaceClosedPayload {
+                workspace_id: WorkspaceId::from_raw("ws-1"),
+                root: "/ws".into(),
+                reason: WorkspaceClosedReason::RootMissing,
+            }),
+        ];
+        for event in events {
+            let json = serde_json::to_value(&event).unwrap();
+            assert_eq!(json["name"], event.name());
+            assert_eq!(event.operation_id(), None);
+            let back: CoreEvent = serde_json::from_value(json).unwrap();
+            assert_eq!(back, event);
+        }
+        let json = serde_json::to_value(CoreEvent::WorkspaceClosed(WorkspaceClosedPayload {
+            workspace_id: WorkspaceId::from_raw("ws-1"),
+            root: "/ws".into(),
+            reason: WorkspaceClosedReason::User,
+        }))
+        .unwrap();
+        assert_eq!(json["payload"]["reason"], "USER");
     }
 
     #[test]

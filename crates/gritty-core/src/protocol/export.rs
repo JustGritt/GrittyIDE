@@ -16,6 +16,10 @@ use crate::operation::Operation;
 use crate::operation::demo::StartDemoRequest;
 use crate::operation::registry::CancelOperationRequest;
 use crate::protocol::error::CoreError;
+use crate::workspace::{
+    CloseWorkspaceRequest, ListDirectoryRequest, ListDirectoryResponse, OpenWorkspaceRequest,
+    Workspace,
+};
 
 /// Relative to this crate's `Cargo.toml`.
 const GENERATED_DIR: &str = "../../packages/protocol/src/generated";
@@ -43,6 +47,11 @@ fn export_bindings() {
     EventMeta::export_all(&cfg).expect("export EventMeta");
     CancelOperationRequest::export_all(&cfg).expect("export CancelOperationRequest");
     StartDemoRequest::export_all(&cfg).expect("export StartDemoRequest");
+    Workspace::export_all(&cfg).expect("export Workspace");
+    OpenWorkspaceRequest::export_all(&cfg).expect("export OpenWorkspaceRequest");
+    CloseWorkspaceRequest::export_all(&cfg).expect("export CloseWorkspaceRequest");
+    ListDirectoryRequest::export_all(&cfg).expect("export ListDirectoryRequest");
+    ListDirectoryResponse::export_all(&cfg).expect("export ListDirectoryResponse");
 
     let version = format!(
         "{HEADER}export const PROTOCOL_VERSION = \"{PROTOCOL_VERSION}\";\n\
