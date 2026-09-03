@@ -10,8 +10,8 @@ domain abstraction before its upstream contract exists.
 | [T010](T010-core-protocol.md) | Core protocol + operation/event/error conventions (Gate A) | 0 | T000 | done |
 | [T020](T020-workspace-open-list.md) | Workspace open/list + fixtures | 0/1A | T010 | done |
 | [T030](T030-file-io-documents.md) | File I/O + document/buffer contract (Gate B) | 0/1A | T020 | done |
-| [T040](T040-monaco-shell.md) | Monaco shell | 0/1A | T030 | review |
-| [T050](T050-markdown.md) | Markdown | 0/1B | T030, T040 | todo |
+| [T040](T040-monaco-shell.md) | Monaco shell | 0/1A | T030 | done |
+| [T050](T050-markdown.md) | Markdown | 0/1B | T030, T040 | in-progress |
 | [T060](T060-session-persistence.md) | Session persistence + recovery | 0/1B | T030, T040 | todo |
 | [T090](T090-terminal-pty.md) | Terminal (PTY) spike | 0/2 | T010 | todo |
 | Phase 0 tests | `docs/plans/phase-0-spike.md` sections B–D | 0 | T060, T090 | todo |
