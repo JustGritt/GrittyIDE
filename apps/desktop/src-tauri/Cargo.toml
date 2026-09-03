@@ -23,5 +23,9 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
+[dev-dependencies]
+# `test` enables the mock runtime used by tests/commands.rs to invoke commands headlessly.
+tauri = { workspace = true, features = ["test"] }
+
 [lints]
 workspace = true

@@ -22,7 +22,9 @@ use crate::core::Core;
 
 /// `core.health`
 #[tauri::command]
-pub async fn core_health(app: tauri::AppHandle) -> Result<HealthReport, CoreError> {
+pub async fn core_health<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<HealthReport, CoreError> {
     guard("core.health", move |_| async move {
         let shell = ShellInfo {
             app_version: app.package_info().version.to_string(),
@@ -108,5 +110,52 @@ where
             Err(CoreError::internal(format!("command {command} panicked"))
                 .with_correlation(correlation))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gritty_core::CoreErrorCode;
+
+    use super::*;
+
+    #[test]
+    fn guard_turns_a_panic_into_an_internal_error_with_correlation() {
+        let result: Result<(), CoreError> =
+            tauri::async_runtime::block_on(guard("test.panic", |_| async {
+                panic!("adapter bug");
+            }));
+        let error = result.unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::Internal);
+        assert!(error.message.contains("test.panic"));
+        assert!(error.correlation_id.is_some());
+    }
+
+    #[test]
+    fn guard_attaches_the_correlation_id_to_core_errors() {
+        let result: Result<(), CoreError> =
+            tauri::async_runtime::block_on(guard("test.fail", |_| async {
+                Err(CoreError::not_found("nothing"))
+            }));
+        let error = result.unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::NotFound);
+        assert!(error.correlation_id.is_some());
+    }
+
+    #[test]
+    fn guard_hands_the_same_correlation_id_to_the_body() {
+        let result = tauri::async_runtime::block_on(guard("test.ok", |correlation| async move {
+            Err::<(), _>(CoreError::internal("x").with_correlation(correlation))
+        }));
+        let error = result.unwrap_err();
+        assert!(error.correlation_id.unwrap().is_well_formed());
+    }
+
+    #[test]
+    fn malformed_request_is_invalid_input() {
+        let error =
+            parse_request::<StartDemoRequest>(serde_json::json!({ "steps": "x" })).unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+        assert_eq!(error.details.unwrap()["field"], "request");
     }
 }

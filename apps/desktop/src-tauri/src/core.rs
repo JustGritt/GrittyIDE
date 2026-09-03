@@ -9,7 +9,7 @@ use gritty_core::CORE_EVENT_CHANNEL;
 use gritty_core::CoreError;
 use gritty_core::event::{EventBus, EventEnvelope, EventSink};
 use gritty_core::operation::OperationRegistry;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Runtime};
 
 /// How long shutdown waits for running operations to observe cancellation.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
@@ -20,11 +20,11 @@ pub struct Core {
 
 /// Delivers every envelope on the single core event channel. Failures are
 /// reported back to the bus, which logs them with the correlation id.
-struct TauriEventSink {
-    app: AppHandle,
+struct TauriEventSink<R: Runtime> {
+    app: AppHandle<R>,
 }
 
-impl EventSink for TauriEventSink {
+impl<R: Runtime> EventSink for TauriEventSink<R> {
     fn emit(&self, envelope: &EventEnvelope) -> Result<(), CoreError> {
         self.app
             .emit(CORE_EVENT_CHANNEL, envelope)
@@ -33,7 +33,7 @@ impl EventSink for TauriEventSink {
 }
 
 impl Core {
-    pub fn new(app: AppHandle) -> Self {
+    pub fn new<R: Runtime>(app: AppHandle<R>) -> Self {
         let events = EventBus::new(Arc::new(TauriEventSink { app }));
         // Tauri already runs a tokio runtime; the core builds on it (no second runtime).
         let handle = tauri::async_runtime::handle().inner().clone();
