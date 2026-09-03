@@ -103,8 +103,8 @@ externalModificationState: UNCHANGED | MODIFIED_EXTERNALLY | CONFLICTED | DELETE
 ```
 
 Repository files are the durable artifacts; the core owns the buffer of every
-open document (`gritty_core::document::DocumentManager`); Monaco (T040) and
-the interim textarea only render and edit. One document per `(workspace,
+open document (`gritty_core::document::DocumentManager`); Monaco (T040,
+`packages/editor`, ADR-012) only renders and edits. One document per `(workspace,
 path)`; `documents.open` on an open path returns the current buffer.
 `documents.update { documentId, baseVersion, text }` replaces the buffer and
 increments `currentVersion` (a stale `baseVersion` is `Conflict`); `dirty` is

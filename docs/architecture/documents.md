@@ -113,6 +113,24 @@ WORKSPACE_CLOSED, dirty }`; the desktop shell keeps the text of dirty ones on
 screen as "unsaved buffers from closed documents" until dismissed. Durable
 recovery of dirty buffers is T060.
 
+## Editor binding (T040)
+
+ADR-012 fixes how Monaco consumes this contract; `packages/editor` implements
+it and `apps/desktop/src/features/{documents,editor}` wire it.
+
+| Direction | Mechanism |
+|---|---|
+| core → model | `documents.open().text` creates the model; afterwards text is pushed only when the tab's `bufferGeneration` moves (reopen, reload, conflict refetch, explicit replacement), as one minimal undoable edit that is not echoed as an edit |
+| model → core | each content change is a *touch*; the debounced flush (300 ms, 1000 ms in large-file mode) reads the model once and sends `documents.update { baseVersion }`; one update in flight per document; `Conflict` → refetch the buffer and show a notice |
+| dirty | `Document.dirty` from the core, plus `draft !== null` (sent but not accepted) or `pending` (touched but not read) |
+| save / close | settle first (await the update in flight, flush what was typed meanwhile); a refused update blocks the save |
+| line endings | LF or CRLF throughout: edited verbatim. Mixed or lone CR: read-only, shown normalized, explicit "Normalize to LF/CRLF" sends one update |
+| read-only | `Document.readOnly` and non-representable line endings make the editor read-only with a message that says why |
+| large files | plaintext model, expensive features off, read-only until `largeFileEditing` |
+| binary | no model; placeholder |
+| closed by the core | model disposed; a dirty buffer's text (including what Monaco still held) becomes an orphan entry |
+| workers | editor, JSON, CSS, HTML and TypeScript workers bundled by Vite; failures tracked and shown, editor keeps working |
+
 ## Fixture
 
 `fixtures/weird-files` (committed) plus `generated/` (git-ignored, written by
