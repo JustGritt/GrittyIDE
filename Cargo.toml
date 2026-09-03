@@ -33,6 +33,12 @@ tauri-plugin-dialog = "2.7.3"
 # T030 documents: content hashing for dirty/external-change detection. Already in
 # the tree through tauri-codegen, so this adds no new crate.
 sha2 = "0.10.9"
+# T050 shell: URL parsing for the `shell.openExternal` allowlist. Already in the
+# tree through tauri, so this adds no new crate.
+url = "2.5.8"
+# T050 shell: open http(s) URLs with the system's default handler, Rust side only
+# (the WebView never gets a shell or opener API).
+open = "5.4.3"
 
 [workspace.lints.rust]
 # Unsafe code needs a justified, reviewed `#![allow(unsafe_code)]` in the crate.

@@ -17,6 +17,7 @@ tauri-build = { workspace = true }
 
 [dependencies]
 gritty-core = { workspace = true }
+open = { workspace = true }
 tauri = { workspace = true }
 tauri-plugin-dialog = { workspace = true }
 tokio = { workspace = true }

@@ -35,6 +35,7 @@ export type { HealthReport } from './generated/HealthReport';
 export type { ListDirectoryRequest } from './generated/ListDirectoryRequest';
 export type { ListDirectoryResponse } from './generated/ListDirectoryResponse';
 export type { OpenDocumentRequest } from './generated/OpenDocumentRequest';
+export type { OpenExternalRequest } from './generated/OpenExternalRequest';
 export type { OpenWorkspaceRequest } from './generated/OpenWorkspaceRequest';
 export type { Operation } from './generated/Operation';
 export type { OperationCancelledPayload } from './generated/OperationCancelledPayload';

@@ -5,8 +5,10 @@ export {
   createEditorHost,
   type EditorHost,
   type EditorTheme,
+  type ScrollState,
   setEditorTheme,
 } from './editor-host';
+export { type CodeHighlighter, createMonacoHighlighter } from './highlighter';
 export { createMonacoModelFactory, modelUri } from './model-factory';
 export { installMonacoEnvironment, type WorkerFactories } from './monaco-environment';
 export { watchColorScheme } from './theme';

@@ -19,6 +19,7 @@ export const COMMANDS = {
   'documents.reload': 'documents_reload',
   'documents.status': 'documents_status',
   'documents.list': 'documents_list',
+  'shell.openExternal': 'shell_open_external',
 } as const;
 
 export type CommandName = keyof typeof COMMANDS;

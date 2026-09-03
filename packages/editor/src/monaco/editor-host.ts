@@ -13,6 +13,12 @@ export interface CursorPosition {
   readonly column: number;
 }
 
+/** What the preview needs to follow the editor: the first visible line, and whether the end is in view. */
+export interface ScrollState {
+  readonly topLine: number;
+  readonly atBottom: boolean;
+}
+
 /**
  * One Monaco editor instance for the pane. Tabs switch models; the view state
  * (cursor, selection, scroll, folding) of each document is kept per id.
@@ -24,6 +30,10 @@ export interface EditorHost {
   /** Cmd/Ctrl+S while the editor has focus. */
   onSave(callback: () => void): void;
   onCursorChange(callback: (position: CursorPosition) => void): () => void;
+  /** Vertical scrolls only; silent while the editor is hidden (no visible range). */
+  onScrollChange(callback: (state: ScrollState) => void): () => void;
+  /** Move the cursor (clamped by Monaco), scroll it into view, focus. */
+  revealPosition(position: CursorPosition): void;
   forgetViewState(documentId: DocumentId): void;
   dispose(): void;
 }
@@ -66,6 +76,23 @@ export function createEditorHost(container: HTMLElement): EditorHost {
         callback({ lineNumber: event.position.lineNumber, column: event.position.column });
       });
       return () => subscription.dispose();
+    },
+    onScrollChange(callback) {
+      const subscription = editor.onDidScrollChange((event) => {
+        if (!event.scrollTopChanged) return;
+        const first = editor.getVisibleRanges()[0];
+        if (!first) return;
+        const atBottom =
+          editor.getScrollTop() + editor.getLayoutInfo().height >= editor.getScrollHeight() - 1;
+        callback({ topLine: first.startLineNumber, atBottom });
+      });
+      return () => subscription.dispose();
+    },
+    revealPosition(position) {
+      const target = { lineNumber: position.lineNumber, column: position.column };
+      editor.setPosition(target);
+      editor.revealPositionInCenter(target);
+      editor.focus();
     },
     forgetViewState(documentId) {
       viewStates.delete(documentId);

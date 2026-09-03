@@ -23,6 +23,17 @@ export const LARGE_FILE_UPDATE_DEBOUNCE_MS = 1000;
 /** Reads the editor's current text for a document; registered by the editor binding. */
 export type TextReader = () => string;
 
+export interface OpenFileOptions {
+  /** Reopen a large document with editing enabled. */
+  readonly largeFileEditing?: boolean;
+  /** Report a failure only through the result, not the pane's error banner (link clicks). */
+  readonly quiet?: boolean;
+}
+
+export type OpenFileResult =
+  | { readonly ok: true; readonly documentId: DocumentId }
+  | { readonly ok: false; readonly error: CoreError };
+
 /**
  * Drives the document store against the core: opens files, turns editor
  * touches into debounced, versioned `documents.update` calls (one in flight
@@ -234,24 +245,32 @@ export function useDocuments() {
   );
 
   const openFile = useCallback(
-    async (workspaceId: WorkspaceId, path: string, largeFileEditing = false) => {
-      if (!largeFileEditing) {
+    async (
+      workspaceId: WorkspaceId,
+      path: string,
+      options: OpenFileOptions = {},
+    ): Promise<OpenFileResult> => {
+      if (!options.largeFileEditing) {
         // Reopening would return the live buffer and replace up to one
         // debounce interval of typing in the editor; activating is enough.
         const existing = findTabByPath(stateRef.current, workspaceId, path);
         if (existing) {
           dispatch({ type: 'activate', documentId: existing.document.id });
-          return;
+          return { ok: true, documentId: existing.document.id };
         }
       }
       try {
-        const request = largeFileEditing
+        const request = options.largeFileEditing
           ? { workspaceId, path, largeFileEditing: true }
           : { workspaceId, path };
-        opened(await core.documents.open(request), true);
-        setError(null);
+        const content = await core.documents.open(request);
+        opened(content, true);
+        if (!options.quiet) setError(null);
+        return { ok: true, documentId: content.document.id };
       } catch (cause: unknown) {
-        setError(toCoreError(cause));
+        const error = toCoreError(cause);
+        if (!options.quiet) setError(error);
+        return { ok: false, error };
       }
     },
     [opened],
@@ -320,7 +339,8 @@ export function useDocuments() {
   const enableEditing = useCallback(
     (documentId: DocumentId) => {
       const tab = stateRef.current.tabs[documentId];
-      if (tab) void openFile(tab.document.workspaceId, tab.document.path, true);
+      if (tab)
+        void openFile(tab.document.workspaceId, tab.document.path, { largeFileEditing: true });
     },
     [openFile],
   );

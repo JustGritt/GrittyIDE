@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@gritty/editor": "workspace:*",
+    "@gritty/markdown": "workspace:*",
     "@gritty/protocol": "workspace:*",
     "monaco-editor": "catalog:",
     "react": "catalog:",
@@ -24,6 +25,7 @@
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
+    "jsdom": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:"

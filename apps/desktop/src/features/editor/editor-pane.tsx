@@ -1,7 +1,9 @@
 import { dominantEol, type EolTarget, isEditableEol, normalizeEol } from '@gritty/editor';
-import type { DocumentId } from '@gritty/protocol';
-import { useCallback, useEffect, useState } from 'react';
+import { isInstructionFile } from '@gritty/markdown';
+import { type DocumentId, toCoreError } from '@gritty/protocol';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
+import { core } from '../../core/client';
 import {
   activeTab,
   type DocumentTab,
@@ -10,6 +12,10 @@ import {
   pendingExternalState,
 } from '../documents/documents-reducer';
 import type { DocumentsController } from '../documents/use-documents';
+import { MarkdownPreview } from '../markdown/markdown-preview';
+import { MarkdownToolbar } from '../markdown/markdown-toolbar';
+import type { PreviewLinkAction } from '../markdown/preview-links';
+import { viewModeFor, viewModesReducer } from '../markdown/view-modes';
 import { CloseDialog } from './close-dialog';
 import { useEditorPreferences } from './editor-preferences';
 import { workerStatus } from './monaco-setup';
@@ -43,6 +49,66 @@ export function EditorPane({ documents }: { documents: DocumentsController }) {
   const active = activeTab(state);
   const activeEol = active ? (editor.eols[active.document.id] ?? null) : null;
   const closingTab = closing === null ? null : (state.tabs[closing] ?? null);
+
+  // Markdown: per-tab view mode, link outcomes and notices (in memory; T060 persists modes).
+  const [modes, dispatchMode] = useReducer(viewModesReducer, {});
+  useEffect(() => dispatchMode({ type: 'prune', open: state.order }), [state.order]);
+  const [brokenTargets, setBrokenTargets] = useState<ReadonlySet<string>>(() => new Set());
+  const [previewNotice, setPreviewNotice] = useState<string | null>(null);
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const isMarkdown =
+    active !== null && active.document.languageId === 'markdown' && active.text !== null;
+  const mode = active
+    ? viewModeFor(modes, active.document.id, active.document.languageId)
+    : 'source';
+  const showPreview = isMarkdown && mode !== 'source';
+  const showEditor = active !== null && active.text !== null && !(isMarkdown && mode === 'preview');
+
+  const followLink = useCallback(
+    async (action: NonNullable<PreviewLinkAction>) => {
+      const from = activeRef.current;
+      switch (action.kind) {
+        case 'document': {
+          if (!from) return;
+          const result = await documents.openFile(from.document.workspaceId, action.path, {
+            quiet: true,
+          });
+          if (!result.ok) {
+            if (result.error.code === 'NotFound') {
+              setBrokenTargets((previous) => new Set(previous).add(action.path));
+            }
+            setPreviewNotice(`${action.path}: ${result.error.message}`);
+            return;
+          }
+          // A target shown preview-only has no editor to reveal in.
+          if (modes[result.documentId] === 'preview') {
+            dispatchMode({ type: 'set', documentId: result.documentId, mode: 'split' });
+          }
+          if (action.line !== undefined) {
+            editor.revealPosition(result.documentId, {
+              lineNumber: action.line,
+              column: action.column ?? 1,
+            });
+          }
+          return;
+        }
+        case 'external':
+          try {
+            await core.shell.openExternal(action.url);
+          } catch (cause: unknown) {
+            setPreviewNotice(`Could not open ${action.url}: ${toCoreError(cause).message}`);
+          }
+          return;
+        case 'unsupported':
+          setPreviewNotice(action.reason);
+          return;
+        case 'anchor':
+          return;
+      }
+    },
+    [documents.openFile, editor.revealPosition, modes],
+  );
 
   const requestClose = useCallback(
     (documentId: DocumentId) => {
@@ -105,12 +171,39 @@ export function EditorPane({ documents }: { documents: DocumentsController }) {
 
       {active && <Banners tab={active} eol={activeEol} documents={documents} />}
 
-      <section
-        ref={editor.containerRef}
-        className="editor__monaco"
-        hidden={!active || active.text === null}
-        aria-label={active ? `Contents of ${active.document.path}` : 'Editor'}
-      />
+      {isMarkdown && active && (
+        <MarkdownToolbar
+          mode={mode}
+          onMode={(next) =>
+            dispatchMode({ type: 'set', documentId: active.document.id, mode: next })
+          }
+          instructionFile={isInstructionFile(active.document.path)}
+          notice={previewNotice}
+          onDismissNotice={() => setPreviewNotice(null)}
+        />
+      )}
+
+      <div className="editor__surfaces">
+        <section
+          ref={editor.containerRef}
+          className="editor__monaco"
+          hidden={!showEditor}
+          aria-label={active ? `Contents of ${active.document.path}` : 'Editor'}
+        />
+        {showPreview && active && (
+          <MarkdownPreview
+            key={active.document.id}
+            documentId={active.document.id}
+            path={active.document.path}
+            largeFileMode={active.document.largeFileMode}
+            fallbackText={active.text}
+            editor={editor}
+            brokenTargets={brokenTargets}
+            onLink={(action) => void followLink(action)}
+            onNotice={setPreviewNotice}
+          />
+        )}
+      </div>
       {!active && (
         <p className="editor__empty">
           {state.order.length === 0

@@ -50,7 +50,8 @@ the schema; `ts-rs` generates the TypeScript side (ADR-008).
   operations are retained in memory (last 200) for rehydration; persistence is
   T060's decision.
 - **Versioning**: `PROTOCOL_VERSION` (`MAJOR.MINOR.PATCH`; `1.1.0` since T030
-  added the `documents.*` family) lives in Rust and is
+  added the `documents.*` family, `1.2.0` since T050 added `shell.openExternal`)
+  lives in Rust and is
   reported by `core.health`; the same test that exports the types writes it to
   `packages/protocol/src/generated/version.ts`. The client probes `core.health`
   before its first command and refuses to run (every command rejects with

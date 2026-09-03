@@ -36,6 +36,14 @@ Legend: ✔ works · ✘ defect (link an issue/note) · ~ partial · – unteste
 | Editor | workers (editor, JSON, CSS, HTML, TypeScript) load under the CSP | – | – | – | T040: chunks emitted by `pnpm --filter @gritty/desktop build`; runtime load in `pnpm dev` and in the packaged app pending the human pass (failures would show in the pane's worker warning) |
 | Editor | typing in the 12 MiB fixture without perceptible frame drops | – | – | – | T040: explicit large-file degradation and lazy reads; measurement (Web Inspector timeline, frames > 16 ms) pending the human pass |
 | Editor | dirty tab close asks save / discard / cancel; Cmd+S saves | – | – | – | T040: pending the human pass |
+| Markdown | GFM rendering (headings, lists, task lists, tables, fences, quotes, links, images) | (a) | – | – | T050: `packages/markdown` file snapshot of `fixtures/markdown/gfm.md` under jsdom, macOS 26 (2026-09-03); visual check in WKWebView pending the human pass |
+| Markdown | XSS fixture yields no script, handler, unsafe URL or forbidden element | (a) | – | – | T050: `sanitize.test.ts` on `fixtures/markdown/xss.md` (jsdom, DOMPurify 3.4.14); a look at the Web Inspector console in the app pending the human pass |
+| Markdown | source / split / preview modes keep the editor state; preview follows edits within ~100 ms | – | – | – | T050: adaptive debounce and thresholds implemented; `gfm.md` parses in under 10 ms (markdown-it, node); timing in WKWebView pending the human pass |
+| Markdown | long document (134 KB `long.md`) renders without freezing; huge documents pause / refuse | (a) | – | – | T050: `long.md` 366 ms under jsdom (markdown-it alone 15–20 ms, DOMPurify under jsdom is the rest); in-app pause banner and Refresh pending the human pass |
+| Markdown | source → preview scroll sync | (a) | – | – | T050: interpolation unit-tested (`scroll-sync.test.ts`); feel in the app pending the human pass |
+| Markdown | local link opens the target at `line:col`; anchor scrolls; missing target → inline notice, link marked | (a) | – | – | T050: resolver and link extraction tests; reveal flow pending the human pass |
+| Markdown | external link opens the system browser exactly once through `shell.openExternal`; middle click and context menu never navigate | (a) | – | – | T050: core validation (`shell.rs`), adapter round trip with a recording opener, navigation-guard predicate (`lib.rs`); the browser actually opening and the guard in WKWebView pending the human pass |
+| Markdown | README.md / AGENTS.md badges in explorer, tab and toolbar | – | – | – | T050: pending the human pass |
 | Files | workspace close refused while documents are dirty | (a) | – | – | T030: core and adapter tests |
 | Terminal | interactive shell (vim, less, top) | – | – | – | T090 |
 | Terminal | resize, process-tree kill, unexpected child death | – | – | – | T090 |
