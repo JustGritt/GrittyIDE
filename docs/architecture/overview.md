@@ -30,7 +30,7 @@ module that imports `@tauri-apps/api`.
 
 | Convention | Shape |
 |---|---|
-| Command names | `<domain>.<verb>` in TypeScript ↔ `<domain>_<snake_verb>` in Rust; one `request` object per command (`core.health`, `operations.list`, `operations.cancel`, `operations.startDemo`) |
+| Command names | `<domain>.<verb>` in TypeScript ↔ `<domain>_<snake_verb>` in Rust; one `request` object per command (`core.health`, `operations.list`, `operations.cancel`, `operations.startDemo`, `workspace.open`, `workspace.close`, `workspace.current`, `workspace.list`) |
 | Error envelope | `CoreError { code, message, details?, retryable, correlationId? }`, `code ∈ InvalidInput, NotFound, PermissionDenied, Conflict, Cancelled, Timeout, Io, Internal, ProtocolMismatch` |
 | Event envelope | one channel `gritty://core/event`, payload `{ name, seq, workspaceId?, correlationId?, actor, payload }`; `seq` strictly increasing per process |
 | Identifiers | UUID v7 strings (`WorkspaceId`, `OperationId`, `AgentRunId`, `CorrelationId`), branded in TypeScript |
@@ -41,7 +41,7 @@ module that imports `@tauri-apps/api`.
 Every command adapter runs its body behind a guard that creates a correlation id,
 opens a tracing span and converts a panic into `Internal`; a promise never hangs.
 Nothing is replayed after a renderer reload: the UI subscribes, then calls the
-domain's list command (`operations.list`) to rehydrate.
+domain's list command (`operations.list`, `workspace.current`) to rehydrate.
 
 ## Asynchronous operation model
 
@@ -64,6 +64,32 @@ Progress events are throttled to one per 50 ms per operation, and high-frequency
 sources (watchers, terminals, indexing, agent logs) must batch before reaching the
 bus. `operations.startDemo` is the reference implementation.
 
+## Workspace (fixed by T020, ADR-010)
+
+One open workspace at a time: `Workspace { id, root, name, openedAt }`. It is
+opened by `workspace.open` (the native directory picker runs on the Rust side
+when no path is given; `null` means the picker was dismissed), closed by
+`workspace.close`, replaced when another root is opened (`WorkspaceClosed` with
+reason `REPLACED`), and closed with reason `ROOT_MISSING` when its root
+disappears; the command that notices fails with `NotFound`. `workspace.current`
+rehydrates the UI after a reload. Events: `WorkspaceOpened { workspace }` and
+`WorkspaceClosed { workspaceId, root, reason }`.
+
+Paths on the wire are `WorkspacePath` strings: relative to the root,
+`/`-separated, no `.`/`..`, validated while the request is deserialized; the
+joined path is canonicalized and must stay inside the root
+(`docs/architecture/security.md`). `workspace.list { workspaceId, path, cursor?,
+pageSize? }` returns exactly one level: `DirEntry { name, kind: file | dir |
+symlink | other, size?, modifiedAt?, hidden, ignoredHint, symlink? }`, directories
+first then by name, at most 5000 entries per page (`total`, `truncated`, `cursor`).
+The listing runs on the blocking pool with a 100 ms budget; past it the command
+returns `{ status: "pending", operation }` (kind `workspace.list`, cancellable) and
+the page arrives in `OperationCompleted.result`; otherwise `{ status: "ready", page }`.
+`crates/workspace` implements the root, the path policy, the listing and the
+fixture generator without depending on `gritty-core`; `gritty_core::workspace`
+owns identity, events, the budget hand-over and the error mapping. Deterministic
+fixtures live in `fixtures/` (`small-repo` committed, `large-repo` generated).
+
 ## Document and buffer model (T030 owns Gate B)
 
 A repository file and an open editable document are different things.
@@ -85,7 +111,7 @@ silently resolved.
 changes, command execution, decisions, logs, ChangeSets and agent edits so the
 UI can explain who did what. This is attribution, not event sourcing.
 
-## Event vocabulary (Operation* fixed by T010; other families named by their tasks)
+## Event vocabulary (Operation* fixed by T010, Workspace{Opened,Closed} by T020; other families named by their tasks)
 
 Workspace{Opened,Closed,Changed}; Document{Opened,Changed,Saved,ExternalChangeDetected,Closed};
 FileSystemBatchChanged; Operation{Started,Progress,Completed,Failed,Cancelled};

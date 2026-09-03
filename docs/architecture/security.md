@@ -9,6 +9,8 @@ T300 (agent capabilities).
 - The WebView gets a minimal command surface. No arbitrary filesystem, shell,
   process or path APIs are exposed; Tauri capabilities stay at the core
   app/event/window/webview defaults (`apps/desktop/src-tauri/capabilities/default.json`).
+  The dialog plugin is registered for the Rust side only: the WebView is
+  granted none of its commands, and `workspace.open` shows the picker itself.
 - Every path crossing into the core is canonicalized and validated against the
   allowed workspace roots. Traversal (`..`), symlink escapes and paths outside a
   root are rejected unless a capability explicitly allows `workspace.outsideRoot`.
@@ -22,6 +24,47 @@ T300 (agent capabilities).
 - Content Security Policy is enabled in both dev and release
   (`app.security.csp` / `devCsp` in `tauri.conf.json`). Widen a directive only
   for a concrete need (Monaco workers, Markdown images) and record why.
+
+## Workspace path policy (T020, ADR-010)
+
+Implemented in `crates/workspace` (`WorkspaceRoot`, `WorkspacePath`) and
+exercised by its unit and integration tests.
+
+- **Root.** A workspace has one root: an absolute directory, canonicalized
+  (symlinks resolved) when it is opened. It must exist, be a directory and be
+  readable; otherwise `workspace.open` fails with `NotFound`,
+  `PermissionDenied` or `InvalidInput` and no state changes. On Windows the
+  canonical form has the `\\?\` prefix removed so it compares and displays
+  like the paths users type.
+- **Wire paths.** Every path argument is a `WorkspacePath`: relative to the
+  root, `/`-separated, no leading or trailing slash, no `.` or `..` segments,
+  no backslashes, no NUL; the empty string is the root. Absolute forms,
+  including Windows drive letters (`C:/x`, `C:x`) and UNC prefixes, are
+  rejected on every platform. Violations are `InvalidInput`, detected while
+  the request is deserialized, before anything touches the disk.
+- **Physical check.** The joined path is canonicalized and must still start
+  with the root, component-wise (`/ws2` is not inside `/ws`). A symlink that
+  resolves outside the root is `PermissionDenied`; a missing path is
+  `NotFound`; a file where a directory was expected is `InvalidInput`.
+- **Symlinks.** Entries are listed with `kind: "symlink"` and
+  `symlink: { broken, resolvesInsideRoot, targetKind }`. A listing follows a
+  symlink only when it resolves inside the root; nothing outside the root is
+  ever read through a link.
+- **Case sensitivity** follows the filesystem. On macOS (APFS is
+  case-insensitive by default) and Windows (NTFS), `README.md` and `readme.md`
+  address the same file and canonicalization returns the on-disk spelling; on
+  Linux they are different files. Gritty never folds case or normalizes
+  Unicode: names are passed through as the filesystem reports them, and a
+  non-UTF-8 name is decoded lossily (it can be shown but not addressed).
+- **Hidden** means the name starts with a dot, on every platform. Windows
+  hidden attributes are not consulted (follow-up).
+- **Nothing is filtered.** `.git`, `node_modules`, `target`, `dist` and
+  similar directories are listed with `ignoredHint: true` so the UI can
+  de-emphasize them; the user decides what to open.
+- **Listings are bounded.** One directory level per call, at most 5000
+  entries per page with a continuation cursor, and a 100 ms budget after which
+  the listing continues as a cancellable operation. There is no recursive
+  scan and no full-repository index in this task.
 
 ## Process boundaries
 

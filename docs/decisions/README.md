@@ -15,6 +15,7 @@ requires updating the relevant ADR.
 | [ADR-007](ADR-007-git-workstreams.md) | Branch/worktree per workstream for parallel work | Accepted |
 | [ADR-008](ADR-008-repository-tooling.md) | Repository tooling and type sharing | Accepted |
 | [ADR-009](ADR-009-core-protocol-conventions.md) | Core protocol conventions: ids, envelopes, events, versioning | Accepted |
+| [ADR-010](ADR-010-workspace-paths.md) | Workspace root, path representation and lazy listing | Accepted |
 
 Template:
 
