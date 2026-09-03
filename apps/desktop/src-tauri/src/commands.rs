@@ -9,6 +9,10 @@
 use std::future::Future;
 use std::path::PathBuf;
 
+use gritty_core::document::{
+    CloseDocumentRequest, Document, DocumentContent, DocumentStatusRequest, OpenDocumentRequest,
+    ReloadDocumentRequest, SaveDocumentRequest, UpdateDocumentRequest,
+};
 use gritty_core::health::ShellInfo;
 use gritty_core::operation::demo::{StartDemoRequest, start_demo};
 use gritty_core::operation::{CancelOperationRequest, Operation};
@@ -16,7 +20,7 @@ use gritty_core::protocol::actor::Actor;
 use gritty_core::protocol::ids::CorrelationId;
 use gritty_core::workspace::{
     CloseWorkspaceRequest, DEFAULT_LIST_BUDGET, ListDirectoryRequest, ListDirectoryResponse,
-    OpenWorkspaceRequest, Workspace,
+    OpenWorkspaceRequest, UnsavedPolicy, Workspace,
 };
 use gritty_core::{CoreError, HealthReport};
 use serde::de::DeserializeOwned;
@@ -105,7 +109,14 @@ pub async fn workspace_open<R: tauri::Runtime>(
                 }
             },
         };
-        workspaces.open(&path, Actor::User, correlation).map(Some)
+        workspaces
+            .open(
+                &path,
+                UnsavedPolicy::from_force(request.force),
+                Actor::User,
+                correlation,
+            )
+            .map(Some)
     })
     .await
 }
@@ -119,7 +130,12 @@ pub async fn workspace_close(
     let workspaces = core.workspaces.clone();
     guard("workspace.close", move |correlation| async move {
         let request: CloseWorkspaceRequest = parse_request(request)?;
-        workspaces.close(&request.workspace_id, Actor::User, correlation)
+        workspaces.close(
+            &request.workspace_id,
+            UnsavedPolicy::from_force(request.force),
+            Actor::User,
+            correlation,
+        )
     })
     .await
 }
@@ -147,6 +163,101 @@ pub async fn workspace_list(
             .list(request, Actor::User, correlation, DEFAULT_LIST_BUDGET)
             .await
     })
+    .await
+}
+
+/// `documents.open`
+#[tauri::command]
+pub async fn documents_open(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<DocumentContent, CoreError> {
+    let documents = core.documents.clone();
+    guard("documents.open", move |correlation| async move {
+        let request: OpenDocumentRequest = parse_request(request)?;
+        documents.open(request, Actor::User, correlation).await
+    })
+    .await
+}
+
+/// `documents.close`
+#[tauri::command]
+pub async fn documents_close(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Document, CoreError> {
+    let documents = core.documents.clone();
+    guard("documents.close", move |correlation| async move {
+        let request: CloseDocumentRequest = parse_request(request)?;
+        documents.close(request, Actor::User, correlation)
+    })
+    .await
+}
+
+/// `documents.update`
+#[tauri::command]
+pub async fn documents_update(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Document, CoreError> {
+    let documents = core.documents.clone();
+    guard("documents.update", move |correlation| async move {
+        let request: UpdateDocumentRequest = parse_request(request)?;
+        documents.update(request, Actor::User, correlation).await
+    })
+    .await
+}
+
+/// `documents.save`
+#[tauri::command]
+pub async fn documents_save(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Document, CoreError> {
+    let documents = core.documents.clone();
+    guard("documents.save", move |correlation| async move {
+        let request: SaveDocumentRequest = parse_request(request)?;
+        documents.save(request, Actor::User, correlation).await
+    })
+    .await
+}
+
+/// `documents.reload`
+#[tauri::command]
+pub async fn documents_reload(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<DocumentContent, CoreError> {
+    let documents = core.documents.clone();
+    guard("documents.reload", move |correlation| async move {
+        let request: ReloadDocumentRequest = parse_request(request)?;
+        documents.reload(request, Actor::User, correlation).await
+    })
+    .await
+}
+
+/// `documents.status`
+#[tauri::command]
+pub async fn documents_status(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Vec<Document>, CoreError> {
+    let documents = core.documents.clone();
+    guard("documents.status", move |correlation| async move {
+        let request: DocumentStatusRequest = parse_request(request)?;
+        documents.status(request, Actor::User, correlation).await
+    })
+    .await
+}
+
+/// `documents.list`
+#[tauri::command]
+pub async fn documents_list(core: State<'_, Core>) -> Result<Vec<Document>, CoreError> {
+    let documents = core.documents.clone();
+    guard(
+        "documents.list",
+        move |_| async move { Ok(documents.list()) },
+    )
     .await
 }
 

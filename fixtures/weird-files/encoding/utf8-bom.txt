@@ -1,0 +1,2 @@
+﻿bom text
+second line

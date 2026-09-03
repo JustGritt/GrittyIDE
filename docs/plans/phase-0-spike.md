@@ -12,7 +12,7 @@ running application. Exit: ADR-001 go/no-go.
 | A2 | Monaco embedded; TypeScript, Rust, Markdown and JSON fixtures open | T040 | |
 | A3 | Keyboard shortcuts, multi-cursor, selection, find, clipboard, drag/drop, font rendering verified on WKWebView | T040 | |
 | A4 | Repository with 10k+ files opens without eager content loading | T020 | |
-| A5 | Rust commands for directory listing, safe read, atomic write | T020/T030 | |
+| A5 | Rust commands for directory listing, safe read, atomic write | T020/T030 | 2026-09-03, macOS 26 arm64: `workspace.list` (T020) and `documents.open/save` (T030) through the real adapters in `cargo test -p gritty-desktop`; atomic write with injected failure/crash in `cargo test -p gritty-workspace`; UI pass pending reviewer |
 | A6 | Filesystem watching; rapid changes do not lock the UI | T070 (after ADR-001) or spike | |
 | A7 | Markdown preview with sanitized HTML and fenced-code highlighting | T050 | |
 | A8 | PTY: spawn a shell, resize, stream output, terminate cleanly | T090 | |

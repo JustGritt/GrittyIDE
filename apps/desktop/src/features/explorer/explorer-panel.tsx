@@ -1,4 +1,4 @@
-import type { DirEntry, WorkspaceClosedReason } from '@gritty/protocol';
+import type { DirEntry, WorkspaceClosedReason, WorkspaceId } from '@gritty/protocol';
 import { type FormEvent, useState } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
 import {
@@ -19,9 +19,14 @@ const CLOSED_REASONS: Record<WorkspaceClosedReason, string> = {
 /**
  * Lazy workspace tree: one `workspace.list` per expanded directory, hidden
  * entries behind a toggle, truncated directories continued on demand, and
- * listings that became operations shown with a cancel button.
+ * listings that became operations shown with a cancel button. Clicking a file
+ * hands it to `onOpenFile` (T030 documents).
  */
-export function ExplorerPanel() {
+export function ExplorerPanel({
+  onOpenFile,
+}: {
+  onOpenFile?: (workspaceId: WorkspaceId, path: string) => void;
+}) {
   const explorer = useExplorer();
   const { state } = explorer;
   const [pathInput, setPathInput] = useState('');
@@ -34,6 +39,9 @@ export function ExplorerPanel() {
 
   const rows = state.workspace ? selectRows(state) : [];
   const hiddenCount = countHidden(state);
+  const workspaceId = state.workspace?.id;
+  const openFile =
+    onOpenFile && workspaceId ? (path: string) => onOpenFile(workspaceId, path) : undefined;
 
   return (
     <section className="explorer" aria-labelledby="explorer-title">
@@ -75,7 +83,19 @@ export function ExplorerPanel() {
           </button>
         </p>
       )}
-      {explorer.error && <ErrorEnvelope error={explorer.error} onDismiss={explorer.clearError} />}
+      {explorer.error && (
+        <>
+          <ErrorEnvelope error={explorer.error} onDismiss={explorer.clearError} />
+          {explorer.error.code === 'Conflict' && (
+            <p className="explorer__notice" role="status">
+              Documents have unsaved changes. Save or close them first, or
+              <button type="button" onClick={() => void explorer.discardAndRetry()}>
+                discard them and continue
+              </button>
+            </p>
+          )}
+        </>
+      )}
 
       {state.workspace ? (
         <>
@@ -92,6 +112,7 @@ export function ExplorerPanel() {
                 onReload={explorer.reload}
                 onLoadMore={explorer.loadMore}
                 onCancel={explorer.cancelListing}
+                onOpenFile={openFile}
               />
             ))}
           </ul>
@@ -114,18 +135,21 @@ function TreeRow({
   onReload,
   onLoadMore,
   onCancel,
+  onOpenFile,
 }: {
   row: ExplorerRow;
   onToggle: (node: ExplorerNode) => void;
   onReload: (node: ExplorerNode) => void;
   onLoadMore: (node: ExplorerNode) => void;
   onCancel: (node: ExplorerNode) => Promise<void>;
+  onOpenFile?: (path: string) => void;
 }) {
   const indent = { paddingLeft: `${0.5 + row.depth * 1.1}rem` };
   switch (row.kind) {
     case 'entry': {
       const { node, entry } = row;
       const expandable = isExpandable(entry);
+      const openable = onOpenFile !== undefined && isOpenableFile(entry);
       return (
         <li className={`tree__row tree__row--${entry.kind}`} style={indent}>
           <button
@@ -141,9 +165,20 @@ function TreeRow({
           <span className="tree__glyph" aria-hidden="true">
             {glyph(entry)}
           </span>
-          <span className={`tree__name${entry.hidden ? ' tree__name--hidden' : ''}`}>
-            {entry.name}
-          </span>
+          {openable ? (
+            <button
+              type="button"
+              className={`tree__name tree__name--file${entry.hidden ? ' tree__name--hidden' : ''}`}
+              onClick={() => onOpenFile(node.path)}
+              title={`Open ${node.path}`}
+            >
+              {entry.name}
+            </button>
+          ) : (
+            <span className={`tree__name${entry.hidden ? ' tree__name--hidden' : ''}`}>
+              {entry.name}
+            </span>
+          )}
           {describe(entry).map((badge) => (
             <span key={badge} className="tree__badge">
               {badge}
@@ -190,6 +225,16 @@ function TreeRow({
       );
     }
   }
+}
+
+/** Regular files, and symlinks that resolve to a file inside the root. */
+function isOpenableFile(entry: DirEntry): boolean {
+  if (entry.kind === 'file') return true;
+  return (
+    entry.kind === 'symlink' &&
+    entry.symlink?.resolvesInsideRoot === true &&
+    entry.symlink.targetKind === 'file'
+  );
 }
 
 function glyph(entry: DirEntry): string {

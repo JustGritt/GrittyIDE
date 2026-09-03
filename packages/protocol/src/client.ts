@@ -3,18 +3,27 @@ import { type CoreError, toCoreError } from './errors';
 import { type Diagnostic, EventHub, type Unsubscribe } from './events';
 import type { Transport } from './transport';
 import {
+  type CloseDocumentRequest,
+  type CloseWorkspaceRequest,
   CORE_EVENT_CHANNEL,
+  type Document,
+  type DocumentContent,
+  type DocumentStatusRequest,
   type EventEnvelope,
   type EventName,
   type EventOf,
   type HealthReport,
   type ListDirectoryRequest,
   type ListDirectoryResponse,
+  type OpenDocumentRequest,
   type OpenWorkspaceRequest,
   type Operation,
   type OperationId,
   PROTOCOL_VERSION,
+  type ReloadDocumentRequest,
+  type SaveDocumentRequest,
   type StartDemoRequest,
+  type UpdateDocumentRequest,
   type Workspace,
   type WorkspaceId,
 } from './types';
@@ -43,9 +52,12 @@ export interface CoreClient {
     /**
      * Open the directory at `path` (absolute, native form). Without a path the
      * shell shows the native directory picker; `null` means it was dismissed.
+     * Replacing a workspace that has dirty documents rejects with `Conflict`
+     * unless `options.force` is set.
      */
-    open(path?: string): Promise<Workspace | null>;
-    close(workspaceId: WorkspaceId): Promise<Workspace>;
+    open(path?: string, options?: { force?: boolean }): Promise<Workspace | null>;
+    /** Rejects with `Conflict` while documents are dirty unless `options.force`. */
+    close(workspaceId: WorkspaceId, options?: { force?: boolean }): Promise<Workspace>;
     /** The open workspace, for rehydration after a renderer reload. */
     current(): Promise<Workspace | null>;
     /**
@@ -53,6 +65,30 @@ export interface CoreClient {
      * operation whose `OperationCompleted.result` will carry it.
      */
     list(request: ListDirectoryRequest): Promise<ListDirectoryResponse>;
+  };
+  /**
+   * Documents (T030, Gate B). The core owns every buffer: `open` returns the
+   * current text (the buffer, not the disk, when the path is already open),
+   * `update` replaces it and must quote the `currentVersion` it was derived
+   * from (`Conflict` otherwise), `save` writes atomically and refuses with
+   * `Conflict` when the file changed or vanished on disk unless `force` is
+   * set, `reload` replaces the buffer from disk, `status` re-checks the disk
+   * and emits `DocumentExternalChangeDetected` on transitions.
+   *
+   * Callers must serialize their own `update` calls per document (await one
+   * before sending the next), otherwise the second one is stale by construction.
+   */
+  documents: {
+    open(request: OpenDocumentRequest): Promise<DocumentContent>;
+    /** Rejects with `Conflict` for a dirty document unless `force` is set. */
+    close(request: CloseDocumentRequest): Promise<Document>;
+    update(request: UpdateDocumentRequest): Promise<Document>;
+    save(request: SaveDocumentRequest): Promise<Document>;
+    reload(request: ReloadDocumentRequest): Promise<DocumentContent>;
+    /** One document, or every open document when `documentId` is omitted. */
+    status(request?: DocumentStatusRequest): Promise<Document[]>;
+    /** Every open document (no text), for rehydration after a renderer reload. */
+    list(): Promise<Document[]>;
   };
   subscribe<N extends EventName>(name: N, handler: (event: EventOf<N>) => void): Unsubscribe;
   subscribeAll(handler: (event: EventEnvelope) => void): Unsubscribe;
@@ -115,13 +151,28 @@ export function createCoreClient(
       startDemo: (request) => command<Operation>('operations.startDemo', { request }),
     },
     workspace: {
-      open: (path) => {
-        const request: OpenWorkspaceRequest = path === undefined ? {} : { path };
+      open: (path, options) => {
+        const request: OpenWorkspaceRequest = {};
+        if (path !== undefined) request.path = path;
+        if (options?.force) request.force = true;
         return command<Workspace | null>('workspace.open', { request });
       },
-      close: (workspaceId) => command<Workspace>('workspace.close', { request: { workspaceId } }),
+      close: (workspaceId, options) => {
+        const request: CloseWorkspaceRequest = { workspaceId };
+        if (options?.force) request.force = true;
+        return command<Workspace>('workspace.close', { request });
+      },
       current: () => command<Workspace | null>('workspace.current'),
       list: (request) => command<ListDirectoryResponse>('workspace.list', { request }),
+    },
+    documents: {
+      open: (request) => command<DocumentContent>('documents.open', { request }),
+      close: (request) => command<Document>('documents.close', { request }),
+      update: (request) => command<Document>('documents.update', { request }),
+      save: (request) => command<Document>('documents.save', { request }),
+      reload: (request) => command<DocumentContent>('documents.reload', { request }),
+      status: (request = {}) => command<Document[]>('documents.status', { request }),
+      list: () => command<Document[]>('documents.list'),
     },
     subscribe: (name, handler) => hub.subscribe(name, handler),
     subscribeAll: (handler) => hub.subscribeAll(handler),

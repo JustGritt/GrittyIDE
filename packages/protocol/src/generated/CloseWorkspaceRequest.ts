@@ -4,4 +4,9 @@ import type { WorkspaceId } from "./WorkspaceId";
 /**
  * `workspace.close`.
  */
-export type CloseWorkspaceRequest = { workspaceId: WorkspaceId, };
+export type CloseWorkspaceRequest = { workspaceId: WorkspaceId, 
+/**
+ * Close even when documents have unsaved changes (T030). Without it the
+ * command fails with `Conflict` listing them.
+ */
+force?: boolean, };

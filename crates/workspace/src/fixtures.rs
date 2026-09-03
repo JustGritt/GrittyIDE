@@ -168,3 +168,182 @@ impl<'a> Generator<'a> {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// weird-files (T030, addendum §10.3)
+// ---------------------------------------------------------------------------
+
+/// Committed fixture directory name under `fixtures/`.
+pub const WEIRD_FILES_DIR: &str = "weird-files";
+/// Directory inside the fixture that holds generated (git-ignored) members.
+pub const WEIRD_GENERATED_DIR: &str = "generated";
+/// Generated text file above the large-file threshold.
+pub const WEIRD_LARGE_TEXT: &str = "generated/large-text.txt";
+pub const WEIRD_LARGE_TEXT_BYTES: u64 = 12 * 1024 * 1024;
+/// Generated file with no permissions (Unix only); reads must fail cleanly.
+pub const WEIRD_DENIED: &str = "generated/denied.txt";
+/// Symlinks of the fixture: `(link, target)`, targets relative to the link's
+/// directory. Recreated by [`stage_weird_files`] on every platform that allows
+/// it, so tests do not depend on how the checkout materialized them.
+pub const WEIRD_LINKS: &[(&str, &str, bool)] = &[
+    ("links/to-readme", "../readme.md", false),
+    ("links/to-unicode", "../unicode", true),
+    ("links/broken", "../missing-target", false),
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WeirdFilesSummary {
+    /// Regular files copied from the committed fixture.
+    pub copied_files: u64,
+    /// Symlinks created (fewer than `WEIRD_LINKS` when the platform refused).
+    pub symlinks: u64,
+    pub large_text_bytes: u64,
+    /// The permission-denied file exists with mode `000` (Unix only).
+    pub denied_created: bool,
+}
+
+/// Copy the committed `weird-files` fixture at `committed` into `dest`
+/// (removed first), recreate its symlinks from [`WEIRD_LINKS`] and add the
+/// generated members ([`augment_weird_files`]). Tests write into the staged
+/// copy, never into the committed fixture.
+pub fn stage_weird_files(committed: &Path, dest: &Path) -> io::Result<WeirdFilesSummary> {
+    if dest.exists() {
+        remove_dir_all_forced(dest)?;
+    }
+    fs::create_dir_all(dest)?;
+    let dest = fs::canonicalize(dest)?;
+    let mut copied_files = 0;
+    copy_tree(committed, &dest, Path::new(""), &mut copied_files)?;
+    let mut symlinks = 0;
+    for (link, target, is_dir) in WEIRD_LINKS {
+        let link = dest.join(link);
+        if let Some(parent) = link.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if create_symlink(Path::new(target), &link, *is_dir)? {
+            symlinks += 1;
+        }
+    }
+    let (large_text_bytes, denied_created) = augment_weird_files(&dest)?;
+    Ok(WeirdFilesSummary {
+        copied_files,
+        symlinks,
+        large_text_bytes,
+        denied_created,
+    })
+}
+
+/// Add the generated members to a `weird-files` tree: `generated/large-text.txt`
+/// (deterministic, above the large-file threshold) and `generated/denied.txt`
+/// (mode `000` on Unix). Returns `(large text size, denied created)`.
+pub fn augment_weird_files(dir: &Path) -> io::Result<(u64, bool)> {
+    use std::io::Write;
+
+    let generated = dir.join(WEIRD_GENERATED_DIR);
+    fs::create_dir_all(&generated)?;
+    let large = dir.join(WEIRD_LARGE_TEXT);
+    let mut out = io::BufWriter::new(fs::File::create(&large)?);
+    let mut written = 0u64;
+    let mut line = 0u64;
+    while written < WEIRD_LARGE_TEXT_BYTES {
+        let text = format!(
+            "line {line:08}: the quick brown fox jumps over the lazy dog {}\n",
+            "0123456789".repeat(3)
+        );
+        out.write_all(text.as_bytes())?;
+        written += text.len() as u64;
+        line += 1;
+    }
+    out.flush()?;
+    drop(out);
+
+    let denied = dir.join(WEIRD_DENIED);
+    // Make it writable first in case a previous generation left it at 000.
+    let _ = set_mode(&denied, 0o600);
+    fs::write(&denied, "you should not be able to read this\n")?;
+    let denied_created = set_mode(&denied, 0o000).is_ok();
+    Ok((written, denied_created))
+}
+
+fn copy_tree(
+    src_root: &Path,
+    dest_root: &Path,
+    relative: &Path,
+    files: &mut u64,
+) -> io::Result<()> {
+    let src = src_root.join(relative);
+    for entry in fs::read_dir(&src)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let child = relative.join(&name);
+        // Symlinks and generated members are recreated, never copied.
+        if child.starts_with("links") || child.starts_with(WEIRD_GENERATED_DIR) {
+            continue;
+        }
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        let target = dest_root.join(&child);
+        if file_type.is_dir() {
+            fs::create_dir_all(&target)?;
+            copy_tree(src_root, dest_root, &child, files)?;
+        } else if file_type.is_file() {
+            fs::copy(entry.path(), &target)?;
+            *files += 1;
+        }
+    }
+    Ok(())
+}
+
+/// `Ok(false)` when the platform refuses symlinks (Windows without Developer
+/// Mode or elevation); every other failure is an error.
+fn create_symlink(target: &Path, link: &Path, target_is_dir: bool) -> io::Result<bool> {
+    #[cfg(unix)]
+    let result = {
+        let _ = target_is_dir;
+        std::os::unix::fs::symlink(target, link)
+    };
+    #[cfg(windows)]
+    let result = if target_is_dir {
+        std::os::windows::fs::symlink_dir(target, link)
+    } else {
+        std::os::windows::fs::symlink_file(target, link)
+    };
+    match result {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::PermissionDenied => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(unix)]
+fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))
+}
+
+#[cfg(not(unix))]
+fn set_mode(_path: &Path, _mode: u32) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "permission bits are Unix-only",
+    ))
+}
+
+/// `remove_dir_all` that also handles the mode-000 file the generator leaves
+/// behind (removing it needs only write permission on its directory, which
+/// holds on Unix; on other platforms the read-only flag is cleared first).
+fn remove_dir_all_forced(dir: &Path) -> io::Result<()> {
+    let denied = dir.join(WEIRD_DENIED);
+    if denied.exists() {
+        let _ = set_mode(&denied, 0o600);
+        if let Ok(metadata) = fs::metadata(&denied) {
+            let mut permissions = metadata.permissions();
+            #[allow(clippy::permissions_set_readonly_false)]
+            permissions.set_readonly(false);
+            let _ = fs::set_permissions(&denied, permissions);
+        }
+    }
+    fs::remove_dir_all(dir)
+}

@@ -20,6 +20,12 @@ pub enum WorkspaceError {
     /// A directory was required.
     #[error("{0}")]
     NotADirectory(String),
+    /// A regular file was required (T030).
+    #[error("{0}")]
+    NotAFile(String),
+    /// The file exceeds the document size bound (T030).
+    #[error("{path} is {size} bytes, above the {limit}-byte limit")]
+    TooLarge { path: String, size: u64, limit: u64 },
     /// Any other filesystem failure.
     #[error("{context}: {source}")]
     Io {

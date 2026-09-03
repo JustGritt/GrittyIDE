@@ -58,11 +58,18 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::workspace_close,
             commands::workspace_current,
             commands::workspace_list,
+            commands::documents_open,
+            commands::documents_close,
+            commands::documents_update,
+            commands::documents_save,
+            commands::documents_reload,
+            commands::documents_status,
+            commands::documents_list,
         ])
 }
 
-/// Build the core (event bus, operation registry, workspace manager) and
-/// manage it as app state.
+/// Build the core (event bus, operation registry, workspace and document
+/// managers) and manage it as app state.
 pub fn attach_core<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     app.manage(core::Core::new(app.clone()));
 }

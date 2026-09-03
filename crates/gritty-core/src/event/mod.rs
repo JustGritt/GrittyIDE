@@ -19,10 +19,15 @@ use std::sync::{Arc, Mutex, PoisonError};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use gritty_workspace::WorkspacePath;
+
+use crate::document::{
+    Document, DocumentChangeCause, DocumentClosedReason, ExternalModificationState,
+};
 use crate::operation::{Operation, OperationProgress};
 use crate::protocol::actor::Actor;
 use crate::protocol::error::CoreError;
-use crate::protocol::ids::{CorrelationId, OperationId, WorkspaceId};
+use crate::protocol::ids::{CorrelationId, DocumentId, OperationId, WorkspaceId};
 use crate::workspace::{Workspace, WorkspaceClosedReason};
 
 /// Envelope fields that are not the event itself.
@@ -42,7 +47,7 @@ pub struct EventMeta {
 }
 
 /// The domain event vocabulary, adjacently tagged as `{ name, payload }`.
-/// Further families (`Document*`, ...) are added by the tasks that own them.
+/// Further families are added by the tasks that own them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "name", content = "payload")]
 pub enum CoreEvent {
@@ -53,6 +58,16 @@ pub enum CoreEvent {
     OperationCancelled(OperationCancelledPayload),
     WorkspaceOpened(WorkspaceOpenedPayload),
     WorkspaceClosed(WorkspaceClosedPayload),
+    DocumentOpened(DocumentOpenedPayload),
+    /// The buffer or its mode changed (an edit, a reload, read-only lifted).
+    /// Carries the document snapshot, never the text: the text travels in the
+    /// command response of the caller that changed it.
+    DocumentChanged(DocumentChangedPayload),
+    DocumentSaved(DocumentSavedPayload),
+    /// The on-disk state moved between `UNCHANGED`, `MODIFIED_EXTERNALLY`,
+    /// `CONFLICTED` and `DELETED_EXTERNALLY` (emitted on transitions only).
+    DocumentExternalChangeDetected(DocumentExternalChangePayload),
+    DocumentClosed(DocumentClosedPayload),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -105,6 +120,44 @@ pub struct WorkspaceClosedPayload {
     pub reason: WorkspaceClosedReason,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentOpenedPayload {
+    pub document: Document,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentChangedPayload {
+    pub document: Document,
+    pub cause: DocumentChangeCause,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentSavedPayload {
+    pub document: Document,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentExternalChangePayload {
+    pub document: Document,
+    pub previous_state: ExternalModificationState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentClosedPayload {
+    pub document_id: DocumentId,
+    pub workspace_id: WorkspaceId,
+    pub path: WorkspacePath,
+    pub reason: DocumentClosedReason,
+    /// Unsaved changes were dropped with the buffer. `true` only after an
+    /// explicit discard or a workspace that went away.
+    pub dirty: bool,
+}
+
 impl CoreEvent {
     /// The `name` discriminator as it appears on the wire.
     pub const fn name(&self) -> &'static str {
@@ -116,6 +169,11 @@ impl CoreEvent {
             Self::OperationCancelled(_) => "OperationCancelled",
             Self::WorkspaceOpened(_) => "WorkspaceOpened",
             Self::WorkspaceClosed(_) => "WorkspaceClosed",
+            Self::DocumentOpened(_) => "DocumentOpened",
+            Self::DocumentChanged(_) => "DocumentChanged",
+            Self::DocumentSaved(_) => "DocumentSaved",
+            Self::DocumentExternalChangeDetected(_) => "DocumentExternalChangeDetected",
+            Self::DocumentClosed(_) => "DocumentClosed",
         }
     }
 
@@ -127,7 +185,25 @@ impl CoreEvent {
             Self::OperationCompleted(p) => Some(&p.operation.id),
             Self::OperationFailed(p) => Some(&p.operation.id),
             Self::OperationCancelled(p) => Some(&p.operation.id),
-            Self::WorkspaceOpened(_) | Self::WorkspaceClosed(_) => None,
+            Self::WorkspaceOpened(_)
+            | Self::WorkspaceClosed(_)
+            | Self::DocumentOpened(_)
+            | Self::DocumentChanged(_)
+            | Self::DocumentSaved(_)
+            | Self::DocumentExternalChangeDetected(_)
+            | Self::DocumentClosed(_) => None,
+        }
+    }
+
+    /// The document a `Document*` event is about.
+    pub fn document_id(&self) -> Option<&DocumentId> {
+        match self {
+            Self::DocumentOpened(p) => Some(&p.document.id),
+            Self::DocumentChanged(p) => Some(&p.document.id),
+            Self::DocumentSaved(p) => Some(&p.document.id),
+            Self::DocumentExternalChangeDetected(p) => Some(&p.document.id),
+            Self::DocumentClosed(p) => Some(&p.document_id),
+            _ => None,
         }
     }
 }

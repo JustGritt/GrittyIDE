@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import { ErrorEnvelope } from './components/error-envelope';
 import { core } from './core/client';
 import { describeHealth } from './core/health';
+import { DocumentPanel } from './features/documents/document-panel';
+import { useDocuments } from './features/documents/use-documents';
 import { ExplorerPanel } from './features/explorer/explorer-panel';
 import { OperationsPanel } from './features/operations/operations-panel';
 
@@ -13,6 +15,7 @@ type HealthState =
 
 export function App() {
   const [state, setState] = useState<HealthState>({ status: 'loading' });
+  const documents = useDocuments();
 
   useEffect(() => {
     let cancelled = false;
@@ -48,7 +51,10 @@ export function App() {
         </section>
       </header>
       <div className="shell__body">
-        <ExplorerPanel />
+        <ExplorerPanel
+          onOpenFile={(workspaceId, path) => void documents.openFile(workspaceId, path)}
+        />
+        <DocumentPanel documents={documents} />
         {import.meta.env.DEV && <OperationsPanel />}
       </div>
     </main>

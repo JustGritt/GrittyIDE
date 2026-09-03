@@ -470,3 +470,234 @@ fn root_removed_while_open_fails_with_not_found_and_closes_the_workspace() {
         "closed exactly once"
     );
 }
+
+// ---------------------------------------------------------------------------
+// T030 documents
+// ---------------------------------------------------------------------------
+
+impl Harness {
+    fn doc(&self, cmd: &str, request: Value) -> Result<Value, Value> {
+        self.invoke(cmd, json!({ "request": request }))
+    }
+
+    fn open_document(&self, workspace_id: &Value, path: &str) -> Value {
+        self.doc(
+            "documents_open",
+            json!({ "workspaceId": workspace_id, "path": path }),
+        )
+        .expect("open document")
+    }
+}
+
+#[test]
+fn documents_open_update_save_round_trip_through_the_adapters() {
+    let h = Harness::new();
+    let root = TempWorkspace::new("documents");
+    let workspace = h.open_workspace(&root.0);
+
+    let content = h.open_document(&workspace["id"], "src/main.rs");
+    let doc = &content["document"];
+    assert!(doc["id"].is_string());
+    assert_eq!(doc["workspaceId"], workspace["id"]);
+    assert_eq!(doc["path"], "src/main.rs");
+    assert_eq!(doc["languageId"], "rust");
+    assert_eq!(doc["encoding"], "utf-8");
+    assert_eq!(doc["currentVersion"], 1);
+    assert_eq!(doc["savedRevision"], 1);
+    assert_eq!(doc["dirty"], false);
+    assert_eq!(doc["externalModificationState"], "UNCHANGED");
+    assert_eq!(content["text"], "fn main() {}");
+    assert_eq!(h.last_event("DocumentOpened")["payload"]["document"], *doc);
+    let id = doc["id"].clone();
+
+    let updated = h
+        .doc(
+            "documents_update",
+            json!({ "documentId": id, "baseVersion": 1, "text": "fn main() { println!(\"hi\"); }\n" }),
+        )
+        .expect("update");
+    assert_eq!(updated["currentVersion"], 2);
+    assert_eq!(updated["dirty"], true);
+    assert_eq!(h.last_event("DocumentChanged")["payload"]["cause"], "EDIT");
+    assert_eq!(
+        fs::read_to_string(root.0.join("src/main.rs")).unwrap(),
+        "fn main() {}",
+        "updates never touch the disk"
+    );
+
+    let stale = h
+        .doc(
+            "documents_update",
+            json!({ "documentId": id, "baseVersion": 1, "text": "x" }),
+        )
+        .unwrap_err();
+    assert_eq!(stale["code"], "Conflict");
+    assert_eq!(stale["details"]["currentVersion"], 2);
+
+    let saved = h
+        .doc("documents_save", json!({ "documentId": id }))
+        .expect("save");
+    assert_eq!(saved["dirty"], false);
+    assert_eq!(saved["savedRevision"], 2);
+    assert_eq!(
+        fs::read_to_string(root.0.join("src/main.rs")).unwrap(),
+        "fn main() { println!(\"hi\"); }\n"
+    );
+    assert_eq!(h.last_event("DocumentSaved")["payload"]["document"], saved);
+    let leftovers: Vec<String> = fs::read_dir(root.0.join("src"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.contains(".gritty-"))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+
+    let listed = h.invoke("documents_list", json!({})).expect("list");
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    assert_eq!(listed[0]["id"], id);
+
+    let closed = h
+        .doc("documents_close", json!({ "documentId": id }))
+        .expect("close");
+    assert_eq!(closed["id"], id);
+    assert_eq!(h.last_event("DocumentClosed")["payload"]["reason"], "USER");
+    assert_eq!(
+        h.invoke("documents_list", json!({})).expect("list"),
+        json!([])
+    );
+    let error = h
+        .doc("documents_save", json!({ "documentId": id }))
+        .unwrap_err();
+    assert_eq!(error["code"], "NotFound");
+}
+
+#[test]
+fn external_edit_while_dirty_is_a_conflict_until_forced_or_reloaded() {
+    let h = Harness::new();
+    let root = TempWorkspace::new("conflict");
+    let workspace = h.open_workspace(&root.0);
+    let id = h.open_document(&workspace["id"], "README.md")["document"]["id"].clone();
+    h.doc(
+        "documents_update",
+        json!({ "documentId": id, "baseVersion": 1, "text": "# mine" }),
+    )
+    .expect("update");
+
+    // `sed -i`-style external edit while the buffer is dirty.
+    fs::write(root.0.join("README.md"), "# theirs").unwrap();
+    let statuses = h
+        .doc("documents_status", json!({ "documentId": id }))
+        .expect("status");
+    assert_eq!(statuses[0]["externalModificationState"], "CONFLICTED");
+    let detected = h.last_event("DocumentExternalChangeDetected");
+    assert_eq!(detected["payload"]["previousState"], "UNCHANGED");
+    assert_eq!(detected["actor"], json!({ "type": "EXTERNAL" }));
+
+    let refused = h
+        .doc("documents_save", json!({ "documentId": id }))
+        .unwrap_err();
+    assert_eq!(refused["code"], "Conflict");
+    assert_eq!(
+        refused["details"]["externalModificationState"],
+        "CONFLICTED"
+    );
+    assert_eq!(
+        fs::read_to_string(root.0.join("README.md")).unwrap(),
+        "# theirs"
+    );
+
+    // Closing the workspace would drop the edit: refused without force.
+    let refused = h
+        .invoke(
+            "workspace_close",
+            json!({ "request": { "workspaceId": workspace["id"] } }),
+        )
+        .unwrap_err();
+    assert_eq!(refused["code"], "Conflict");
+    assert_eq!(refused["details"]["dirtyDocuments"][0]["path"], "README.md");
+
+    let forced = h
+        .doc("documents_save", json!({ "documentId": id, "force": true }))
+        .expect("forced save");
+    assert_eq!(forced["externalModificationState"], "UNCHANGED");
+    assert_eq!(
+        fs::read_to_string(root.0.join("README.md")).unwrap(),
+        "# mine"
+    );
+
+    fs::write(root.0.join("README.md"), "# again").unwrap();
+    let all = h.doc("documents_status", json!({})).expect("status all");
+    assert_eq!(all[0]["externalModificationState"], "MODIFIED_EXTERNALLY");
+    let reloaded = h
+        .doc("documents_reload", json!({ "documentId": id }))
+        .expect("reload");
+    assert_eq!(reloaded["text"], "# again");
+    assert_eq!(
+        reloaded["document"]["externalModificationState"],
+        "UNCHANGED"
+    );
+    assert_eq!(
+        h.last_event("DocumentChanged")["payload"]["cause"],
+        "RELOAD"
+    );
+
+    let closed = h
+        .invoke(
+            "workspace_close",
+            json!({ "request": { "workspaceId": workspace["id"] } }),
+        )
+        .expect("close workspace");
+    assert_eq!(closed["id"], workspace["id"]);
+    let event = h.last_event("DocumentClosed");
+    assert_eq!(event["payload"]["reason"], "WORKSPACE_CLOSED");
+    assert_eq!(event["payload"]["dirty"], false);
+}
+
+#[test]
+fn document_requests_are_validated_before_touching_the_disk() {
+    let h = Harness::new();
+    let root = TempWorkspace::new("doc-policy");
+    let workspace = h.open_workspace(&root.0);
+    for path in ["../secret", "/etc/passwd", "src\\main.rs", ""] {
+        let error = h
+            .doc(
+                "documents_open",
+                json!({ "workspaceId": workspace["id"], "path": path }),
+            )
+            .unwrap_err();
+        assert_eq!(error["code"], "InvalidInput", "{path}: {error}");
+    }
+    let error = h
+        .doc(
+            "documents_open",
+            json!({ "workspaceId": workspace["id"], "path": "src" }),
+        )
+        .unwrap_err();
+    assert_eq!(error["code"], "InvalidInput");
+    let error = h
+        .doc(
+            "documents_open",
+            json!({ "workspaceId": workspace["id"], "path": "missing.txt" }),
+        )
+        .unwrap_err();
+    assert_eq!(error["code"], "NotFound");
+    let error = h
+        .doc(
+            "documents_open",
+            json!({ "workspaceId": "nope", "path": "README.md" }),
+        )
+        .unwrap_err();
+    assert_eq!(error["code"], "NotFound");
+    let error = h
+        .doc(
+            "documents_update",
+            json!({ "documentId": "x", "baseVersion": "one", "text": "" }),
+        )
+        .unwrap_err();
+    assert_eq!(error["code"], "InvalidInput");
+    assert_eq!(error["details"]["field"], "request");
+    assert_eq!(
+        h.invoke("documents_list", json!({})).expect("list"),
+        json!([])
+    );
+    assert_eq!(h.event_names(), vec!["WorkspaceOpened"]);
+}

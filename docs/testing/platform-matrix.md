@@ -26,8 +26,12 @@ Legend: ✔ works · ✘ defect (link an issue/note) · ~ partial · – unteste
 | Files | 10k+ file repository opens without a recursive scan | – | – | (a) | T020: generated `large-repo`, root listed in < 100 ms, one `read_dir` per call |
 | Files | directory with > 5000 entries pages with a cursor | – | – | (a) | T020 |
 | Files | root removed while open → `NotFound` + `WorkspaceClosed` | – | – | (a) | T020: core and adapter tests |
-| Files | permission errors surfaced, not crashed | – | – | – | T030 |
-| Files | external modification detection | – | – | – | T030/T070 |
+| Files | permission errors surfaced, not crashed | (a) | – | – | T030: `crates/workspace/tests/documents.rs` (mode-000 file → `PermissionDenied`, no document created) on macOS 26 (2026-09-03) |
+| Files | external modification detection | (a) | – | – | T030: core and adapter tests (`sed`-style edit while dirty → `CONFLICTED`, save refused, force/reload paths) on macOS 26; UI banner check pending |
+| Files | open / edit / save round trip in the running app | – | – | – | T030: textarea surface; `pnpm dev` launch checked on macOS, manual edit pending |
+| Files | atomic save leaves no temp file; injected crash keeps destination | (a) | – | – | T030: `crates/workspace/tests/documents.rs` |
+| Files | binary / invalid UTF-8 / BOM / CRLF / large (12 MiB) open correctly | (a) | – | – | T030: staged `weird-files` fixture; large file read-only until enabled |
+| Files | workspace close refused while documents are dirty | (a) | – | – | T030: core and adapter tests |
 | Terminal | interactive shell (vim, less, top) | – | – | – | T090 |
 | Terminal | resize, process-tree kill, unexpected child death | – | – | – | T090 |
 | Recovery | force-kill restart restores tabs/cursor/dirty buffers | – | – | – | T060 |
