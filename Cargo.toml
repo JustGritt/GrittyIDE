@@ -20,6 +20,13 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+# T010 core protocol: async primitives on Tauri's tokio runtime, cooperative
+# cancellation, ids, error derive and Rust -> TypeScript type export.
+tokio = { version = "1.53.1", features = ["rt", "sync", "time", "macros"] }
+tokio-util = "0.7.19"
+uuid = { version = "1.26.0", features = ["v7"] }
+thiserror = "2.0.20"
+ts-rs = { version = "12.0.1", features = ["serde-json-impl"] }
 
 [workspace.lints.rust]
 # Unsafe code needs a justified, reviewed `#![allow(unsafe_code)]` in the crate.

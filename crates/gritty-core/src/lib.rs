@@ -4,55 +4,24 @@
 //! (`apps/desktop/src-tauri`) is a thin composition root that wires this crate
 //! into Tauri commands and events. See `AGENTS.md` and
 //! `docs/architecture/overview.md`.
+//!
+//! Module map (T010, Gate A):
+//! - [`protocol`]: wire conventions shared by every command and event
+//!   (identifiers, timestamps, the error envelope, actors, versioning).
+//! - [`event`]: the event envelope, the domain event vocabulary and the bus
+//!   that assigns sequence numbers.
+//! - [`operation`]: the asynchronous operation model (state machine, registry
+//!   with cooperative cancellation, progress reporting, demo operation).
+//! - [`health`]: the `core.health` report.
 
-use serde::{Deserialize, Serialize};
+pub mod event;
+pub mod health;
+pub mod operation;
+pub mod protocol;
+
+pub use health::{HealthReport, ShellInfo, health};
+pub use protocol::error::{CoreError, CoreErrorCode};
+pub use protocol::{CORE_EVENT_CHANNEL, PROTOCOL_VERSION};
 
 /// Version of the core crate, taken from `Cargo.toml` at compile time.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-/// Basic runtime facts about the core, used by the T000 health round-trip and
-/// as Phase 0 evidence. Extended or replaced by the T010 protocol.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HealthReport {
-    /// `CARGO_PKG_VERSION` of `gritty-core`.
-    pub core_version: String,
-    /// `std::env::consts::OS` of the running binary.
-    pub os: String,
-    /// `std::env::consts::ARCH` of the running binary.
-    pub arch: String,
-    /// `true` when compiled with debug assertions (development builds).
-    pub debug: bool,
-}
-
-/// Report the core's identity and build facts.
-pub fn health() -> HealthReport {
-    HealthReport {
-        core_version: VERSION.to_owned(),
-        os: std::env::consts::OS.to_owned(),
-        arch: std::env::consts::ARCH.to_owned(),
-        debug: cfg!(debug_assertions),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn health_reports_crate_version_and_platform() {
-        let report = health();
-        assert_eq!(report.core_version, env!("CARGO_PKG_VERSION"));
-        assert!(!report.os.is_empty());
-        assert!(!report.arch.is_empty());
-    }
-
-    #[test]
-    fn health_report_serde_round_trip_uses_camel_case() {
-        let report = health();
-        let json = serde_json::to_string(&report).expect("serialize");
-        assert!(json.contains("\"coreVersion\""));
-        let back: HealthReport = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(back, report);
-    }
-}
