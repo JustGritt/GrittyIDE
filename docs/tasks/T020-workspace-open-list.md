@@ -1,7 +1,7 @@
 # Task T020 — Workspace open/list + fixtures
 
 - **Phase:** 0 / 1A
-- **Status:** review
+- **Status:** done
 - **Depends on:** T010
 
 ## Objective

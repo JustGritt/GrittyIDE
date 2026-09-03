@@ -8,8 +8,8 @@ domain abstraction before its upstream contract exists.
 |---|---|---|---|---|
 | [T000](T000-bootstrap-workspace.md) | Bootstrap workspace | 0 | – | done |
 | [T010](T010-core-protocol.md) | Core protocol + operation/event/error conventions (Gate A) | 0 | T000 | done |
-| [T020](T020-workspace-open-list.md) | Workspace open/list + fixtures | 0/1A | T010 | review |
-| [T030](T030-file-io-documents.md) | File I/O + document/buffer contract (Gate B) | 0/1A | T020 | todo |
+| [T020](T020-workspace-open-list.md) | Workspace open/list + fixtures | 0/1A | T010 | done |
+| [T030](T030-file-io-documents.md) | File I/O + document/buffer contract (Gate B) | 0/1A | T020 | in-progress |
 | [T040](T040-monaco-shell.md) | Monaco shell | 0/1A | T030 | todo |
 | [T050](T050-markdown.md) | Markdown | 0/1B | T030, T040 | todo |
 | [T060](T060-session-persistence.md) | Session persistence + recovery | 0/1B | T030, T040 | todo |
