@@ -1,7 +1,7 @@
 # Task T030 — File I/O + document/buffer contract (Gate B)
 
 - **Phase:** 0 / 1A
-- **Status:** review
+- **Status:** done
 - **Depends on:** T020
 
 ## Objective
@@ -207,6 +207,11 @@ tests ran on macOS (all green).
   stopped. The explorer → textarea → save → external edit → banner flow was
   not driven by hand (the agent has no WebView access on this machine) and is
   pending in `docs/testing/platform-matrix.md`.
+- CI on PR #4 (`Linux (check + build)`, ubuntu runner, 2026-09-03): the same
+  `pnpm check` plus the no-bundle build passed in 5 min, so the new Rust and
+  TypeScript tests (including the staged `weird-files` fixture with its
+  symlinks and mode-000 file) are green on Linux as well. The macOS CI job was
+  skipped (no `ci:macos` label); macOS results above are from this machine.
 - Manual "force-quit during typing does not corrupt the file": not executed.
   By construction `documents.update` never touches the disk and the write path
   is covered by the injected failure/crash tests; the reviewer's manual pass

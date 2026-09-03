@@ -9,8 +9,8 @@ running application. Exit: ADR-001 go/no-go.
 | # | Item | Task | Result |
 |---|---|---|---|
 | A1 | Minimal Tauri 2 + React + TypeScript application launches | T000 | |
-| A2 | Monaco embedded; TypeScript, Rust, Markdown and JSON fixtures open | T040 | |
-| A3 | Keyboard shortcuts, multi-cursor, selection, find, clipboard, drag/drop, font rendering verified on WKWebView | T040 | |
+| A2 | Monaco embedded; TypeScript, Rust, Markdown and JSON fixtures open | T040 | 2026-09-03, macOS 26 arm64: Monaco 0.56.0 embedded (`packages/editor`, ADR-012); the bundle loads in WKWebView 21624.4.5 and the health round trip completes (`pnpm dev`); opening the `small-repo` fixtures in the running app pending reviewer (the agent cannot see the WebView) |
+| A3 | Keyboard shortcuts, multi-cursor, selection, find, clipboard, drag/drop, font rendering verified on WKWebView | T040 | pending reviewer; rows and steps in `docs/testing/platform-matrix.md` (T040 completion report lists the exact checks) |
 | A4 | Repository with 10k+ files opens without eager content loading | T020 | |
 | A5 | Rust commands for directory listing, safe read, atomic write | T020/T030 | 2026-09-03, macOS 26 arm64: `workspace.list` (T020) and `documents.open/save` (T030) through the real adapters in `cargo test -p gritty-desktop`; atomic write with injected failure/crash in `cargo test -p gritty-workspace`; UI pass pending reviewer |
 | A6 | Filesystem watching; rapid changes do not lock the UI | T070 (after ADR-001) or spike | |
@@ -41,7 +41,7 @@ repository. Record the command/method used.
 | Cold launch to usable shell | ≤ 2 s | | |
 | Warm launch | ≤ 1 s | | |
 | Idle CPU (no watchers/tasks) | ~0 % | | Activity Monitor / `top` |
-| Typing responsiveness | no perceptible frame drops | | |
+| Typing responsiveness | no perceptible frame drops | pending | T040: type for 30 s in `weird-files/generated/large-text.txt` after "Enable editing" with the Safari Web Inspector timeline recording; report frames over 16 ms; repeat in `small-repo/src/*.ts` |
 | Open a normal source file | ≤ 100 ms perceived | | |
 | Workspace restore | UI immediately, expensive work incremental | | |
 | Repository enumeration | never blocks the editor; progressive | | |

@@ -12,7 +12,9 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@gritty/editor": "workspace:*",
     "@gritty/protocol": "workspace:*",
+    "monaco-editor": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:"
   },

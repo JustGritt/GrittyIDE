@@ -1,0 +1,25 @@
+{
+  "name": "@gritty/editor",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Monaco wrapper bound to the Gritty document contract: workers, models, minimal edits, line-ending policy. No React, no Tauri.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./monaco": "./src/monaco/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@gritty/protocol": "workspace:*",
+    "monaco-editor": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "jsdom": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

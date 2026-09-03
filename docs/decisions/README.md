@@ -17,6 +17,7 @@ requires updating the relevant ADR.
 | [ADR-009](ADR-009-core-protocol-conventions.md) | Core protocol conventions: ids, envelopes, events, versioning | Accepted |
 | [ADR-010](ADR-010-workspace-paths.md) | Workspace root, path representation and lazy listing | Accepted |
 | [ADR-011](ADR-011-document-buffer-contract.md) | Document/buffer contract: identity, versions, dirty state, atomic saves, external changes | Accepted |
+| [ADR-012](ADR-012-monaco-editor-binding.md) | Monaco editor binding: one model per document, lazy reads, line-ending policy, workers | Accepted |
 
 Template:
 
