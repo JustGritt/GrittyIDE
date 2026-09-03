@@ -14,6 +14,7 @@ publish = false
 # member actually uses it, with a one-line justification in the task report.
 [workspace.dependencies]
 gritty-core = { path = "crates/gritty-core" }
+gritty-workspace = { path = "crates/workspace" }
 tauri = { version = "2.11.5", features = [] }
 tauri-build = { version = "2.6.3", features = [] }
 serde = { version = "1.0.229", features = ["derive"] }
@@ -27,6 +28,8 @@ tokio-util = "0.7.19"
 uuid = { version = "1.26.0", features = ["v7"] }
 thiserror = "2.0.20"
 ts-rs = { version = "12.0.1", features = ["serde-json-impl"] }
+# T020 workspace: native directory picker, invoked from the Rust side only.
+tauri-plugin-dialog = "2.7.3"
 
 [workspace.lints.rust]
 # Unsafe code needs a justified, reviewed `#![allow(unsafe_code)]` in the crate.
