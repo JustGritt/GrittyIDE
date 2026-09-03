@@ -11,16 +11,28 @@
 //! - [`WorkspacePath`]: the wire representation of a path inside the root
 //!   (`/`-separated, relative, no `.`/`..`; `""` is the root).
 //! - [`list_directory`]: one directory level, sorted, paginated, cancellable.
-//! - [`fixtures`]: the deterministic `large-repo` generator used by tests and
-//!   by `examples/generate_large_repo.rs`.
+//! - [`file`] and [`detect`] (T030): bounded whole-file reads, content
+//!   detection (binary / UTF-8 / BOM / large), hashing, atomic replacement.
+//! - [`fixtures`]: the deterministic `large-repo` generator and the
+//!   `weird-files` stager used by tests and by the examples.
 
+pub mod detect;
 pub mod error;
+pub mod file;
 pub mod fixtures;
 pub mod listing;
 pub mod path;
 pub mod root;
 
+pub use detect::{
+    ContentKind, DocumentEncoding, LARGE_FILE_THRESHOLD, MAX_DOCUMENT_BYTES, decode_text,
+    detect_content, encode_text, is_large_file, language_id,
+};
 pub use error::WorkspaceError;
+pub use file::{
+    AtomicWriteFault, ContentHash, DiskProbe, FileSnapshot, FileStat, is_temp_file_name,
+    probe_file, read_file, write_file_atomic,
+};
 pub use listing::{
     DEFAULT_PAGE_SIZE, DirEntry, DirEntryKind, DirectoryPage, IGNORED_DIRECTORY_NAMES, ListOptions,
     ListStats, Listing, MAX_PAGE_SIZE, SymlinkInfo, list_directory,

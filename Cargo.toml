@@ -30,6 +30,9 @@ thiserror = "2.0.20"
 ts-rs = { version = "12.0.1", features = ["serde-json-impl"] }
 # T020 workspace: native directory picker, invoked from the Rust side only.
 tauri-plugin-dialog = "2.7.3"
+# T030 documents: content hashing for dirty/external-change detection. Already in
+# the tree through tauri-codegen, so this adds no new crate.
+sha2 = "0.10.9"
 
 [workspace.lints.rust]
 # Unsafe code needs a justified, reviewed `#![allow(unsafe_code)]` in the crate.

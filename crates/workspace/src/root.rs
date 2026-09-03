@@ -100,6 +100,29 @@ impl WorkspaceRoot {
         Ok(ResolvedPath { native, canonical })
     }
 
+    /// Resolve a wire path for creating or replacing a file (T030). An existing
+    /// target is resolved like [`Self::resolve`] (symlinks followed, must stay
+    /// inside the root); a missing target is allowed when its parent resolves
+    /// inside the root, and the final name is appended lexically. The root
+    /// itself is rejected.
+    pub fn resolve_for_write(&self, path: &WorkspacePath) -> Result<ResolvedPath, WorkspaceError> {
+        let Some(name) = path.name() else {
+            return Err(WorkspaceError::invalid_path("path", "must name a file"));
+        };
+        match self.resolve(path) {
+            Ok(resolved) => Ok(resolved),
+            Err(WorkspaceError::NotFound(_)) => {
+                let parent = path.parent().expect("a named path has a parent");
+                let resolved_parent = self.resolve(&parent)?;
+                Ok(ResolvedPath {
+                    native: path.to_native(&self.path),
+                    canonical: resolved_parent.canonical().join(name),
+                })
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     /// Whether an already canonical path lies inside the root (component-wise,
     /// so `/ws2` is not inside `/ws`).
     pub fn contains(&self, canonical: &Path) -> bool {

@@ -13,7 +13,8 @@
       "!**/dist",
       "!**/target",
       "!**/src-tauri/gen",
-      "!packages/protocol/src/generated"
+      "!packages/protocol/src/generated",
+      "!fixtures/weird-files"
     ]
   },
   "formatter": {
