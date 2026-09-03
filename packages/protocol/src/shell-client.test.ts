@@ -31,7 +31,10 @@ describe('shell client', () => {
       throw {
         code: 'InvalidInput',
         message: "url: scheme 'javascript' is not allowed (http and https only)",
-        details: { field: 'url', reason: "scheme 'javascript' is not allowed (http and https only)" },
+        details: {
+          field: 'url',
+          reason: "scheme 'javascript' is not allowed (http and https only)",
+        },
         retryable: false,
       };
     });

@@ -1,3 +1,4 @@
+import { isInstructionFile } from '@gritty/markdown';
 import type { DocumentId } from '@gritty/protocol';
 import { type DragEvent, useState } from 'react';
 import { type DocumentsState, isUnsaved } from '../documents/documents-reducer';
@@ -74,6 +75,11 @@ export function TabStrip({
                 {unsaved ? '●' : ''}
               </span>
               {name}
+              {isInstructionFile(tab.document.path) && (
+                <span className="tabs__badge" title="instruction file">
+                  instructions
+                </span>
+              )}
             </button>
             <button
               type="button"

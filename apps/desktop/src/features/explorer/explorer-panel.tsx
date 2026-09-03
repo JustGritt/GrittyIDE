@@ -1,3 +1,4 @@
+import { isInstructionFile } from '@gritty/markdown';
 import type { DirEntry, WorkspaceClosedReason, WorkspaceId } from '@gritty/protocol';
 import { type FormEvent, useState } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
@@ -259,6 +260,7 @@ function describe(entry: DirEntry): string[] {
     else badges.push(`link → ${entry.symlink.targetKind ?? 'unknown'}`);
   }
   if (entry.kind === 'other') badges.push('special');
+  if (entry.kind === 'file' && isInstructionFile(entry.name)) badges.push('instructions');
   return badges;
 }
 

@@ -141,6 +141,7 @@ describe('createMarkdownRenderer', () => {
     const started = performance.now();
     const result = renderer.render(text, { path: 'long.md' });
     const elapsed = performance.now() - started;
+    console.info(`long.md (${text.length} chars) rendered in ${elapsed.toFixed(1)} ms`);
     expect(result.html.length).toBeGreaterThan(100_000);
     // Generous bound for CI; the report records the measured value.
     expect(elapsed).toBeLessThan(2000);
