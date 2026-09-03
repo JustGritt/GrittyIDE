@@ -7,7 +7,9 @@
 //! - The WebView is never handed raw filesystem or process APIs.
 
 mod commands;
+mod core;
 
+use tauri::Manager;
 use tracing_subscriber::EnvFilter;
 
 /// Environment variable controlling log filtering, e.g. `GRITTY_LOG=debug`.
@@ -19,13 +21,29 @@ pub fn run() {
     tracing::info!(
         app_version = env!("CARGO_PKG_VERSION"),
         core_version = gritty_core::VERSION,
+        protocol_version = gritty_core::PROTOCOL_VERSION,
         "starting Gritty"
     );
 
-    tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![commands::health])
-        .run(tauri::generate_context!())
-        .expect("error while running Gritty");
+    let app = tauri::Builder::default()
+        .setup(|app| {
+            app.manage(core::Core::new(app.handle().clone()));
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::core_health,
+            commands::operations_list,
+            commands::operations_cancel,
+            commands::operations_start_demo,
+        ])
+        .build(tauri::generate_context!())
+        .expect("error while building Gritty");
+
+    app.run(|app, event| {
+        if let tauri::RunEvent::Exit = event {
+            app.state::<core::Core>().shutdown();
+        }
+    });
 }
 
 fn init_tracing() {
