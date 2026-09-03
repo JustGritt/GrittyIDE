@@ -18,7 +18,8 @@ content and writes), T090 (processes), T300 (agent capabilities).
   capability grants; destructive or out-of-scope actions are shown before
   execution unless a persistent permission was deliberately granted.
 - Markdown preview never renders raw HTML from documents or agents; output is
-  sanitized and links to `javascript:`/`data:` URLs are stripped.
+  sanitized against an allowlist and links to `javascript:`/`data:` URLs are
+  stripped (T050, ADR-013).
 - Secrets stay out of logs, events, SQLite and persisted run output. Provider
   tokens go to OS credential storage when direct API credentials appear.
 - Content Security Policy is enabled in both dev and release
@@ -95,6 +96,20 @@ Implemented in `crates/workspace/src/{detect,file}.rs` and
   record ids, paths, sizes and states.
 - **Temporary files are hidden entries** (leading dot) and appear in listings
   only when hidden files are shown.
+
+## Markdown preview and external URLs (T050, ADR-013)
+
+- The preview renders repository Markdown through two layers: markdown-it
+  with raw HTML disabled, then a DOMPurify allowlist (`docs/architecture/markdown.md`).
+  Only inline `data:image/*` images render; nothing is fetched. Ids are
+  prefixed so a document cannot clobber the application's DOM.
+- Links never navigate the WebView: clicks, middle clicks and context menus on
+  preview links are intercepted, and a Tauri `on_navigation` hook refuses any
+  navigation away from the application origin.
+- External `http(s)` URLs leave the app only through `shell.openExternal`,
+  validated by the core (scheme, length, characters, host, no credentials) and
+  opened by the system handler from the Rust side; the WebView has no opener
+  or shell capability. Only scheme and host are logged.
 
 ## Process boundaries
 

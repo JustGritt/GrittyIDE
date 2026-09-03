@@ -126,6 +126,14 @@ and language map: `docs/architecture/documents.md`.
 changes, command execution, decisions, logs, ChangeSets and agent edits so the
 UI can explain who did what. This is attribution, not event sourcing.
 
+## Shell (fixed by T050, ADR-013)
+
+`shell.openExternal { url }` is the only way content leaves the application:
+the core validates the URL (http/https, bounded, no credentials) and an
+injected opener hands it to the system handler from the Rust side; the WebView
+never navigates (`on_navigation` guard) and holds no opener capability. See
+`docs/architecture/markdown.md`.
+
 ## Event vocabulary (Operation* fixed by T010, Workspace{Opened,Closed} by T020, Document* by T030; other families named by their tasks)
 
 Workspace{Opened,Closed,Changed}; Document{Opened,Changed,Saved,ExternalChangeDetected,Closed};

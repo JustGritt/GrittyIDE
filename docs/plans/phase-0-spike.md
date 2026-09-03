@@ -14,7 +14,7 @@ running application. Exit: ADR-001 go/no-go.
 | A4 | Repository with 10k+ files opens without eager content loading | T020 | |
 | A5 | Rust commands for directory listing, safe read, atomic write | T020/T030 | 2026-09-03, macOS 26 arm64: `workspace.list` (T020) and `documents.open/save` (T030) through the real adapters in `cargo test -p gritty-desktop`; atomic write with injected failure/crash in `cargo test -p gritty-workspace`; UI pass pending reviewer |
 | A6 | Filesystem watching; rapid changes do not lock the UI | T070 (after ADR-001) or spike | |
-| A7 | Markdown preview with sanitized HTML and fenced-code highlighting | T050 | |
+| A7 | Markdown preview with sanitized HTML and fenced-code highlighting | T050 | 2026-09-03, macOS 26 arm64: markdown-it + DOMPurify allowlist (ADR-013), fenced code colorized by Monaco's tokenizers; XSS fixture asserted clean and GFM fixture snapshotted under jsdom; `long.md` (134 KB) renders in 366 ms under jsdom (markdown-it alone 15–20 ms); in-app rendering, scroll sync and link navigation pending reviewer (the agent cannot see the WebView) |
 | A8 | PTY: spawn a shell, resize, stream output, terminate cleanly | T090 | |
 | A9 | Persist and restore workspace + tabs | T060 | |
 | A10 | Cold/warm startup, idle RAM/CPU, editor RAM growth, interaction latency recorded | below | |
