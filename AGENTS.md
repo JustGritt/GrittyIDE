@@ -29,7 +29,7 @@ what needs my attention.
 | `crates/*` | further domain crates (workspace, persistence, terminal, git, search, process-supervisor, platform) | created by the task that first needs them; small adapters around PTY/Git/platform libraries |
 | `apps/desktop/src-tauri` | Tauri composition root | wiring, tracing, window setup, command adapters only; no domain logic |
 | `apps/desktop/src` | React shell | calls the typed core protocol only |
-| `packages/protocol` (T010) | typed client, generated types, error/event envelopes | the only place that may import `@tauri-apps/api` (during T000: `apps/desktop/src/core/bridge.ts`) |
+| `packages/protocol` | typed client, generated types (`src/generated`, written by `cargo test -p gritty-core`), error/event envelopes | `src/transport/tauri.ts` is the only file that may import `@tauri-apps/api` (Biome-enforced); never edit `src/generated` by hand |
 | `packages/*` | editor, markdown, ui, workstreams | consumed as source through workspace links |
 | `docs/tasks/` | one Markdown file per task, following `docs/agent/task-template.md` | update status and completion report |
 | `fixtures/` (T020+) | deterministic test repositories | never rely on a developer's real project |
@@ -39,7 +39,8 @@ what needs my attention.
 ```
 pnpm install                  # JS workspace (pnpm 11 via corepack)
 pnpm dev                      # tauri dev (always runs inside apps/desktop)
-pnpm check                    # Biome, tsc, vitest, cargo fmt --check, clippy -D warnings, cargo test
+pnpm check                    # Biome, tsc, vitest, cargo fmt --check, clippy -D warnings, cargo test, generated types fresh
+cargo test -p gritty-core     # also regenerates packages/protocol/src/generated (commit the result)
 pnpm format                   # Biome + rustfmt fixes
 pnpm build                    # release build + bundles
 GRITTY_LOG=debug pnpm dev     # tracing filter

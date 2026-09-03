@@ -20,23 +20,28 @@ the short version agents read first.
 Tauri already runs an async runtime (`tauri::async_runtime`, tokio-based). Core
 async work builds on it; do not create a second runtime.
 
-## Core protocol (T010 owns the final form)
+## Core protocol (fixed by T010, ADR-009)
 
-The UI talks to the core only through typed commands and events:
+The UI talks to the core only through typed commands and events, via the
+hand-written client in `packages/protocol` whose types are generated from Rust
+(`cargo test -p gritty-core` rewrites `packages/protocol/src/generated`; CI fails
+when the output is stale). `packages/protocol/src/transport/tauri.ts` is the only
+module that imports `@tauri-apps/api`.
 
-```
-workspace.open(path)  workspace.list(path)  workspace.read(path)  workspace.write(path, content)
-search.query(text, options)     git.status()  git.diff(target)
-terminal.spawn(profile)  terminal.write(id, data)
-workstreams.create(goal)  workstreams.update(id, patch)
-agents.start(workstreamId, config)  agents.cancel(runId)  agents.respond(runId, decision)
-```
+| Convention | Shape |
+|---|---|
+| Command names | `<domain>.<verb>` in TypeScript ↔ `<domain>_<snake_verb>` in Rust; one `request` object per command (`core.health`, `operations.list`, `operations.cancel`, `operations.startDemo`) |
+| Error envelope | `CoreError { code, message, details?, retryable, correlationId? }`, `code ∈ InvalidInput, NotFound, PermissionDenied, Conflict, Cancelled, Timeout, Io, Internal, ProtocolMismatch` |
+| Event envelope | one channel `gritty://core/event`, payload `{ name, seq, workspaceId?, correlationId?, actor, payload }`; `seq` strictly increasing per process |
+| Identifiers | UUID v7 strings (`WorkspaceId`, `OperationId`, `AgentRunId`, `CorrelationId`), branded in TypeScript |
+| Timestamps | milliseconds since the Unix epoch, exported as `number` |
+| Actor | `{ type: "USER" } \| { type: "SYSTEM" } \| { type: "AGENT", runId } \| { type: "EXTERNAL" }` |
+| Versioning | `PROTOCOL_VERSION` (`MAJOR.MINOR.PATCH`) reported by `core.health`; the client refuses a different MAJOR with `ProtocolMismatch` |
 
-Conventions T010 must fix: command naming, event envelope, shared identifiers,
-error envelope, asynchronous operation semantics, cancellation, serialization
-and versioning. Types are exported from Rust with `ts-rs` into
-`packages/protocol`, whose hand-written client is the only module importing
-`@tauri-apps/api` (ADR-008).
+Every command adapter runs its body behind a guard that creates a correlation id,
+opens a tracing span and converts a panic into `Internal`; a promise never hangs.
+Nothing is replayed after a renderer reload: the UI subscribes, then calls the
+domain's list command (`operations.list`) to rehydrate.
 
 ## Asynchronous operation model
 
@@ -45,13 +50,19 @@ UI command → fast validation → operation created → operationId returned
 → supervised background execution → progress events → COMPLETED | FAILED | CANCELLED
 ```
 
-Every cancellable operation carries: id, kind, actor, workspaceId, status,
-createdAt, startedAt, finishedAt, cancellationRequested, correlationId. Defined
-behavior is required for: cancel before start, cancel during execution, child
-process termination, events after cancellation (dropped), duplicate completion
-signals, UI reload, shutdown, unexpected worker death. A cancelled operation
-never later appears completed. High-frequency sources (watchers, terminals,
-indexing, agent logs) are batched/bounded before reaching the renderer.
+`Operation { id, kind, actor, workspaceId?, status, createdAt, startedAt?, finishedAt?,
+cancellationRequested, correlationId, progress?, error? }` with
+`CREATED → RUNNING → COMPLETED | FAILED | CANCELLED` (and `CREATED → CANCELLED`).
+The registry (`gritty_core::operation`) runs bodies on Tauri's tokio runtime with a
+child `CancellationToken` per operation: cancel before start finishes immediately
+and the body never runs; cancel during execution fires the token and aborts the
+body task at its next await point; progress after cancellation is dropped; late or
+duplicate completions are rejected by the state machine; once cancellation was
+requested the only terminal state is `CANCELLED`; a body panic ends the operation
+`FAILED` with `Internal`; shutdown cancels everything through a root token.
+Progress events are throttled to one per 50 ms per operation, and high-frequency
+sources (watchers, terminals, indexing, agent logs) must batch before reaching the
+bus. `operations.startDemo` is the reference implementation.
 
 ## Document and buffer model (T030 owns Gate B)
 
@@ -74,7 +85,7 @@ silently resolved.
 changes, command execution, decisions, logs, ChangeSets and agent edits so the
 UI can explain who did what. This is attribution, not event sourcing.
 
-## Event vocabulary (illustrative; T010 fixes names)
+## Event vocabulary (Operation* fixed by T010; other families named by their tasks)
 
 Workspace{Opened,Closed,Changed}; Document{Opened,Changed,Saved,ExternalChangeDetected,Closed};
 FileSystemBatchChanged; Operation{Started,Progress,Completed,Failed,Cancelled};

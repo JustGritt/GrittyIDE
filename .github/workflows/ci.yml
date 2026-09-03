@@ -49,6 +49,9 @@ jobs:
 
       - run: pnpm check
 
+      - name: Generated protocol types are fresh (cargo test -p gritty-core rewrites them)
+        run: pnpm check:generated
+
       - name: Build desktop app (no bundling; packaging is Phase 7)
         run: pnpm tauri build --no-bundle
 
@@ -80,6 +83,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm check
+
+      - name: Generated protocol types are fresh (cargo test -p gritty-core rewrites them)
+        run: pnpm check:generated
 
       - name: Build macOS app bundle
         run: pnpm tauri build --bundles app --ci
