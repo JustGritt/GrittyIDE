@@ -145,10 +145,9 @@ macOS during this task (see "Deviations" and "Remaining risks").
 - `pnpm check` (run with Git Bash as the pnpm script shell): Biome (54 files),
   tsc for the three projects, vitest, `cargo fmt --check`,
   `cargo clippy --workspace --all-targets -D warnings` and
-  `cargo test --workspace` all passed. The final `check:generated` step fails
-  only because it requires `packages/protocol/src/generated` to be committed;
-  the files are fresh (written by the same run) and the step passes once the
-  branch is committed.
+  `cargo test --workspace` all passed. The final `check:generated` step
+  requires `packages/protocol/src/generated` to be committed; it failed on the
+  uncommitted tree and passed once the branch was committed (re-run on its own).
 - `cargo test --workspace`: gritty-core 53 passed (9 workspace tests:
   open/close/current lifecycle, REPLACED and ROOT_MISSING events, budget
   hand-over to an operation, operation cancellation, error mapping; plus the
