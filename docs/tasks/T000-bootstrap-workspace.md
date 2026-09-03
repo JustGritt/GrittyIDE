@@ -1,7 +1,7 @@
 # Task T000 — Bootstrap workspace
 
 - **Phase:** 0
-- **Status:** review
+- **Status:** done
 - **Depends on:** –
 
 ## Objective

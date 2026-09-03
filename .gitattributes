@@ -1,0 +1,8 @@
+# Every text file is LF in the working tree on every platform: rustfmt
+# (`newline_style = "Unix"`) and Biome format with LF, and the generated-types
+# freshness check compares bytes. Binary assets are marked explicitly.
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.icns binary
