@@ -1,7 +1,7 @@
 # Security model
 
-Status: baseline written at T000; refined by T020 (paths), T090 (processes),
-T300 (agent capabilities).
+Status: baseline written at T000; refined by T020 (paths), T030 (file
+content and writes), T090 (processes), T300 (agent capabilities).
 
 ## Principles
 
@@ -65,6 +65,36 @@ exercised by its unit and integration tests.
   entries per page with a continuation cursor, and a 100 ms budget after which
   the listing continues as a cancellable operation. There is no recursive
   scan and no full-repository index in this task.
+
+## File content and writes (T030, ADR-011)
+
+Implemented in `crates/workspace/src/{detect,file}.rs` and
+`gritty_core::document`.
+
+- **Reads are bounded.** A document read refuses files above 64 MiB before
+  reading them; the whole file is validated as UTF-8 and scanned for NUL
+  bytes, and anything that fails is `binary`: no buffer exists, so a save can
+  never rewrite it. Only UTF-8 (with or without BOM) is decoded.
+- **Writes only through resolved paths.** A save resolves the document path
+  against the root like every other command (`resolve_for_write`): an
+  existing target is canonicalized and must stay inside the root, a missing
+  target needs a parent that resolves inside the root. Symlinks that escape
+  the root are `PermissionDenied` before anything is written.
+- **Atomic replacement.** New content goes to `.<name>.gritty-<pid>-<n>.tmp`
+  in the destination directory (created exclusively), is `fsync`ed, gets the
+  destination's permission bits and is renamed over the destination. The
+  destination is never partially written; a failure removes the temporary
+  file; a crash leaves it behind, recognizable by name.
+- **No silent overwrite.** A save compares the disk hash with the hash the
+  buffer was synchronized with and refuses (`Conflict`) when they differ or
+  the file is gone; only an explicit `force` from the UI overwrites or
+  recreates. The same rule guards `documents.close`, `workspace.close` and a
+  replacing `workspace.open` while documents are dirty.
+- **Content never reaches logs or events.** Events carry document metadata
+  (path, hashes, states); text travels only in command responses. Logs
+  record ids, paths, sizes and states.
+- **Temporary files are hidden entries** (leading dot) and appear in listings
+  only when hidden files are shown.
 
 ## Process boundaries
 

@@ -49,7 +49,8 @@ the schema; `ts-rs` generates the TypeScript side (ADR-008).
   the state machine rejects any later or duplicate completion signal. Finished
   operations are retained in memory (last 200) for rehydration; persistence is
   T060's decision.
-- **Versioning**: `PROTOCOL_VERSION` (`MAJOR.MINOR.PATCH`) lives in Rust and is
+- **Versioning**: `PROTOCOL_VERSION` (`MAJOR.MINOR.PATCH`; `1.1.0` since T030
+  added the `documents.*` family) lives in Rust and is
   reported by `core.health`; the same test that exports the types writes it to
   `packages/protocol/src/generated/version.ts`. The client probes `core.health`
   before its first command and refuses to run (every command rejects with

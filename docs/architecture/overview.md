@@ -30,18 +30,19 @@ module that imports `@tauri-apps/api`.
 
 | Convention | Shape |
 |---|---|
-| Command names | `<domain>.<verb>` in TypeScript ↔ `<domain>_<snake_verb>` in Rust; one `request` object per command (`core.health`, `operations.list`, `operations.cancel`, `operations.startDemo`, `workspace.open`, `workspace.close`, `workspace.current`, `workspace.list`) |
+| Command names | `<domain>.<verb>` in TypeScript ↔ `<domain>_<snake_verb>` in Rust; one `request` object per command (`core.health`, `operations.list`, `operations.cancel`, `operations.startDemo`, `workspace.open`, `workspace.close`, `workspace.current`, `workspace.list`, `documents.open`, `documents.close`, `documents.update`, `documents.save`, `documents.reload`, `documents.status`, `documents.list`) |
 | Error envelope | `CoreError { code, message, details?, retryable, correlationId? }`, `code ∈ InvalidInput, NotFound, PermissionDenied, Conflict, Cancelled, Timeout, Io, Internal, ProtocolMismatch` |
 | Event envelope | one channel `gritty://core/event`, payload `{ name, seq, workspaceId?, correlationId?, actor, payload }`; `seq` strictly increasing per process |
-| Identifiers | UUID v7 strings (`WorkspaceId`, `OperationId`, `AgentRunId`, `CorrelationId`), branded in TypeScript |
+| Identifiers | UUID v7 strings (`WorkspaceId`, `OperationId`, `DocumentId`, `AgentRunId`, `CorrelationId`), branded in TypeScript |
 | Timestamps | milliseconds since the Unix epoch, exported as `number` |
 | Actor | `{ type: "USER" } \| { type: "SYSTEM" } \| { type: "AGENT", runId } \| { type: "EXTERNAL" }` |
-| Versioning | `PROTOCOL_VERSION` (`MAJOR.MINOR.PATCH`) reported by `core.health`; the client refuses a different MAJOR with `ProtocolMismatch` |
+| Versioning | `PROTOCOL_VERSION` (`MAJOR.MINOR.PATCH`, currently `1.1.0`) reported by `core.health`; the client refuses a different MAJOR with `ProtocolMismatch` |
 
 Every command adapter runs its body behind a guard that creates a correlation id,
 opens a tracing span and converts a panic into `Internal`; a promise never hangs.
 Nothing is replayed after a renderer reload: the UI subscribes, then calls the
-domain's list command (`operations.list`, `workspace.current`) to rehydrate.
+domain's list command (`operations.list`, `workspace.current`, `documents.list`)
+to rehydrate.
 
 ## Asynchronous operation model
 
@@ -90,20 +91,34 @@ fixture generator without depending on `gritty-core`; `gritty_core::workspace`
 owns identity, events, the budget hand-over and the error mapping. Deterministic
 fixtures live in `fixtures/` (`small-repo` committed, `large-repo` generated).
 
-## Document and buffer model (T030 owns Gate B)
+## Document and buffer model (fixed by T030, ADR-011)
 
 A repository file and an open editable document are different things.
 
 ```
 Document: id, workspaceId, path, encoding, languageId, savedRevision, savedHash,
-          currentVersion, dirty, readOnly, binary, largeFileMode, externalModificationState
+          currentVersion, dirty, readOnly, binary, largeFileMode,
+          externalModificationState, size
 externalModificationState: UNCHANGED | MODIFIED_EXTERNALLY | CONFLICTED | DELETED_EXTERNALLY
 ```
 
-Repository files are the durable artifacts; Gritty owns unsaved buffer state
-while a document is open or recoverable; Monaco only renders and edits. Saves
-are atomic (temp file → fsync → rename). Conflicts are represented, never
-silently resolved.
+Repository files are the durable artifacts; the core owns the buffer of every
+open document (`gritty_core::document::DocumentManager`); Monaco (T040) and
+the interim textarea only render and edit. One document per `(workspace,
+path)`; `documents.open` on an open path returns the current buffer.
+`documents.update { documentId, baseVersion, text }` replaces the buffer and
+increments `currentVersion` (a stale `baseVersion` is `Conflict`); `dirty` is
+derived from `sha256(buffer) != savedHash`. `documents.save` writes atomically
+(temp file → fsync → permissions → rename, `crates/workspace/src/file.rs`) and
+fails with `Conflict` when the disk no longer matches `savedHash` or the file
+is gone, unless `force`. External modification is checked on demand
+(`documents.status`, before save, on reload) by hashing the file; transitions
+emit `DocumentExternalChangeDetected`. NUL bytes or invalid UTF-8 make a file
+`binary` (no buffer); files ≥ 10 MiB open read-only in `largeFileMode`; files
+above 64 MiB are refused. A dirty document, and a workspace with dirty
+documents, close only with `force`; documents of a closing workspace emit
+`DocumentClosed { reason: WORKSPACE_CLOSED, dirty }`. Details, state matrix
+and language map: `docs/architecture/documents.md`.
 
 ## Actor model
 
@@ -111,7 +126,7 @@ silently resolved.
 changes, command execution, decisions, logs, ChangeSets and agent edits so the
 UI can explain who did what. This is attribution, not event sourcing.
 
-## Event vocabulary (Operation* fixed by T010, Workspace{Opened,Closed} by T020; other families named by their tasks)
+## Event vocabulary (Operation* fixed by T010, Workspace{Opened,Closed} by T020, Document* by T030; other families named by their tasks)
 
 Workspace{Opened,Closed,Changed}; Document{Opened,Changed,Saved,ExternalChangeDetected,Closed};
 FileSystemBatchChanged; Operation{Started,Progress,Completed,Failed,Cancelled};

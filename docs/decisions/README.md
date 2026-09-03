@@ -16,6 +16,7 @@ requires updating the relevant ADR.
 | [ADR-008](ADR-008-repository-tooling.md) | Repository tooling and type sharing | Accepted |
 | [ADR-009](ADR-009-core-protocol-conventions.md) | Core protocol conventions: ids, envelopes, events, versioning | Accepted |
 | [ADR-010](ADR-010-workspace-paths.md) | Workspace root, path representation and lazy listing | Accepted |
+| [ADR-011](ADR-011-document-buffer-contract.md) | Document/buffer contract: identity, versions, dirty state, atomic saves, external changes | Accepted |
 
 Template:
 
