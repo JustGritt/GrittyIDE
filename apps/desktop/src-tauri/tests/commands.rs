@@ -9,8 +9,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use gritty_core::{CORE_EVENT_CHANNEL, PROTOCOL_VERSION};
-use gritty_desktop_lib::{attach_core, configure};
+use gritty_core::shell::ExternalOpener;
+use gritty_core::{CORE_EVENT_CHANNEL, CoreError, PROTOCOL_VERSION};
+use gritty_desktop_lib::{attach_core_with, configure};
 use serde_json::{Value, json};
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{
@@ -19,19 +20,42 @@ use tauri::test::{
 use tauri::webview::InvokeRequest;
 use tauri::{Listener, WebviewWindow, WebviewWindowBuilder};
 
+/// Stands in for the system browser: records what the core asked to open.
+#[derive(Default)]
+struct RecordingOpener {
+    opened: Mutex<Vec<String>>,
+    fail: bool,
+}
+
+impl ExternalOpener for RecordingOpener {
+    fn open(&self, url: &str) -> Result<(), CoreError> {
+        if self.fail {
+            return Err(std::io::Error::other("no handler registered").into());
+        }
+        self.opened.lock().unwrap().push(url.to_owned());
+        Ok(())
+    }
+}
+
 struct Harness {
     _app: tauri::App<MockRuntime>,
     webview: WebviewWindow<MockRuntime>,
     events: Arc<Mutex<Vec<Value>>>,
+    opener: Arc<RecordingOpener>,
 }
 
 impl Harness {
     fn new() -> Self {
+        Self::with_opener(Arc::new(RecordingOpener::default()))
+    }
+
+    fn with_opener(opener: Arc<RecordingOpener>) -> Self {
         let app = configure(mock_builder())
             .build(mock_context(noop_assets()))
             .expect("build app");
-        // The mock runtime never runs `setup`; do what it would do.
-        attach_core(app.handle());
+        // The mock runtime never runs `setup`; do what it would do. The
+        // recording opener means no test can ever open a real browser.
+        attach_core_with(app.handle(), opener.clone());
         let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .expect("create webview");
@@ -46,6 +70,7 @@ impl Harness {
             _app: app,
             webview,
             events,
+            opener,
         }
     }
 
@@ -700,4 +725,72 @@ fn document_requests_are_validated_before_touching_the_disk() {
         json!([])
     );
     assert_eq!(h.event_names(), vec!["WorkspaceOpened"]);
+}
+
+// --- shell.openExternal (T050) -------------------------------------------------
+
+#[test]
+fn shell_open_external_hands_validated_urls_to_the_opener() {
+    let h = Harness::new();
+    let result = h
+        .invoke(
+            "shell_open_external",
+            json!({ "request": { "url": "HTTPS://Example.com/docs?x=1" } }),
+        )
+        .expect("open");
+    assert_eq!(result, Value::Null);
+    assert_eq!(
+        *h.opener.opened.lock().unwrap(),
+        vec!["https://example.com/docs?x=1".to_owned()]
+    );
+}
+
+#[test]
+fn shell_open_external_rejects_everything_but_http_and_https_without_side_effects() {
+    let h = Harness::new();
+    for url in [
+        "javascript:alert(1)",
+        "file:///etc/passwd",
+        "ftp://example.com/",
+        "mailto:someone@example.com",
+        "https://user:secret@example.com/",
+        "https://exa\nmple.com/",
+        "",
+    ] {
+        let error = h
+            .invoke("shell_open_external", json!({ "request": { "url": url } }))
+            .expect_err(url);
+        assert_eq!(error["code"], "InvalidInput", "{url}");
+        assert_eq!(error["details"]["field"], "url", "{url}");
+        assert!(error["correlationId"].is_string(), "{url}");
+    }
+    let long = format!("https://example.com/{}", "a".repeat(3000));
+    let error = h
+        .invoke("shell_open_external", json!({ "request": { "url": long } }))
+        .expect_err("too long");
+    assert_eq!(error["code"], "InvalidInput");
+    // A request that is not even the right shape is refused while parsing.
+    let error = h
+        .invoke("shell_open_external", json!({ "request": { "url": 42 } }))
+        .expect_err("wrong type");
+    assert_eq!(error["code"], "InvalidInput");
+    assert_eq!(error["details"]["field"], "request");
+    assert!(h.opener.opened.lock().unwrap().is_empty());
+}
+
+#[test]
+fn shell_open_external_reports_a_handler_failure_as_io() {
+    let h = Harness::with_opener(Arc::new(RecordingOpener {
+        fail: true,
+        ..Default::default()
+    }));
+    let error = h
+        .invoke(
+            "shell_open_external",
+            json!({ "request": { "url": "https://example.com/" } }),
+        )
+        .expect_err("handler failure");
+    assert_eq!(error["code"], "Io");
+    assert_eq!(error["retryable"], true);
+    assert!(error["correlationId"].is_string());
 }

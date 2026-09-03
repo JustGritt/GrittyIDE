@@ -30,13 +30,13 @@ module that imports `@tauri-apps/api`.
 
 | Convention | Shape |
 |---|---|
-| Command names | `<domain>.<verb>` in TypeScript ↔ `<domain>_<snake_verb>` in Rust; one `request` object per command (`core.health`, `operations.list`, `operations.cancel`, `operations.startDemo`, `workspace.open`, `workspace.close`, `workspace.current`, `workspace.list`, `documents.open`, `documents.close`, `documents.update`, `documents.save`, `documents.reload`, `documents.status`, `documents.list`) |
+| Command names | `<domain>.<verb>` in TypeScript ↔ `<domain>_<snake_verb>` in Rust; one `request` object per command (`core.health`, `operations.list`, `operations.cancel`, `operations.startDemo`, `workspace.open`, `workspace.close`, `workspace.current`, `workspace.list`, `documents.open`, `documents.close`, `documents.update`, `documents.save`, `documents.reload`, `documents.status`, `documents.list`, `shell.openExternal`) |
 | Error envelope | `CoreError { code, message, details?, retryable, correlationId? }`, `code ∈ InvalidInput, NotFound, PermissionDenied, Conflict, Cancelled, Timeout, Io, Internal, ProtocolMismatch` |
 | Event envelope | one channel `gritty://core/event`, payload `{ name, seq, workspaceId?, correlationId?, actor, payload }`; `seq` strictly increasing per process |
 | Identifiers | UUID v7 strings (`WorkspaceId`, `OperationId`, `DocumentId`, `AgentRunId`, `CorrelationId`), branded in TypeScript |
 | Timestamps | milliseconds since the Unix epoch, exported as `number` |
 | Actor | `{ type: "USER" } \| { type: "SYSTEM" } \| { type: "AGENT", runId } \| { type: "EXTERNAL" }` |
-| Versioning | `PROTOCOL_VERSION` (`MAJOR.MINOR.PATCH`, currently `1.1.0`) reported by `core.health`; the client refuses a different MAJOR with `ProtocolMismatch` |
+| Versioning | `PROTOCOL_VERSION` (`MAJOR.MINOR.PATCH`, currently `1.2.0`) reported by `core.health`; the client refuses a different MAJOR with `ProtocolMismatch` |
 
 Every command adapter runs its body behind a guard that creates a correlation id,
 opens a tracing span and converts a panic into `Internal`; a promise never hangs.

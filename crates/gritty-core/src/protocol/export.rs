@@ -20,6 +20,7 @@ use crate::operation::Operation;
 use crate::operation::demo::StartDemoRequest;
 use crate::operation::registry::CancelOperationRequest;
 use crate::protocol::error::CoreError;
+use crate::shell::OpenExternalRequest;
 use crate::workspace::{
     CloseWorkspaceRequest, ListDirectoryRequest, ListDirectoryResponse, OpenWorkspaceRequest,
     Workspace,
@@ -63,6 +64,7 @@ fn export_bindings() {
     SaveDocumentRequest::export_all(&cfg).expect("export SaveDocumentRequest");
     ReloadDocumentRequest::export_all(&cfg).expect("export ReloadDocumentRequest");
     DocumentStatusRequest::export_all(&cfg).expect("export DocumentStatusRequest");
+    OpenExternalRequest::export_all(&cfg).expect("export OpenExternalRequest");
 
     let version = format!(
         "{HEADER}export const PROTOCOL_VERSION = \"{PROTOCOL_VERSION}\";\n\

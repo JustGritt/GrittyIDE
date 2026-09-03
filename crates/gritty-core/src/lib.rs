@@ -17,12 +17,14 @@
 //!   the `gritty-workspace` crate.
 //! - [`document`]: open documents and their buffers (T030, Gate B): dirty
 //!   state, atomic saves, external modification detection.
+//! - [`shell`]: opening external URLs through an injected opener (T050).
 
 pub mod document;
 pub mod event;
 pub mod health;
 pub mod operation;
 pub mod protocol;
+pub mod shell;
 pub mod workspace;
 
 pub use health::{HealthReport, ShellInfo, health};

@@ -16,6 +16,7 @@ import {
   type ListDirectoryRequest,
   type ListDirectoryResponse,
   type OpenDocumentRequest,
+  type OpenExternalRequest,
   type OpenWorkspaceRequest,
   type Operation,
   type OperationId,
@@ -89,6 +90,15 @@ export interface CoreClient {
     status(request?: DocumentStatusRequest): Promise<Document[]>;
     /** Every open document (no text), for rehydration after a renderer reload. */
     list(): Promise<Document[]>;
+  };
+  /**
+   * Shell integration (T050). The only way content leaves the app: the core
+   * validates the URL (http and https only, bounded length, no credentials)
+   * and hands it to the system's default handler. Anything else rejects with
+   * `InvalidInput`; a handler failure is `Io`.
+   */
+  shell: {
+    openExternal(url: string): Promise<void>;
   };
   subscribe<N extends EventName>(name: N, handler: (event: EventOf<N>) => void): Unsubscribe;
   subscribeAll(handler: (event: EventEnvelope) => void): Unsubscribe;
@@ -173,6 +183,12 @@ export function createCoreClient(
       reload: (request) => command<DocumentContent>('documents.reload', { request }),
       status: (request = {}) => command<Document[]>('documents.status', { request }),
       list: () => command<Document[]>('documents.list'),
+    },
+    shell: {
+      openExternal: (url) => {
+        const request: OpenExternalRequest = { url };
+        return command<void>('shell.openExternal', { request });
+      },
     },
     subscribe: (name, handler) => hub.subscribe(name, handler),
     subscribeAll: (handler) => hub.subscribeAll(handler),

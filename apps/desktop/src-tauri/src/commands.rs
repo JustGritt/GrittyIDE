@@ -18,6 +18,7 @@ use gritty_core::operation::demo::{StartDemoRequest, start_demo};
 use gritty_core::operation::{CancelOperationRequest, Operation};
 use gritty_core::protocol::actor::Actor;
 use gritty_core::protocol::ids::CorrelationId;
+use gritty_core::shell::OpenExternalRequest;
 use gritty_core::workspace::{
     CloseWorkspaceRequest, DEFAULT_LIST_BUDGET, ListDirectoryRequest, ListDirectoryResponse,
     OpenWorkspaceRequest, UnsavedPolicy, Workspace,
@@ -258,6 +259,21 @@ pub async fn documents_list(core: State<'_, Core>) -> Result<Vec<Document>, Core
         "documents.list",
         move |_| async move { Ok(documents.list()) },
     )
+    .await
+}
+
+/// `shell.openExternal`: the core validates the URL (http/https only) and the
+/// system handler opens it; the WebView never navigates or spawns anything.
+#[tauri::command]
+pub async fn shell_open_external(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<(), CoreError> {
+    let shell = core.shell.clone();
+    guard("shell.openExternal", move |correlation| async move {
+        let request: OpenExternalRequest = parse_request(request)?;
+        shell.open_external(request, Actor::User, correlation).await
+    })
     .await
 }
 
