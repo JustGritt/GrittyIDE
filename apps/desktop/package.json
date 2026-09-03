@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@gritty/editor": "workspace:*",
+    "@gritty/markdown": "workspace:*",
     "@gritty/protocol": "workspace:*",
     "monaco-editor": "catalog:",
     "react": "catalog:",

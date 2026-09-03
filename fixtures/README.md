@@ -8,6 +8,7 @@ never depend on a developer's real project.
 | `small-repo/` | fast integration and explorer tests: TypeScript, Rust, JSON, Markdown, nested directories, a hidden file and directory, a file name with spaces, a symlink | committed |
 | `large-repo/` | performance and cancellation tests: 10,500 files, a 24-level deep chain, `bulk/` with 5,200 entries (more than one listing page), ignored directories (`.git`, `node_modules`, `target`, `dist`) | generated, git-ignored |
 | `weird-files/` | document edge cases (addendum §10.3): see the inventory below | committed, plus a git-ignored `generated/` |
+| `markdown/` | Markdown preview (T050): GFM features, XSS attempts, link resolution cases, a long document, instruction files; see the inventory below | committed |
 
 ## Generating `large-repo`
 
@@ -59,5 +60,19 @@ Tests never write into the committed fixture: `stage_weird_files` copies it
 (recreating the symlinks from a manifest, so Windows checkouts without
 symlinks behave the same) and adds the generated members.
 
-Planned (addendum §10.4): Markdown and Git fixtures arrive with the tasks that
-need them (T050, T100).
+## `markdown` (T050)
+
+Rendering tests snapshot these files; the XSS file is asserted on, never
+"fixed". `long.md` is generated deterministically (400 sections, ~134 KB) and
+committed; regenerate it only with the same script in the T050 report.
+
+| Path | Case |
+|---|---|
+| `gfm.md` | headings, emphasis, lists, task lists, tables with alignment, fenced code (ts, rust, json, none, unknown), indented code, quotes, rules, links of every kind, a relative and a `data:` image, duplicate and punctuated headings |
+| `xss.md` | raw `<script>`, `onerror`, `javascript:` / `vbscript:` / `data:text/html` / `file:` links, entity and percent-encoded schemes, SVG data image, `<iframe>` `<object>` `<embed>` `<style>` `<svg>` `<math>` `<form>`, `id="root"` clobbering, `style` overlays, `target`, benign content that must survive |
+| `links.md` | relative, `./`, `../` (inside and escaping), root-relative, `path:line`, `path:line:col`, anchors, percent-encoded spaces and Unicode, query strings, directories, external, `mailto:`, `ftp:`, drive letters, backslashes, a missing target, an empty link |
+| `long.md` | ~134 KB, 400 sections with lists, tasks, fences and tables: render-time budget |
+| `README.md`, `AGENTS.md` | recognized as instruction files (badge only) |
+| `docs/target.ts`, `docs/nested/deep.md` | link targets (`target.ts:3:5` is a known position; `deep.md#section` an anchor) |
+
+Planned (addendum §10.4): Git fixtures arrive with T100.

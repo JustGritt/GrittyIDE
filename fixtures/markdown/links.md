@@ -1,0 +1,28 @@
+# Links fixture
+
+Resolution is relative to this file (`links.md` at the fixture root).
+
+- [same dir](gfm.md)
+- [dot slash](./gfm.md)
+- [subdir](docs/target.ts)
+- [subdir with line](docs/target.ts:3)
+- [subdir with line and column](docs/target.ts:3:5)
+- [nested](docs/nested/deep.md)
+- [nested anchor](docs/nested/deep.md#section)
+- [root relative](/docs/target.ts)
+- [dot dot inside](docs/../gfm.md)
+- [escape above root](../escape.md)
+- [escape from root](/../escape.md)
+- [spaces](docs/file%20with%20spaces.md)
+- [unicode](docs/h%C3%A9llo.md)
+- [query stripped](docs/target.ts?x=1)
+- [directory](docs/)
+- [anchor](#links-fixture)
+- [external](https://example.com/a?b=c#d)
+- [external http](http://example.com)
+- [mailto](mailto:someone@example.com)
+- [ftp](ftp://example.com/x)
+- [drive letter](C:/Users/x)
+- [backslash](docs\target.ts)
+- [missing](docs/missing.md)
+- [empty]()

@@ -1,0 +1,115 @@
+<h1 data-line="0" data-line-end="1" id="md-gfm-fixture">GFM fixture</h1>
+<p data-line="2" data-line-end="4">Deterministic Markdown covering what the preview must render. Do not edit
+casually: rendering tests snapshot this file.</p>
+<h2 data-line="5" data-line-end="6" id="md-emphasis-and-inline-code">Emphasis and inline code</h2>
+<p data-line="7" data-line-end="9">Plain, <em>emphasis</em>, <strong>strong</strong>, <em><strong>both</strong></em>, <s>strikethrough</s>, <code>inline code</code>,
+a*literal asterisk*, and an entity: © &amp; &lt;tag&gt;.</p>
+<p data-line="10" data-line-end="12">Line one of a paragraph
+continues on line two (soft break).</p>
+<h2 data-line="13" data-line-end="14" id="md-lists">Lists</h2>
+<ul data-line="15" data-line-end="21">
+<li data-line="15" data-line-end="16">unordered one</li>
+<li data-line="16" data-line-end="19">unordered two
+<ul data-line="17" data-line-end="19">
+<li data-line="17" data-line-end="18">nested</li>
+<li data-line="18" data-line-end="19">nested with <code>code</code></li>
+</ul>
+</li>
+<li data-line="19" data-line-end="21">unordered three</li>
+</ul>
+<ol data-line="21" data-line-end="29">
+<li data-line="21" data-line-end="22">
+<p data-line="21" data-line-end="22">ordered one</p>
+</li>
+<li data-line="22" data-line-end="24">
+<p data-line="22" data-line-end="23">ordered two</p>
+<ol data-line="23" data-line-end="24">
+<li data-line="23" data-line-end="24">nested ordered</li>
+</ol>
+</li>
+<li data-line="24" data-line-end="26">
+<p data-line="24" data-line-end="25">ordered three</p>
+</li>
+<li data-line="26" data-line-end="27">
+<p data-line="26" data-line-end="27">starts at five</p>
+</li>
+<li data-line="27" data-line-end="29">
+<p data-line="27" data-line-end="28">six</p>
+</li>
+</ol>
+<h2 data-line="29" data-line-end="30" id="md-task-lists">Task lists</h2>
+<ul data-line="31" data-line-end="37">
+<li data-line="31" data-line-end="32" class="md-task"><input type="checkbox" disabled="" class="md-task__box"> open task</li>
+<li data-line="32" data-line-end="33" class="md-task"><input type="checkbox" disabled="" class="md-task__box" checked=""> done task</li>
+<li data-line="33" data-line-end="34" class="md-task"><input type="checkbox" disabled="" class="md-task__box" checked=""> done task, capital</li>
+<li data-line="34" data-line-end="35">[ ]not a task (no space)</li>
+<li data-line="35" data-line-end="37">regular item with [brackets] in text</li>
+</ul>
+<h2 data-line="37" data-line-end="38" id="md-table">Table</h2>
+<table data-line="39" data-line-end="44">
+<thead data-line="39" data-line-end="40">
+<tr data-line="39" data-line-end="40">
+<th align="left">Name</th>
+<th align="center">Kind</th>
+<th align="right">Size</th>
+</tr>
+</thead>
+<tbody data-line="41" data-line-end="44">
+<tr data-line="41" data-line-end="42">
+<td align="left"><code>a.ts</code></td>
+<td align="center">file</td>
+<td align="right">12</td>
+</tr>
+<tr data-line="42" data-line-end="43">
+<td align="left"><strong>docs</strong></td>
+<td align="center">dir</td>
+<td align="right">3</td>
+</tr>
+<tr data-line="43" data-line-end="44">
+<td align="left">c | pipe</td>
+<td align="center">escaped</td>
+<td align="right">0</td>
+</tr>
+</tbody>
+</table>
+<h2 data-line="45" data-line-end="46" id="md-code">Code</h2>
+<pre class="md-code" data-lang="ts" data-line="47" data-line-end="52" data-md-code="0"><code>export function hello(name: string): string {
+  return `Hello, ${name}!`;
+}
+</code></pre>
+<pre class="md-code" data-lang="rust" data-line="53" data-line-end="58" data-md-code="1"><code>fn main() {
+    println!("hi");
+}
+</code></pre>
+<pre class="md-code" data-lang="json" data-line="59" data-line-end="62" data-md-code="2"><code>{ "key": [1, 2, 3], "nested": { "ok": true } }
+</code></pre>
+<pre class="md-code" data-line="63" data-line-end="66"><code>no language
+</code></pre>
+<pre class="md-code" data-lang="unknown-lang" data-line="67" data-line-end="70" data-md-code="3"><code>still escaped &lt;b&gt;not bold&lt;/b&gt;
+</code></pre>
+<pre data-line="71" data-line-end="73"><code>indented code block
+second line
+</code></pre>
+<h2 data-line="74" data-line-end="75" id="md-quotes-and-rules">Quotes and rules</h2>
+<blockquote data-line="76" data-line-end="80">
+<p data-line="76" data-line-end="78">A quote
+with two lines</p>
+<blockquote data-line="79" data-line-end="80">
+<p data-line="79" data-line-end="80">nested quote</p>
+</blockquote>
+</blockquote>
+<hr data-line="81" data-line-end="82">
+<hr data-line="83" data-line-end="84">
+<h2 data-line="85" data-line-end="86" id="md-links-and-images">Links and images</h2>
+<p data-line="87" data-line-end="90"><a href="docs/target.ts" data-md-kind="document" class="md-link md-link--document" title="docs/target.ts" data-md-path="docs/target.ts">Relative</a>, <a href="docs/target.ts" data-md-kind="document" class="md-link md-link--document" title="docs/target.ts:3" data-md-path="docs/target.ts" data-md-line="3">line</a>, <a href="docs/target.ts" data-md-kind="document" class="md-link md-link--document" title="docs/target.ts:3:5" data-md-path="docs/target.ts" data-md-line="3" data-md-column="5">line and column</a>,
+<a href="#md-table" data-md-kind="anchor" class="md-link md-link--anchor" title="#table" data-md-anchor="md-table">anchor</a>, <a href="https://example.com/path?q=1" data-md-kind="external" class="md-link md-link--external" title="https://example.com/path?q=1" data-md-url="https://example.com/path?q=1">external</a>, <a href="https://example.org" data-md-kind="external" class="md-link md-link--external" title="https://example.org" data-md-url="https://example.org">https://example.org</a>,
+<a href="https://example.com/reference" title="https://example.com/reference" data-md-kind="external" class="md-link md-link--external" data-md-url="https://example.com/reference">reference link</a>, <span data-md-kind="unsupported" class="md-link md-link--unsupported" title="links with the 'mailto:' scheme are not supported">mailto</span>.</p>
+<p data-line="91" data-line-end="92">Bare domain in prose: README.md and AGENTS.md must stay text; <a href="https://example.net/auto" data-md-kind="external" class="md-link md-link--external" title="https://example.net/auto" data-md-url="https://example.net/auto">https://example.net/auto</a> links.</p>
+<p data-line="93" data-line-end="95"><span class="md-image" title="docs/pixel.png">[image: Relative image]</span>
+<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" alt="Data image"></p>
+<h2 data-line="98" data-line-end="99" id="md-headings-with-punctuation--duplicates">Headings with punctuation &amp; duplicates</h2>
+<h3 data-line="100" data-line-end="101" id="md-duplicate">Duplicate</h3>
+<h3 data-line="102" data-line-end="103" id="md-duplicate-1">Duplicate</h3>
+<h3 data-line="104" data-line-end="105" id="md-ünïcödé--heading-with-punctuation">Ünïcödé — heading, with: punctuation!</h3>
+<p data-line="106" data-line-end="108">Final paragraph with a hard break<br>
+after two spaces, and superscript H&lt;sup&gt;2&lt;/sup&gt;O stays escaped.</p>

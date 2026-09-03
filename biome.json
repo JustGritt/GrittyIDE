@@ -14,7 +14,9 @@
       "!**/target",
       "!**/src-tauri/gen",
       "!packages/protocol/src/generated",
-      "!fixtures/weird-files"
+      "!fixtures/weird-files",
+      "!fixtures/markdown",
+      "!**/__snapshots__"
     ]
   },
   "formatter": {
