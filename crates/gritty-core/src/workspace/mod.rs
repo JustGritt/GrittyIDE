@@ -10,7 +10,7 @@
 //! event carries the page. Wire types are exported to TypeScript from here.
 
 use std::path::Path;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::Duration;
 
 use gritty_workspace::{
@@ -58,6 +58,11 @@ pub struct OpenWorkspaceRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub path: Option<String>,
+    /// Replace the current workspace even when it has documents with unsaved
+    /// changes (T030). Without it the command fails with `Conflict`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub force: Option<bool>,
 }
 
 /// `workspace.close`.
@@ -65,6 +70,11 @@ pub struct OpenWorkspaceRequest {
 #[serde(rename_all = "camelCase")]
 pub struct CloseWorkspaceRequest {
     pub workspace_id: WorkspaceId,
+    /// Close even when documents have unsaved changes (T030). Without it the
+    /// command fails with `Conflict` listing them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub force: Option<bool>,
 }
 
 /// `workspace.list`: one level of `path` (`""` is the root).
@@ -104,6 +114,49 @@ pub enum WorkspaceClosedReason {
     RootMissing,
 }
 
+/// What to do with unsaved document changes when a user action would close
+/// the workspace they belong to (T030).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnsavedPolicy {
+    /// Fail with `Conflict` and change nothing (the default).
+    Refuse,
+    /// The UI confirmed that unsaved changes may be dropped (`force: true`).
+    Discard,
+}
+
+impl UnsavedPolicy {
+    pub fn from_force(force: Option<bool>) -> Self {
+        if force == Some(true) {
+            Self::Discard
+        } else {
+            Self::Refuse
+        }
+    }
+}
+
+/// Installed by the document manager (T030) so that closing a workspace never
+/// silently drops unsaved buffers. Both hooks run under the workspace lock;
+/// implementations must not call back into the manager.
+pub trait WorkspaceCloseGuard: Send + Sync {
+    /// Runs before a user-initiated close (`USER`) or replacement
+    /// (`REPLACED`). An `Err` (normally `Conflict`) vetoes it; nothing changes.
+    fn before_close(
+        &self,
+        workspace: &Workspace,
+        reason: WorkspaceClosedReason,
+        policy: UnsavedPolicy,
+    ) -> Result<(), CoreError>;
+
+    /// Runs after `WorkspaceClosed` was emitted, whatever the reason.
+    fn after_close(
+        &self,
+        workspace: &Workspace,
+        reason: WorkspaceClosedReason,
+        actor: &Actor,
+        correlation: Option<&CorrelationId>,
+    );
+}
+
 struct OpenWorkspace {
     workspace: Workspace,
     root: Arc<WorkspaceRoot>,
@@ -114,6 +167,7 @@ pub struct WorkspaceManager {
     events: Arc<EventBus>,
     registry: Arc<OperationRegistry>,
     handle: Handle,
+    close_guard: Mutex<Option<Weak<dyn WorkspaceCloseGuard>>>,
     /// Tests slow the blocking listing down so the budget hand-over and its
     /// cancellation can be exercised deterministically.
     #[cfg(test)]
@@ -131,17 +185,38 @@ impl WorkspaceManager {
             events,
             registry,
             handle,
+            close_guard: Mutex::new(None),
             #[cfg(test)]
             listing_delay: Mutex::new(Duration::ZERO),
         })
     }
 
+    /// Install the guard consulted when a workspace closes (one per process,
+    /// set by the composition root; a `Weak` so the two managers do not keep
+    /// each other alive).
+    pub fn set_close_guard(&self, guard: Weak<dyn WorkspaceCloseGuard>) {
+        *self
+            .close_guard
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(guard);
+    }
+
+    fn guard(&self) -> Option<Arc<dyn WorkspaceCloseGuard>> {
+        self.close_guard
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .and_then(Weak::upgrade)
+    }
+
     /// Open `path` (absolute). Reopening the current root returns it unchanged;
-    /// opening another root closes the current one first (`REPLACED`). A
+    /// opening another root closes the current one first (`REPLACED`), which
+    /// the close guard may veto (`Conflict`) under `UnsavedPolicy::Refuse`. A
     /// failure leaves the current workspace untouched.
     pub fn open(
         &self,
         path: &Path,
+        policy: UnsavedPolicy,
         actor: Actor,
         correlation: CorrelationId,
     ) -> Result<Workspace, CoreError> {
@@ -151,6 +226,11 @@ impl WorkspaceManager {
             && open.root.path() == root.path()
         {
             return Ok(open.workspace.clone());
+        }
+        if let Some(previous) = current.as_ref()
+            && let Some(guard) = self.guard()
+        {
+            guard.before_close(&previous.workspace, WorkspaceClosedReason::Replaced, policy)?;
         }
         if let Some(previous) = current.take() {
             self.emit_closed(
@@ -184,10 +264,13 @@ impl WorkspaceManager {
         Ok(workspace)
     }
 
-    /// Close the workspace with this id; `NotFound` when it is not the open one.
+    /// Close the workspace with this id; `NotFound` when it is not the open
+    /// one, `Conflict` when the close guard refuses (unsaved documents under
+    /// `UnsavedPolicy::Refuse`).
     pub fn close(
         &self,
         id: &WorkspaceId,
+        policy: UnsavedPolicy,
         actor: Actor,
         correlation: CorrelationId,
     ) -> Result<Workspace, CoreError> {
@@ -197,6 +280,11 @@ impl WorkspaceManager {
             .is_some_and(|open| open.workspace.id == *id)
         {
             return Err(CoreError::not_found(format!("workspace {id} is not open")));
+        }
+        if let Some(open) = current.as_ref()
+            && let Some(guard) = self.guard()
+        {
+            guard.before_close(&open.workspace, WorkspaceClosedReason::User, policy)?;
         }
         let open = current.take().expect("checked above");
         self.emit_closed(&open, WorkspaceClosedReason::User, actor, Some(correlation));
@@ -300,7 +388,9 @@ impl WorkspaceManager {
         }
     }
 
-    fn require(
+    /// The open workspace with this id and its root, or `NotFound`. A root that
+    /// disappeared closes the workspace (`ROOT_MISSING`) first.
+    pub(crate) fn require(
         &self,
         id: &WorkspaceId,
         correlation: &CorrelationId,
@@ -345,8 +435,8 @@ impl WorkspaceManager {
         self.events.emit(
             &EventOrigin {
                 workspace_id: Some(open.workspace.id.clone()),
-                correlation_id,
-                actor,
+                correlation_id: correlation_id.clone(),
+                actor: actor.clone(),
             },
             CoreEvent::WorkspaceClosed(WorkspaceClosedPayload {
                 workspace_id: open.workspace.id.clone(),
@@ -354,6 +444,9 @@ impl WorkspaceManager {
                 reason,
             }),
         );
+        if let Some(guard) = self.guard() {
+            guard.after_close(&open.workspace, reason, &actor, correlation_id.as_ref());
+        }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Option<OpenWorkspace>> {
@@ -396,6 +489,17 @@ impl From<WorkspaceError> for CoreError {
                 Self::new(CoreErrorCode::PermissionDenied, message)
             }
             WorkspaceError::NotADirectory(message) => Self::invalid_input("path", message),
+            WorkspaceError::NotAFile(message) => Self::invalid_input("path", message),
+            WorkspaceError::TooLarge { path, size, limit } => Self::invalid_input(
+                "path",
+                format!("{path} is {size} bytes, above the {limit}-byte document limit"),
+            )
+            .with_details(serde_json::json!({
+                "field": "path",
+                "reason": "too large",
+                "size": size,
+                "limit": limit,
+            })),
             WorkspaceError::Io { context, source } => {
                 let mut mapped = Self::from(source);
                 mapped.message = format!("{context}: {}", mapped.message);
@@ -500,7 +604,12 @@ mod tests {
         let correlation = CorrelationId::new();
         let workspace = h
             .manager
-            .open(&dir.0, Actor::User, correlation.clone())
+            .open(
+                &dir.0,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                correlation.clone(),
+            )
             .unwrap();
         assert!(workspace.id.is_well_formed());
         assert_eq!(workspace.name, dir.0.file_name().unwrap().to_string_lossy());
@@ -522,16 +631,31 @@ mod tests {
         let second = TempDir::new("second");
         let a = h
             .manager
-            .open(&first.0, Actor::User, CorrelationId::new())
+            .open(
+                &first.0,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
             .unwrap();
         let again = h
             .manager
-            .open(&first.0, Actor::User, CorrelationId::new())
+            .open(
+                &first.0,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
             .unwrap();
         assert_eq!(a, again);
         let b = h
             .manager
-            .open(&second.0, Actor::User, CorrelationId::new())
+            .open(
+                &second.0,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
             .unwrap();
         assert_ne!(a.id, b.id);
         assert_eq!(
@@ -553,23 +677,43 @@ mod tests {
         let dir = TempDir::new("failures");
         let workspace = h
             .manager
-            .open(&dir.0, Actor::User, CorrelationId::new())
+            .open(
+                &dir.0,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
             .unwrap();
         let missing = std::env::temp_dir().join("gritty-core-ws-does-not-exist");
         let error = h
             .manager
-            .open(&missing, Actor::User, CorrelationId::new())
+            .open(
+                &missing,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
             .unwrap_err();
         assert_eq!(error.code, CoreErrorCode::NotFound);
         let file = dir.0.join("README.md");
         let error = h
             .manager
-            .open(&file, Actor::User, CorrelationId::new())
+            .open(
+                &file,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
             .unwrap_err();
         assert_eq!(error.code, CoreErrorCode::InvalidInput);
         let error = h
             .manager
-            .open(Path::new("relative"), Actor::User, CorrelationId::new())
+            .open(
+                Path::new("relative"),
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
             .unwrap_err();
         assert_eq!(error.code, CoreErrorCode::InvalidInput);
         assert_eq!(h.manager.current(&CorrelationId::new()), Some(workspace));
@@ -582,21 +726,41 @@ mod tests {
         let dir = TempDir::new("close");
         let error = h
             .manager
-            .close(&WorkspaceId::new(), Actor::User, CorrelationId::new())
+            .close(
+                &WorkspaceId::new(),
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
             .unwrap_err();
         assert_eq!(error.code, CoreErrorCode::NotFound);
         let workspace = h
             .manager
-            .open(&dir.0, Actor::User, CorrelationId::new())
+            .open(
+                &dir.0,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
             .unwrap();
         let error = h
             .manager
-            .close(&WorkspaceId::new(), Actor::User, CorrelationId::new())
+            .close(
+                &WorkspaceId::new(),
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
             .unwrap_err();
         assert_eq!(error.code, CoreErrorCode::NotFound);
         let closed = h
             .manager
-            .close(&workspace.id, Actor::User, CorrelationId::new())
+            .close(
+                &workspace.id,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
             .unwrap();
         assert_eq!(closed, workspace);
         let event = h.next_named("WorkspaceClosed").await;
@@ -607,7 +771,12 @@ mod tests {
         assert_eq!(h.manager.current(&CorrelationId::new()), None);
         let error = h
             .manager
-            .close(&workspace.id, Actor::User, CorrelationId::new())
+            .close(
+                &workspace.id,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
             .unwrap_err();
         assert_eq!(error.code, CoreErrorCode::NotFound);
     }
@@ -618,7 +787,12 @@ mod tests {
         let dir = TempDir::new("list");
         let workspace = h
             .manager
-            .open(&dir.0, Actor::User, CorrelationId::new())
+            .open(
+                &dir.0,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
             .unwrap();
         let response = h
             .manager
@@ -671,7 +845,12 @@ mod tests {
         let dir = TempDir::new("pending");
         let workspace = h
             .manager
-            .open(&dir.0, Actor::User, CorrelationId::new())
+            .open(
+                &dir.0,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
             .unwrap();
         slow_listings(&h, Duration::from_millis(150));
         let correlation = CorrelationId::new();
@@ -713,7 +892,12 @@ mod tests {
         let dir = TempDir::new("cancel");
         let workspace = h
             .manager
-            .open(&dir.0, Actor::User, CorrelationId::new())
+            .open(
+                &dir.0,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
             .unwrap();
         slow_listings(&h, Duration::from_millis(300));
         let response = h
@@ -782,7 +966,12 @@ mod tests {
         let dir = TempDir::new("removed");
         let workspace = h
             .manager
-            .open(&dir.0, Actor::User, CorrelationId::new())
+            .open(
+                &dir.0,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
             .unwrap();
         fs::remove_dir_all(&dir.0).unwrap();
         let error = h
@@ -810,7 +999,12 @@ mod tests {
         let dir = TempDir::new("removed-current");
         let workspace = h
             .manager
-            .open(&dir.0, Actor::User, CorrelationId::new())
+            .open(
+                &dir.0,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
             .unwrap();
         fs::remove_dir_all(&dir.0).unwrap();
         assert_eq!(h.manager.current(&CorrelationId::new()), None);

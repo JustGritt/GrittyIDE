@@ -4,7 +4,7 @@ import {
   toCoreError,
   type WorkspaceId,
 } from '@gritty/protocol';
-import { useCallback, useEffect, useReducer, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { core } from '../../core/client';
 import {
   type ExplorerNode,
@@ -16,6 +16,10 @@ import {
 export function useExplorer() {
   const [state, dispatch] = useReducer(explorerReducer, initialExplorerState);
   const [error, setError] = useState<CoreError | null>(null);
+  /** The action the core refused with `Conflict` (dirty documents), replayable with force. */
+  const refused = useRef<{ kind: 'open'; path: string | undefined } | { kind: 'close' } | null>(
+    null,
+  );
 
   useEffect(() => {
     // Subscribe before asking for the current workspace so nothing emitted in
@@ -103,23 +107,35 @@ export function useExplorer() {
   );
 
   const openFolder = useCallback(
-    (path?: string) =>
+    (path?: string, force = false) =>
       run(async () => {
-        const opened = await core.workspace.open(path);
+        refused.current = { kind: 'open', path };
+        const opened = await core.workspace.open(path, force ? { force } : undefined);
+        refused.current = null;
         if (opened) dispatch({ type: 'workspace', workspace: opened });
       }),
     [run],
   );
 
   const closeWorkspace = useCallback(
-    () =>
+    (force = false) =>
       run(async () => {
         if (!workspace) return;
-        await core.workspace.close(workspace.id);
+        refused.current = { kind: 'close' };
+        await core.workspace.close(workspace.id, force ? { force } : undefined);
+        refused.current = null;
         dispatch({ type: 'workspace', workspace: null });
       }),
     [run, workspace],
   );
+
+  /** Replay the refused open/close with `force`: the user chose to drop unsaved changes. */
+  const discardAndRetry = useCallback(async () => {
+    const last = refused.current;
+    if (!last) return;
+    if (last.kind === 'close') await closeWorkspace(true);
+    else await openFolder(last.path, true);
+  }, [closeWorkspace, openFolder]);
 
   const cancelListing = useCallback(
     (node: ExplorerNode) =>
@@ -144,6 +160,7 @@ export function useExplorer() {
     loadMore,
     openFolder,
     closeWorkspace,
+    discardAndRetry,
     cancelListing,
     setShowHidden,
     dismissNotice,

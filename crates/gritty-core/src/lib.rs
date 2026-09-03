@@ -15,7 +15,10 @@
 //! - [`health`]: the `core.health` report.
 //! - [`workspace`]: workspace lifecycle and directory listing (T020) over
 //!   the `gritty-workspace` crate.
+//! - [`document`]: open documents and their buffers (T030, Gate B): dirty
+//!   state, atomic saves, external modification detection.
 
+pub mod document;
 pub mod event;
 pub mod health;
 pub mod operation;

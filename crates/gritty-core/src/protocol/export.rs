@@ -10,6 +10,10 @@ use std::path::Path;
 use ts_rs::{Config, TS};
 
 use super::{CORE_EVENT_CHANNEL, PROTOCOL_VERSION};
+use crate::document::{
+    CloseDocumentRequest, DocumentContent, DocumentStatusRequest, OpenDocumentRequest,
+    ReloadDocumentRequest, SaveDocumentRequest, UpdateDocumentRequest,
+};
 use crate::event::{CoreEvent, EventMeta};
 use crate::health::HealthReport;
 use crate::operation::Operation;
@@ -52,6 +56,13 @@ fn export_bindings() {
     CloseWorkspaceRequest::export_all(&cfg).expect("export CloseWorkspaceRequest");
     ListDirectoryRequest::export_all(&cfg).expect("export ListDirectoryRequest");
     ListDirectoryResponse::export_all(&cfg).expect("export ListDirectoryResponse");
+    DocumentContent::export_all(&cfg).expect("export DocumentContent");
+    OpenDocumentRequest::export_all(&cfg).expect("export OpenDocumentRequest");
+    CloseDocumentRequest::export_all(&cfg).expect("export CloseDocumentRequest");
+    UpdateDocumentRequest::export_all(&cfg).expect("export UpdateDocumentRequest");
+    SaveDocumentRequest::export_all(&cfg).expect("export SaveDocumentRequest");
+    ReloadDocumentRequest::export_all(&cfg).expect("export ReloadDocumentRequest");
+    DocumentStatusRequest::export_all(&cfg).expect("export DocumentStatusRequest");
 
     let version = format!(
         "{HEADER}export const PROTOCOL_VERSION = \"{PROTOCOL_VERSION}\";\n\

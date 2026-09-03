@@ -12,6 +12,13 @@ export const COMMANDS = {
   'workspace.close': 'workspace_close',
   'workspace.current': 'workspace_current',
   'workspace.list': 'workspace_list',
+  'documents.open': 'documents_open',
+  'documents.close': 'documents_close',
+  'documents.update': 'documents_update',
+  'documents.save': 'documents_save',
+  'documents.reload': 'documents_reload',
+  'documents.status': 'documents_status',
+  'documents.list': 'documents_list',
 } as const;
 
 export type CommandName = keyof typeof COMMANDS;

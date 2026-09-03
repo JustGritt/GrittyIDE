@@ -7,4 +7,9 @@ export type OpenWorkspaceRequest = {
 /**
  * Absolute native path of the directory to open.
  */
-path?: string, };
+path?: string, 
+/**
+ * Replace the current workspace even when it has documents with unsaved
+ * changes (T030). Without it the command fails with `Conflict`.
+ */
+force?: boolean, };

@@ -76,6 +76,11 @@ string_id! {
 }
 
 string_id! {
+    /// Identifies an open document (T030).
+    DocumentId => "string & { readonly __brand: 'DocumentId' }"
+}
+
+string_id! {
     /// Identifies an agent run (T300); used by [`super::actor::Actor::Agent`].
     AgentRunId => "string & { readonly __brand: 'AgentRunId' }"
 }
