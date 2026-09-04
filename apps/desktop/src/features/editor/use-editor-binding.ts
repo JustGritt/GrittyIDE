@@ -1,8 +1,10 @@
 import {
   DocumentModelRegistry,
   type EditorPreferences,
+  type EditorViewState,
   type Eol,
   editorOptionsFor,
+  INITIAL_VIEW_STATE,
   isEditableEol,
 } from '@gritty/editor';
 import {
@@ -38,6 +40,15 @@ export interface EditorBinding {
   readText(documentId: DocumentId): string | null;
   /** Move the cursor once the document is shown (now, or after it becomes active). */
   revealPosition(documentId: DocumentId, position: CursorPosition): void;
+  /**
+   * The last known plain view state of a document (cursor, selection anchor,
+   * first visible line), for the session (T060); `null` before anything is known.
+   */
+  readViewState(documentId: DocumentId): EditorViewState | null;
+  /** Put a persisted view state back once the document is shown (now, or when it becomes active). */
+  restoreView(documentId: DocumentId, state: EditorViewState): void;
+  /** Fires after any cursor, selection or scroll change of the active document. */
+  subscribeViewChange(listener: () => void): () => void;
   focus(): void;
 }
 
@@ -67,6 +78,9 @@ export function useEditorBinding(
   const contentListeners = useRef(new Map<DocumentId, Set<() => void>>());
   const contentSubscriptions = useRef(new Map<DocumentId, { dispose(): void }>());
   const pendingReveal = useRef<{ documentId: DocumentId; position: CursorPosition } | null>(null);
+  const viewStates = useRef(new Map<DocumentId, EditorViewState>());
+  const pendingViews = useRef(new Map<DocumentId, EditorViewState>());
+  const viewListeners = useRef(new Set<() => void>());
   const engineRef = useRef<Engine | null>(null);
   engineRef.current = engine;
   const documentsRef = useRef(documents);
@@ -74,6 +88,15 @@ export function useEditorBinding(
 
   const notifyContent = useCallback((documentId: DocumentId) => {
     for (const listener of [...(contentListeners.current.get(documentId) ?? [])]) listener();
+  }, []);
+
+  /** Record a change of the active document's view state and tell the session. */
+  const trackView = useCallback((update: (previous: EditorViewState) => EditorViewState) => {
+    const activeId = documentsRef.current.state.activeId;
+    if (activeId === null) return;
+    const previous = viewStates.current.get(activeId) ?? INITIAL_VIEW_STATE;
+    viewStates.current.set(activeId, update(previous));
+    for (const listener of [...viewListeners.current]) listener();
   }, []);
 
   useEffect(() => {
@@ -90,6 +113,14 @@ export function useEditorBinding(
     });
     const unsubscribeScroll = host.onScrollChange((state) => {
       for (const listener of [...scrollListeners.current]) listener(state);
+      trackView((previous) => ({ ...previous, scrollLine: state.topLine }));
+    });
+    const unsubscribeSelection = host.onSelectionChange((selection) => {
+      trackView((previous) => ({
+        ...previous,
+        cursor: { line: selection.cursor.lineNumber, column: selection.cursor.column },
+        anchor: { line: selection.anchor.lineNumber, column: selection.anchor.column },
+      }));
     });
     const unwatchTheme = watchColorScheme();
     setEngine({ host, registry });
@@ -97,16 +128,19 @@ export function useEditorBinding(
       unwatchTheme();
       unsubscribeCursor();
       unsubscribeScroll();
+      unsubscribeSelection();
       for (const detach of detachers.current.values()) detach();
       detachers.current.clear();
       for (const subscription of contentSubscriptions.current.values()) subscription.dispose();
       contentSubscriptions.current.clear();
       applied.current.clear();
+      viewStates.current.clear();
+      pendingViews.current.clear();
       host.dispose();
       registry.disposeAll();
       setEngine(null);
     };
-  }, []);
+  }, [trackView]);
 
   useEffect(() => {
     if (!engine) return;
@@ -123,6 +157,8 @@ export function useEditorBinding(
       registry.dispose(id);
       host.forgetViewState(id);
       applied.current.delete(id);
+      viewStates.current.delete(id);
+      pendingViews.current.delete(id);
     }
 
     for (const id of order) {
@@ -160,10 +196,15 @@ export function useEditorBinding(
       );
     }
 
+    const pendingView = active && entry ? pendingViews.current.get(active.document.id) : undefined;
+    if (pendingView && active) {
+      pendingViews.current.delete(active.document.id);
+      // After the browser laid the (possibly just unhidden) editor out.
+      requestAnimationFrame(() => host.restoreView(pendingView));
+    }
     const reveal = pendingReveal.current;
     if (reveal && active && entry && reveal.documentId === active.document.id) {
       pendingReveal.current = null;
-      // After the browser laid the (possibly just unhidden) editor out.
       requestAnimationFrame(() => host.revealPosition(reveal.position));
     }
 
@@ -218,6 +259,30 @@ export function useEditorBinding(
     }
   }, []);
 
+  const readViewState = useCallback(
+    (documentId: DocumentId) => viewStates.current.get(documentId) ?? null,
+    [],
+  );
+
+  const restoreView = useCallback((documentId: DocumentId, state: EditorViewState) => {
+    // Known from now on, even for a tab that is never activated.
+    viewStates.current.set(documentId, state);
+    pendingViews.current.set(documentId, state);
+    const engine = engineRef.current;
+    const activeId = documentsRef.current.state.activeId;
+    if (engine && activeId === documentId && engine.registry.get(documentId)) {
+      pendingViews.current.delete(documentId);
+      requestAnimationFrame(() => engine.host.restoreView(state));
+    }
+  }, []);
+
+  const subscribeViewChange = useCallback((listener: () => void) => {
+    viewListeners.current.add(listener);
+    return () => {
+      viewListeners.current.delete(listener);
+    };
+  }, []);
+
   const focus = useCallback(() => engine?.host.focus(), [engine]);
 
   return {
@@ -228,6 +293,9 @@ export function useEditorBinding(
     subscribeContent,
     readText,
     revealPosition,
+    readViewState,
+    restoreView,
+    subscribeViewChange,
     focus,
   };
 }

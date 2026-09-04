@@ -1034,3 +1034,64 @@ button:disabled {
 .md-content .md-fallback {
   white-space: pre-wrap;
 }
+
+/* Session (T060): notices and the recovery prompt */
+.session-notices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.25rem 1rem 0;
+}
+
+.session-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted);
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.session-notice--degraded {
+  border-left-color: var(--error);
+}
+
+.session-notice__path {
+  font-size: 0.8rem;
+  word-break: break-all;
+}
+
+.recovery__list {
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.recovery__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.recovery__state,
+.recovery__status {
+  color: var(--muted);
+}
+
+.recovery__error {
+  color: var(--error);
+}
+
+.recovery__actions {
+  display: inline-flex;
+  gap: 0.35rem;
+}

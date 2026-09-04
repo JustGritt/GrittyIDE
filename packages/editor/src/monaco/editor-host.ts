@@ -5,6 +5,7 @@ import {
   type EditorOptions,
   editorOptionsFor,
 } from '../editor-options';
+import type { EditorViewState } from '../view-state';
 
 export type EditorTheme = 'vs' | 'vs-dark';
 
@@ -19,6 +20,12 @@ export interface ScrollState {
   readonly atBottom: boolean;
 }
 
+/** The primary selection: where it started and where the cursor is. */
+export interface SelectionState {
+  readonly anchor: CursorPosition;
+  readonly cursor: CursorPosition;
+}
+
 /**
  * One Monaco editor instance for the pane. Tabs switch models; the view state
  * (cursor, selection, scroll, folding) of each document is kept per id.
@@ -30,10 +37,18 @@ export interface EditorHost {
   /** Cmd/Ctrl+S while the editor has focus. */
   onSave(callback: () => void): void;
   onCursorChange(callback: (position: CursorPosition) => void): () => void;
+  /** Every selection change (a plain cursor move included): anchor and head as plain numbers. */
+  onSelectionChange(callback: (selection: SelectionState) => void): () => void;
   /** Vertical scrolls only; silent while the editor is hidden (no visible range). */
   onScrollChange(callback: (state: ScrollState) => void): () => void;
   /** Move the cursor (clamped by Monaco), scroll it into view, focus. */
   revealPosition(position: CursorPosition): void;
+  /**
+   * Put a persisted view state back (T060): selection, then the first
+   * visible line. Clamped by Monaco; never focuses, never persists Monaco's
+   * own view-state object.
+   */
+  restoreView(state: EditorViewState): void;
   forgetViewState(documentId: DocumentId): void;
   dispose(): void;
 }
@@ -77,6 +92,19 @@ export function createEditorHost(container: HTMLElement): EditorHost {
       });
       return () => subscription.dispose();
     },
+    onSelectionChange(callback) {
+      const subscription = editor.onDidChangeCursorSelection((event) => {
+        const selection = event.selection;
+        callback({
+          anchor: {
+            lineNumber: selection.selectionStartLineNumber,
+            column: selection.selectionStartColumn,
+          },
+          cursor: { lineNumber: selection.positionLineNumber, column: selection.positionColumn },
+        });
+      });
+      return () => subscription.dispose();
+    },
     onScrollChange(callback) {
       const subscription = editor.onDidScrollChange((event) => {
         if (!event.scrollTopChanged) return;
@@ -93,6 +121,16 @@ export function createEditorHost(container: HTMLElement): EditorHost {
       editor.setPosition(target);
       editor.revealPositionInCenter(target);
       editor.focus();
+    },
+    restoreView(state) {
+      if (!editor.getModel()) return;
+      editor.setSelection({
+        selectionStartLineNumber: state.anchor.line,
+        selectionStartColumn: state.anchor.column,
+        positionLineNumber: state.cursor.line,
+        positionColumn: state.cursor.column,
+      });
+      editor.setScrollTop(editor.getTopForLineNumber(Math.max(1, state.scrollLine)));
     },
     forgetViewState(documentId) {
       viewStates.delete(documentId);

@@ -1,5 +1,6 @@
 import {
   type CoreError,
+  type Document,
   type DocumentContent,
   type DocumentId,
   toCoreError,
@@ -40,6 +41,10 @@ export type OpenFileResult =
  * per document), saves, reloads, and re-checks the disk when the window
  * regains focus. Text lives in the core; the editor holds at most one
  * debounce interval of keystrokes; this hook only mirrors and forwards.
+ *
+ * Rehydration after a renderer reload (`documents.list` then `documents.open`
+ * per document) is exposed as `rehydrate` and driven by the session hook
+ * (T060), which runs it whether or not the persisted session could be read.
  */
 export function useDocuments() {
   const [state, dispatch] = useReducer(documentsReducer, initialDocumentsState);
@@ -170,7 +175,7 @@ export function useDocuments() {
       }),
   );
 
-  // Events, and rehydration after a renderer reload: the core still holds every buffer.
+  // Events from the core; the store applies them idempotently.
   useEffect(() => {
     const unsubscribe = core.subscribeAll((event) => {
       if (event.name === 'DocumentClosed') {
@@ -185,27 +190,39 @@ export function useDocuments() {
       }
       dispatch({ type: 'event', event });
     });
-    let active = true;
-    core.documents
-      .list()
-      .then(async (documents) => {
-        for (const [index, document] of documents.entries()) {
-          const content = await core.documents.open({
-            workspaceId: document.workspaceId,
-            path: document.path,
-          });
-          if (active) opened(content, index === 0);
-        }
-      })
-      .catch((cause: unknown) => {
-        if (active) setError(toCoreError(cause));
-      });
     return () => {
-      active = false;
       unsubscribe();
       scheduler.cancelAll();
     };
-  }, [scheduler, opened, forget]);
+  }, [scheduler, forget]);
+
+  /**
+   * Open every document the core still holds (a renderer reload: the core
+   * returns the live buffer, not the disk). Resolves with the core's list.
+   */
+  const rehydrate = useCallback(async (): Promise<Document[]> => {
+    try {
+      const documents = await core.documents.list();
+      for (const document of documents) {
+        if (stateRef.current.tabs[document.id]) continue;
+        const content = await core.documents.open({
+          workspaceId: document.workspaceId,
+          path: document.path,
+        });
+        opened(content, stateRef.current.activeId === null);
+      }
+      return documents;
+    } catch (cause: unknown) {
+      setError(toCoreError(cause));
+      throw cause;
+    }
+  }, [opened]);
+
+  /** Take in a document the core opened on our behalf (a recovered snapshot). */
+  const adopt = useCallback(
+    (content: DocumentContent, activate: boolean) => opened(content, activate),
+    [opened],
+  );
 
   const checkStatus = useCallback(async () => {
     if (stateRef.current.order.length === 0) return;
@@ -367,6 +384,8 @@ export function useDocuments() {
   return {
     state,
     error,
+    rehydrate,
+    adopt,
     openFile,
     attach,
     touch,

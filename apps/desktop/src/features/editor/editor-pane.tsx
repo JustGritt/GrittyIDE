@@ -1,7 +1,13 @@
-import { dominantEol, type EolTarget, isEditableEol, normalizeEol } from '@gritty/editor';
+import {
+  dominantEol,
+  type EditorPreferences,
+  type EolTarget,
+  isEditableEol,
+  normalizeEol,
+} from '@gritty/editor';
 import { isInstructionFile } from '@gritty/markdown';
 import { type DocumentId, toCoreError } from '@gritty/protocol';
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { type Dispatch, useCallback, useEffect, useRef, useState } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
 import { core } from '../../core/client';
 import {
@@ -15,15 +21,16 @@ import type { DocumentsController } from '../documents/use-documents';
 import { MarkdownPreview } from '../markdown/markdown-preview';
 import { MarkdownToolbar } from '../markdown/markdown-toolbar';
 import type { PreviewLinkAction } from '../markdown/preview-links';
-import { viewModeFor, viewModesReducer } from '../markdown/view-modes';
+import { type ViewModes, type ViewModesAction, viewModeFor } from '../markdown/view-modes';
+import { RecoveryPrompt } from '../session/recovery-prompt';
+import type { SessionController } from '../session/use-session';
 import { CloseDialog } from './close-dialog';
-import { useEditorPreferences } from './editor-preferences';
 import { workerStatus } from './monaco-setup';
 import { OrphansPanel } from './orphans-panel';
 import { PreferencesPopover } from './preferences-popover';
 import { StatusBar } from './status-bar';
 import { TabStrip } from './tab-strip';
-import { useEditorBinding } from './use-editor-binding';
+import type { EditorBinding } from './use-editor-binding';
 
 const EXTERNAL_MESSAGES: Record<PendingExternalState, string> = {
   MODIFIED_EXTERNALLY: 'This file changed on disk. Your buffer has no unsaved edits.',
@@ -36,11 +43,27 @@ const EXTERNAL_MESSAGES: Record<PendingExternalState, string> = {
  * The Monaco editing surface (T040): tabs, one editor bound to the core's
  * buffers, the external-change / conflict banners, placeholders for binary
  * and large documents, the mixed line-ending notice, and the status bar.
+ * Preferences, view modes and the editor binding are owned by `App` so the
+ * session (T060) can restore and persist them.
  */
-export function EditorPane({ documents }: { documents: DocumentsController }) {
+export function EditorPane({
+  documents,
+  editor,
+  prefs,
+  onPrefsChange,
+  modes,
+  dispatchMode,
+  session,
+}: {
+  documents: DocumentsController;
+  editor: EditorBinding;
+  prefs: EditorPreferences;
+  onPrefsChange: (patch: Partial<EditorPreferences>) => void;
+  modes: ViewModes;
+  dispatchMode: Dispatch<ViewModesAction>;
+  session: SessionController;
+}) {
   const { state } = documents;
-  const { prefs, update } = useEditorPreferences();
-  const editor = useEditorBinding(documents, prefs);
   const [closing, setClosing] = useState<DocumentId | null>(null);
   const [closingBusy, setClosingBusy] = useState(false);
   const [workers, setWorkers] = useState(workerStatus.snapshot());
@@ -50,9 +73,7 @@ export function EditorPane({ documents }: { documents: DocumentsController }) {
   const activeEol = active ? (editor.eols[active.document.id] ?? null) : null;
   const closingTab = closing === null ? null : (state.tabs[closing] ?? null);
 
-  // Markdown: per-tab view mode, link outcomes and notices (in memory; T060 persists modes).
-  const [modes, dispatchMode] = useReducer(viewModesReducer, {});
-  useEffect(() => dispatchMode({ type: 'prune', open: state.order }), [state.order]);
+  // Markdown: link outcomes and notices; the view modes come from `App`.
   const [brokenTargets, setBrokenTargets] = useState<ReadonlySet<string>>(() => new Set());
   const [previewNotice, setPreviewNotice] = useState<string | null>(null);
   const activeRef = useRef(active);
@@ -107,7 +128,7 @@ export function EditorPane({ documents }: { documents: DocumentsController }) {
           return;
       }
     },
-    [documents.openFile, editor.revealPosition, modes],
+    [documents.openFile, editor.revealPosition, modes, dispatchMode],
   );
 
   const requestClose = useCallback(
@@ -147,7 +168,7 @@ export function EditorPane({ documents }: { documents: DocumentsController }) {
           onClose={requestClose}
           onReorder={documents.reorder}
         />
-        <PreferencesPopover prefs={prefs} onChange={update} />
+        <PreferencesPopover prefs={prefs} onChange={onPrefsChange} />
       </div>
 
       {documents.error && (
@@ -168,6 +189,8 @@ export function EditorPane({ documents }: { documents: DocumentsController }) {
           </ul>
         </div>
       )}
+
+      <RecoveryPrompt session={session} />
 
       {active && <Banners tab={active} eol={activeEol} documents={documents} />}
 

@@ -13,8 +13,20 @@ import {
   isExpandable,
 } from './explorer-reducer';
 
-export function useExplorer() {
+export interface ExplorerOptions {
+  /** Controlled by the session layout (T060); the local state follows it. */
+  readonly showHidden?: boolean;
+  onShowHiddenChange?(showHidden: boolean): void;
+}
+
+export function useExplorer(options: ExplorerOptions = {}) {
   const [state, dispatch] = useReducer(explorerReducer, initialExplorerState);
+  const { showHidden: controlledShowHidden, onShowHiddenChange } = options;
+  useEffect(() => {
+    if (controlledShowHidden !== undefined) {
+      dispatch({ type: 'setShowHidden', showHidden: controlledShowHidden });
+    }
+  }, [controlledShowHidden]);
   const [error, setError] = useState<CoreError | null>(null);
   /** The action the core refused with `Conflict` (dirty documents), replayable with force. */
   const refused = useRef<{ kind: 'open'; path: string | undefined } | { kind: 'close' } | null>(
@@ -146,8 +158,11 @@ export function useExplorer() {
   );
 
   const setShowHidden = useCallback(
-    (showHidden: boolean) => dispatch({ type: 'setShowHidden', showHidden }),
-    [],
+    (showHidden: boolean) => {
+      dispatch({ type: 'setShowHidden', showHidden });
+      onShowHiddenChange?.(showHidden);
+    },
+    [onShowHiddenChange],
   );
   const dismissNotice = useCallback(() => dispatch({ type: 'dismissNotice' }), []);
   const clearError = useCallback(() => setError(null), []);
