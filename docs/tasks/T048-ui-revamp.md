@@ -1,7 +1,7 @@
 # Task T048 — Shell UI revamp (design artboard 2a)
 
 - **Phase:** 0
-- **Status:** review
+- **Status:** done
 - **Depends on:** T020, T030, T040, T046, T050, T060, T090
 
 ## Objective

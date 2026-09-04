@@ -12,14 +12,14 @@ domain abstraction before its upstream contract exists.
 | [T030](T030-file-io-documents.md) | File I/O + document/buffer contract (Gate B) | 0/1A | T020 | done |
 | [T040](T040-monaco-shell.md) | Monaco shell | 0/1A | T030 | done |
 | [T045](T045-drag-and-drop.md) | Drag and drop files/folders onto the window | 1A | T030, T040 | in-progress |
-| [T046](T046-resizable-panes.md) | Resizable panes, and a terminal on opening | 1A | T040, T060, T095 | review |
-| [T047](T047-terminal-names.md) | Naming terminal sessions | 1A | T090, T095 | review |
-| [T048](T048-ui-revamp.md) | Shell UI revamp from design artboard 2a | 0 | T020, T030, T040, T046, T050, T060, T090 | review |
+| [T046](T046-resizable-panes.md) | Resizable panes, and a terminal on opening | 1A | T040, T060, T095 | done |
+| [T047](T047-terminal-names.md) | Naming terminal sessions | 1A | T090, T095 | done |
+| [T048](T048-ui-revamp.md) | Shell UI revamp from design artboard 2a | 0 | T020, T030, T040, T046, T050, T060, T090 | done |
 | [T049](T049-startup-screen.md) | Startup screen from design artboard 3a | 0 | T020, T030, T048, T060, T095 | review |
 | [T050](T050-markdown.md) | Markdown | 0/1B | T030, T040 | done |
 | [T060](T060-session-persistence.md) | Session persistence + recovery | 0/1B | T030, T040 | done |
 | [T090](T090-terminal-pty.md) | Terminal (PTY) spike | 0/2 | T010 | done |
-| [T095](T095-terminal-profiles.md) | Terminal shell profiles and rooting | 0/2 | T090, T060 | review |
+| [T095](T095-terminal-profiles.md) | Terminal shell profiles and rooting | 0/2 | T090, T060 | done |
 | Phase 0 tests | `docs/plans/phase-0-spike.md` sections B–D | 0 | T060, T090 | in-progress |
 | ADR-001 | Confirm or reject Tauri | 0 | Phase 0 tests | todo |
 | T070 | File watcher | 1A/2 | T020, ADR-001 | not yet specified |
