@@ -19,6 +19,13 @@ export interface ExplorerOptions {
   onShowHiddenChange?(showHidden: boolean): void;
 }
 
+/**
+ * The explorer as its consumers see it. The shell owns the instance (T049):
+ * the launcher needs `openFolder` and the top bar needs `state.workspace`, and
+ * a second instance would mean a second subscription and a second tree.
+ */
+export type ExplorerController = ReturnType<typeof useExplorer>;
+
 export function useExplorer(options: ExplorerOptions = {}) {
   const [state, dispatch] = useReducer(explorerReducer, initialExplorerState);
   const { showHidden: controlledShowHidden, onShowHiddenChange } = options;

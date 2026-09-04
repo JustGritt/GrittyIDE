@@ -1,4 +1,4 @@
-import { toCoreError, type Workspace } from '@gritty/protocol';
+import { toCoreError } from '@gritty/protocol';
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { Splitter } from './components/splitter';
 import { boundsWithin } from './components/splitter-geometry';
@@ -14,12 +14,16 @@ import { StatusBar } from './features/editor/status-bar';
 import { useCloseFlow } from './features/editor/use-close-flow';
 import { useEditorBinding } from './features/editor/use-editor-binding';
 import { ExplorerPanel } from './features/explorer/explorer-panel';
+import { useExplorer } from './features/explorer/use-explorer';
+import { Launcher } from './features/launcher/launcher';
 import { viewModesReducer } from './features/markdown/view-modes';
 import { OperationsPanel } from './features/operations/operations-panel';
 import { DEFAULT_LAYOUT, type Layout, PANE_LIMITS } from './features/session/persisted-layout';
 import { SessionNotices } from './features/session/session-notices';
 import { useSession } from './features/session/use-session';
 import { AppBar, type HealthState } from './features/shell/app-bar';
+import { type Accelerator, acceleratorForOs } from './features/shell/open-shortcuts';
+import { useOpenShortcuts } from './features/shell/use-open-shortcuts';
 import { TerminalPanel } from './features/terminal/terminal-panel';
 import { useTerminals } from './features/terminal/use-terminals';
 
@@ -43,9 +47,18 @@ export function App() {
   // through the ordinary commands).
   const drop = useFileDrop(documents);
   const [layout, setLayout] = useState<Layout>(DEFAULT_LAYOUT);
-  // The top bar names the open workspace; the explorer owns the subscription
-  // and reports it up (T048).
-  const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  // The workspace lives here (T049), not inside the explorer: the launcher
+  // opens folders through the same controller and the top bar names the same
+  // workspace, so there is one subscription and one tree.
+  const explorer = useExplorer({
+    showHidden: layout.explorer.showHidden,
+    onShowHiddenChange: (showHidden) =>
+      setLayout((current) => ({ ...current, explorer: { showHidden } })),
+  });
+  const workspace = explorer.state.workspace;
+  // Only the launcher has a path field, so ⌘⇧O is its shortcut and the shell
+  // holds the disclosure it opens.
+  const [pathOpen, setPathOpen] = useState(false);
   // The gutters write their CSS variables straight onto this element while
   // dragging, so a drag never re-renders the shell (T046).
   const shell = useRef<HTMLElement | null>(null);
@@ -84,6 +97,25 @@ export function App() {
     };
   }, []);
 
+  // The core knows the platform; `navigator.platform` is deprecated and lies
+  // under emulation. Null until health lands, which leaves the shortcuts inert
+  // rather than guessing which modifier is "the command key".
+  const accelerator: Accelerator | null =
+    state.status === 'ready' ? acceleratorForOs(state.health.os) : null;
+  const openFolder = useCallback(
+    (path?: string) => {
+      setPathOpen(false);
+      void explorer.openFolder(path);
+    },
+    [explorer.openFolder],
+  );
+  useOpenShortcuts(accelerator, {
+    onOpenFolder: () => openFolder(),
+    // Only the launcher has a field to focus; with a workspace open the chord
+    // is left to whatever else wants it.
+    onOpenPath: workspace ? undefined : () => setPathOpen(true),
+  });
+
   const sidebarBounds = useCallback(
     (root: HTMLElement) =>
       boundsWithin(
@@ -119,42 +151,55 @@ export function App() {
       <AppBar health={state} workspace={workspace} />
       <SessionNotices session={session} />
       <DropOverlay drop={drop} />
-      <div className="shell__body">
-        <aside className="shell__sidebar">
-          <ExplorerPanel
-            onOpenFile={(workspaceId, path) => void documents.openFile(workspaceId, path)}
-            showHidden={layout.explorer.showHidden}
-            onShowHiddenChange={(showHidden) =>
-              setLayout((current) => ({ ...current, explorer: { showHidden } }))
+      {/* The panels are hidden until a workspace exists (T049, artboard 3a),
+          and the launcher waits for the session to settle rather than
+          flashing while the last workspace is being reopened: `workspace` is
+          null both before and after that, `phase` is what tells them apart. */}
+      {workspace ? (
+        <div className="shell__body">
+          <aside className="shell__sidebar">
+            <ExplorerPanel
+              explorer={explorer}
+              onOpenFile={(workspaceId, path) => void documents.openFile(workspaceId, path)}
+            />
+            {import.meta.env.DEV && <OperationsPanel />}
+          </aside>
+          <Splitter
+            orientation="vertical"
+            label="Resize the sidebar"
+            value={layout.panes.sidebarWidth}
+            fallback={PANE_LIMITS.sidebar.default}
+            direction={1}
+            target={shell}
+            property="--sidebar-width"
+            bounds={sidebarBounds}
+            onCommit={(sidebarWidth) =>
+              setLayout((current) => ({ ...current, panes: { ...current.panes, sidebarWidth } }))
             }
-            onWorkspaceChange={setWorkspace}
           />
-          {import.meta.env.DEV && <OperationsPanel />}
-        </aside>
-        <Splitter
-          orientation="vertical"
-          label="Resize the sidebar"
-          value={layout.panes.sidebarWidth}
-          fallback={PANE_LIMITS.sidebar.default}
-          direction={1}
-          target={shell}
-          property="--sidebar-width"
-          bounds={sidebarBounds}
-          onCommit={(sidebarWidth) =>
-            setLayout((current) => ({ ...current, panes: { ...current.panes, sidebarWidth } }))
-          }
+          <EditorPane
+            documents={documents}
+            editor={editor}
+            prefs={prefs}
+            onPrefsChange={updatePrefs}
+            modes={modes}
+            dispatchMode={dispatchMode}
+            session={session}
+            onRequestClose={closeFlow.request}
+          />
+        </div>
+      ) : session.state.phase === 'ready' ? (
+        <Launcher
+          accelerator={accelerator}
+          pathOpen={pathOpen}
+          onPathOpenChange={setPathOpen}
+          onOpen={openFolder}
+          onPickFolder={() => openFolder()}
         />
-        <EditorPane
-          documents={documents}
-          editor={editor}
-          prefs={prefs}
-          onPrefsChange={updatePrefs}
-          modes={modes}
-          dispatchMode={dispatchMode}
-          session={session}
-          onRequestClose={closeFlow.request}
-        />
-      </div>
+      ) : null}
+      {/* The dock stays mounted with no workspace open: T095 roots a shell in
+          the home directory when there is none, and unmounting would dispose
+          every xterm and its scrollback. */}
       <footer className="shell__dock">
         {/* Only while the dock is open: resizing a collapsed panel means
             nothing, and an invisible tab stop is worse than no gutter. */}
@@ -203,6 +248,7 @@ export function App() {
           the contract knows about the active document (T048). */}
       <StatusBar
         health={state}
+        workspace={workspace}
         tab={active}
         eol={activeEol}
         subscribeCursor={editor.subscribeCursor}

@@ -1,6 +1,6 @@
 import { isInstructionFile } from '@gritty/markdown';
-import type { DirEntry, Workspace, WorkspaceClosedReason, WorkspaceId } from '@gritty/protocol';
-import { type FormEvent, useEffect, useState } from 'react';
+import type { DirEntry, WorkspaceClosedReason, WorkspaceId } from '@gritty/protocol';
+import { type FormEvent, useState } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
 import {
   countHidden,
@@ -9,7 +9,7 @@ import {
   isExpandable,
   selectRows,
 } from './explorer-reducer';
-import { useExplorer } from './use-explorer';
+import type { ExplorerController } from './use-explorer';
 
 const CLOSED_REASONS: Record<WorkspaceClosedReason, string> = {
   USER: 'closed',
@@ -24,27 +24,19 @@ const CLOSED_REASONS: Record<WorkspaceClosedReason, string> = {
  * hands it to `onOpenFile` (T030 documents).
  */
 export function ExplorerPanel({
+  explorer,
   onOpenFile,
-  showHidden,
-  onShowHiddenChange,
-  onWorkspaceChange,
 }: {
-  onOpenFile?: (workspaceId: WorkspaceId, path: string) => void;
-  /** Persisted layout (T060). */
-  showHidden?: boolean;
-  onShowHiddenChange?: (showHidden: boolean) => void;
   /**
-   * The top bar names the open workspace (T048). The explorer owns the
-   * subscription, so it reports the workspace up rather than the shell opening
-   * a second one.
+   * Owned by the shell (T049), not created here: the launcher opens folders
+   * through the same controller and the top bar reads its workspace, and two
+   * instances would mean two subscriptions and two trees.
    */
-  onWorkspaceChange?: (workspace: Workspace | null) => void;
+  explorer: ExplorerController;
+  onOpenFile?: (workspaceId: WorkspaceId, path: string) => void;
 }) {
-  const explorer = useExplorer({ showHidden, onShowHiddenChange });
   const { state } = explorer;
   const [pathInput, setPathInput] = useState('');
-  const workspace = state.workspace;
-  useEffect(() => onWorkspaceChange?.(workspace), [workspace, onWorkspaceChange]);
 
   function onOpenPath(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

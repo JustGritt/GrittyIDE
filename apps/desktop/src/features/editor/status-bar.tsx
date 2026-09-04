@@ -1,6 +1,6 @@
 import { type Eol, eolLabel } from '@gritty/editor';
 import type { CursorPosition } from '@gritty/editor/monaco';
-import type { DocumentId } from '@gritty/protocol';
+import type { DocumentId, Workspace } from '@gritty/protocol';
 import { useEffect, useState } from 'react';
 import { type DocumentTab, isUnsaved, pendingExternalState } from '../documents/documents-reducer';
 import type { DocumentsController } from '../documents/use-documents';
@@ -16,6 +16,7 @@ import type { HealthState } from '../shell/app-bar';
  */
 export function StatusBar({
   health,
+  workspace,
   tab,
   eol,
   subscribeCursor,
@@ -23,6 +24,7 @@ export function StatusBar({
   onClose,
 }: {
   health: HealthState;
+  workspace: Workspace | null;
   tab: DocumentTab | null;
   eol: Eol | null;
   subscribeCursor: (listener: (position: CursorPosition) => void) => () => void;
@@ -46,7 +48,11 @@ export function StatusBar({
           onClose={onClose}
         />
       ) : (
-        <span className="statusbar__spacer" />
+        <>
+          <span className="statusbar__spacer" />
+          {/* With nothing open the bar still answers "where am I" (T049). */}
+          {workspace === null && <span>no workspace</span>}
+        </>
       )}
     </div>
   );
