@@ -74,6 +74,20 @@ export interface DocumentFlags {
   readonly editableEol: boolean;
 }
 
+/**
+ * Must match the `--font-mono` design token (ADR-016). Monaco measures its font
+ * on a canvas, where a `var()` does not resolve, so this is the one place the
+ * stack is repeated — keep the two in step.
+ */
+export const EDITOR_FONT_STACK = 'ui-monospace, SFMono-Regular, Menlo, monospace';
+
+/**
+ * A multiplier, not a pixel value: Monaco reads a `lineHeight` below 8 as a
+ * ratio of the font size, so the editor keeps its rhythm when the user changes
+ * the size in preferences.
+ */
+export const EDITOR_LINE_HEIGHT = 1.5;
+
 /** Monaco's default is 20 000; the 12 MiB fixture needs nothing more than plaintext anyway. */
 export const MAX_TOKENIZATION_LINE_LENGTH = 20_000;
 export const LARGE_FILE_MAX_TOKENIZATION_LINE_LENGTH = 1_000;
@@ -101,6 +115,8 @@ export function editorOptionsFor(prefs: EditorPreferences, flags: DocumentFlags)
   const reason = readOnlyReason(flags);
   const base: EditorOptions = {
     fontSize: prefs.fontSize,
+    fontFamily: EDITOR_FONT_STACK,
+    lineHeight: EDITOR_LINE_HEIGHT,
     wordWrap: prefs.wordWrap ? 'on' : 'off',
     minimap: { enabled: prefs.minimap },
     readOnly: reason !== null,

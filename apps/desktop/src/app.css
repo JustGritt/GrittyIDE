@@ -1,23 +1,4 @@
-:root {
-  color-scheme: light dark;
-  --bg: #111418;
-  --fg: #e6e9ef;
-  --muted: #9aa4b2;
-  --ok: #7bd88f;
-  --error: #ff7b72;
-  --border: #2a313a;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  font-size: 14px;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f7f8fa;
-    --fg: #1b1f24;
-    --muted: #57606a;
-    --border: #d0d7de;
-  }
-}
+@import "./styles/tokens.css";
 
 * {
   box-sizing: border-box;
@@ -31,90 +12,200 @@ body,
 }
 
 body {
-  background: var(--bg);
+  background: var(--surface-base);
   color: var(--fg);
+  font-size: var(--text-body);
   -webkit-font-smoothing: antialiased;
 }
 
+/* The shell is edge-to-edge chrome (T048). It used to be a padded page with
+   each region floating as a bordered card; depth now comes from the surface
+   ramp, and the hairline is kept for boundaries that are real. */
 .shell {
   height: 100%;
   display: flex;
   flex-direction: column;
-  padding: 0.75rem 1rem 1rem;
-  gap: 0.75rem;
+  background: var(--surface-base);
+  overflow: hidden;
 }
 
-.shell__header h1 {
-  margin: 0 0 0.25rem;
-  font-size: 1.5rem;
+/* Top bar: who you are, where you are, and whether the core is answering. */
+
+.appbar {
+  height: var(--bar-h);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-lg);
+  padding: 0 var(--gap-md);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-chrome);
+}
+
+.appbar__identity {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap);
+  flex: none;
+  min-width: 0;
+}
+
+.appbar__wordmark {
+  margin: 0;
+  font-size: var(--text-title);
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
 }
 
-.shell__tagline {
-  margin: 0;
-  color: var(--muted);
+.appbar__workspace {
+  font-family: var(--font-mono);
+  font-size: var(--text-control);
+  color: var(--fg-muted);
+  white-space: nowrap;
 }
 
-.shell__status {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1rem 1.25rem;
-  max-width: 40rem;
+.appbar__path {
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  color: var(--fg-muted);
+  background: var(--surface-control);
+  border-radius: var(--radius);
+  padding: 2px 7px;
+  max-width: 32rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.shell__ok,
-.shell__facts dd {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+.appbar__spacer {
+  flex: 1;
 }
 
-.shell__ok {
-  color: var(--ok);
-  margin: 0 0 0.75rem;
-  font-size: 0.9rem;
+.appbar__health {
+  flex: none;
+  position: relative;
 }
 
-.shell__error {
-  color: var(--error);
-  margin: 0;
+.appbar__health summary {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--text-control);
+  color: var(--fg-muted);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  white-space: nowrap;
 }
 
-.shell__facts {
+.appbar__health summary::-webkit-details-marker {
+  display: none;
+}
+
+.appbar__health summary:hover {
+  background: var(--ghost);
+  color: var(--fg);
+}
+
+/* A dot, not a sentence: the colour is the state, the popover has the detail. */
+.appbar__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--fg-faint);
+}
+
+.appbar__dot--ok {
+  background: var(--ok);
+}
+
+.appbar__dot--error {
+  background: var(--error);
+}
+
+/* Anchored to the bar rather than pushing it open, so the layout below never
+   moves when the disclosure is used. */
+.appbar__facts {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 15;
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 0.25rem 1rem;
+  gap: var(--gap-xs) var(--gap-md);
   margin: 0;
+  padding: 10px 12px;
+  min-width: 20rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 35%);
+  font-size: var(--text-control);
 }
 
-.shell__facts dt {
-  color: var(--muted);
+.appbar__facts dt {
+  color: var(--fg-muted);
 }
 
-.shell__facts dd {
+.appbar__facts dd {
   margin: 0;
+  font-family: var(--font-mono);
+}
+
+.appbar__error {
+  color: var(--error-text);
+  margin: 0;
+  padding: 0 12px 10px;
+  font-size: var(--text-control);
+}
+
+/* Uppercase micro-label used by every section header in the shell. */
+.label {
+  font-size: var(--text-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+/* A count or a state, riding alongside a label. */
+.badge {
+  font-size: var(--text-meta);
+  color: var(--fg-muted);
+  background: var(--surface-control);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+  white-space: nowrap;
 }
 
 /* Error envelope */
 
 .envelope {
-  border: 1px solid var(--error);
-  border-radius: 8px;
-  padding: 0.75rem 1rem;
-  margin: 0.75rem 0;
+  background: var(--error-wash);
+  border-radius: var(--radius-lg);
+  padding: 10px 12px;
+  margin: var(--gap) var(--gap-md);
   max-width: 40rem;
+  min-width: 0;
+  /* It can appear in the 244px sidebar as well as the editor, and a core error
+     message has no length limit. */
+  max-height: 40vh;
+  overflow: auto;
 }
 
 .envelope__fields {
   display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 0.25rem 1rem;
-  margin: 0 0 0.5rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85rem;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--gap-xs) var(--gap-md);
+  margin: 0 0 var(--gap-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-control);
 }
 
 .envelope__fields dt {
-  color: var(--muted);
+  color: var(--fg-muted);
 }
 
 .envelope__fields dd,
@@ -126,53 +217,80 @@ body {
 
 /* Development operations panel */
 
+/* Collapsed, it is one 32px row at the foot of the sidebar; open, it scrolls
+   inside its own share of the column rather than pushing the tree out. */
 .panel {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1rem 1.25rem;
-  max-width: 40rem;
+  border-top: 1px solid var(--border);
+  flex: none;
+  max-height: 45%;
+  overflow: auto;
 }
 
-.panel h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1rem;
+.panel > summary {
+  height: var(--section-h);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--gap-md);
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--text-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
   font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.panel > summary:hover {
+  background: var(--ghost);
+  color: var(--fg);
+}
+
+.panel__body {
+  padding: 0 var(--gap-md) var(--gap-md);
 }
 
 .panel__form {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: var(--gap);
   align-items: flex-end;
-  margin-bottom: 0.75rem;
+  margin-bottom: var(--gap);
 }
 
 .panel__form label {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.8rem;
-  color: var(--muted);
+  gap: 3px;
+  font-size: var(--text-meta);
+  color: var(--fg-muted);
 }
 
 .panel__form input {
   width: 5.5rem;
-  padding: 0.25rem 0.4rem;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--fg);
-  font: inherit;
 }
 
+/* Controls are borderless (T048): a quiet translucent fill that only appears
+   on hover carries the affordance, so a row of buttons reads as one surface
+   instead of a fence of outlines. This element selector is deliberate — it is
+   what gives every button in the app the same shape without a variant
+   layer. */
 button {
-  padding: 0.3rem 0.7rem;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: transparent;
+  padding: 4px 10px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--ghost);
   color: var(--fg);
   font: inherit;
+  font-size: var(--text-control);
   cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: var(--ghost-strong);
 }
 
 button:disabled {
@@ -180,8 +298,63 @@ button:disabled {
   cursor: default;
 }
 
+button:focus-visible,
+summary:focus-visible,
+[role="separator"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The one loud control on a screen: the action the user came for. */
+.btn--primary {
+  background: var(--accent-fill);
+  color: var(--accent-on);
+  font-weight: 500;
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-fill) 82%, var(--fg));
+}
+
+/* Destructive, and quiet about it until you reach for it. */
+.btn--danger {
+  background: transparent;
+  color: var(--error-text);
+}
+
+.btn--danger:hover:not(:disabled) {
+  background: var(--error-wash);
+}
+
+/* No fill at all: for controls that live inside another control's row. */
+.btn--bare {
+  background: transparent;
+}
+
+/* Text inputs and selects follow the same logic: a filled surface, no border. */
+input[type="text"],
+input[type="number"],
+input:not([type]),
+select,
+textarea {
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--surface-control);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-control);
+  padding: 4px 7px;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .panel__empty {
-  color: var(--muted);
+  color: var(--fg-muted);
   margin: 0;
 }
 
@@ -195,14 +368,14 @@ button:disabled {
 }
 
 .ops__row {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
+  background: var(--surface-raised);
+  border-radius: var(--radius-lg);
+  padding: var(--gap) 10px;
 }
 
 .ops__status {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-control);
 }
 
 .ops__row--completed .ops__status {
@@ -215,11 +388,11 @@ button:disabled {
 }
 
 .ops__row--cancelled .ops__status {
-  color: var(--muted);
+  color: var(--fg-muted);
 }
 
 .ops__row--interrupted .ops__status {
-  color: var(--muted);
+  color: var(--fg-muted);
 }
 
 .ops__head {
@@ -233,7 +406,7 @@ button:disabled {
 }
 
 .ops__id {
-  color: var(--muted);
+  color: var(--fg-muted);
   margin-left: auto;
 }
 
@@ -256,30 +429,7 @@ button:disabled {
 }
 
 .ops__meta {
-  color: var(--muted);
-}
-
-/* Shell layout (T020): header with health facts, body with explorer + dev panels */
-
-.shell__header {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem 2rem;
-  align-items: flex-start;
-}
-
-.shell__header .shell__status {
-  flex: 1 1 24rem;
-  padding: 0.5rem 1rem;
-}
-
-.shell__status summary {
-  cursor: pointer;
-  list-style: revert;
-}
-
-.shell__status details[open] summary {
-  margin-bottom: 0.5rem;
+  color: var(--fg-muted);
 }
 
 /* T040: sidebar column (explorer, dev panels) next to the editor pane. */
@@ -294,26 +444,52 @@ button:disabled {
      instead of squeezing the editor to nothing. The drag has the same bound;
      this is what holds when nothing is being dragged. */
   grid-template-columns:
-    min(var(--sidebar-width, 20rem), calc(100% - 1rem - 22.5rem))
-    1rem
+    min(var(--sidebar-width, 244px), calc(100% - 8px - 22.5rem))
+    8px
     minmax(0, 1fr);
   min-height: 0;
   flex: 1;
 }
 
+/* The column is a surface of its own, edge to edge. The hairline between it and
+   the editor belongs to the gutter, so the line you see is the line you grab.
+
+   It clips rather than scrolls: the tree inside it is what scrolls, so a long
+   listing never pushes the dev panel out of reach. */
 .shell__sidebar {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
+  background: var(--surface-base);
 }
 
+/* Stacked, the sidebar is a short row rather than a full column, so the whole
+   row scrolls as one instead of the tree scrolling inside a fixed frame —
+   otherwise a notice above the tree is simply cut off. */
 @media (max-width: 60rem) {
   .shell__body {
-    gap: 1rem;
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(24rem, 1fr);
+  }
+
+  .shell__sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    overflow: auto;
+  }
+
+  .explorer {
+    overflow: visible;
+  }
+
+  .tree {
+    overflow: visible;
+  }
+
+  .panel {
+    max-height: none;
+    overflow: visible;
   }
 }
 
@@ -332,21 +508,23 @@ button:disabled {
   touch-action: none;
 }
 
+/* The rule is always drawn — it is the boundary between two columns, not just
+   an affordance — and brightens to the accent when the gutter is grabbable.
+   The 8px track stays the hit area even though the line is 1px. */
 .splitter::before {
   background: var(--border);
   content: "";
-  opacity: 0;
   position: absolute;
-  transition: opacity 120ms ease-out;
+  transition: background 120ms ease-out;
 }
 
 .splitter:hover::before,
 .splitter:focus-visible::before {
-  opacity: 1;
+  background: var(--accent);
 }
 
 .splitter:focus-visible {
-  outline: 2px solid var(--ok);
+  outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
@@ -383,120 +561,168 @@ button:disabled {
 /* Explorer */
 
 .explorer {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1rem 1.25rem;
-  flex: none;
-  min-width: 0;
-}
-
-.explorer h2 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-}
-
-.explorer__toolbar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 0.75rem;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+/* Everything above the tree keeps its natural height; only the tree flexes.
+   Without this the notices are compressed and their text spills over the panel
+   below them. */
+.explorer > :not(.tree) {
+  flex: none;
+}
+
+/* A 32px header carrying only the label and a count: the workspace controls
+   that used to wrap across three rows now live in the disclosure beside it. */
+.explorer__toolbar {
+  height: var(--section-h);
+  flex: none;
+  display: flex;
   align-items: center;
-  margin-bottom: 0.75rem;
+  gap: var(--gap);
+  padding: 0 var(--gap-md) 0 var(--gap-md);
+}
+
+.explorer__toolbar h2 {
+  margin: 0;
+  font-size: var(--text-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.explorer__spacer {
+  flex: 1;
+}
+
+.explorer__toolbar button {
+  padding: 3px 8px;
+  font-size: var(--text-meta);
+}
+
+/* The path form, close and hidden toggle, folded into the popover idiom the
+   editor and terminal settings already use. */
+.explorer__more {
+  position: relative;
+  flex: none;
+}
+
+.explorer__more > summary {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  list-style: none;
+  color: var(--fg-muted);
+  font-size: var(--text-meta);
+  border-radius: var(--radius);
+  padding: 3px 7px;
+}
+
+.explorer__more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.explorer__more > summary:hover {
+  background: var(--ghost);
+  color: var(--fg);
+}
+
+.explorer__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding: 10px;
+  width: 21rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 35%);
 }
 
 .explorer__path {
   display: flex;
-  gap: 0.4rem;
-  flex: 1 1 16rem;
+  gap: var(--gap-sm);
 }
 
 .explorer__path input {
   flex: 1;
-  min-width: 8rem;
-  padding: 0.25rem 0.4rem;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--fg);
-  font: inherit;
+  min-width: 0;
+  font-family: var(--font-mono);
 }
 
 .explorer__hidden {
   display: flex;
-  gap: 0.35rem;
+  gap: var(--gap-sm);
   align-items: center;
-  font-size: 0.85rem;
-  color: var(--muted);
+  font-size: var(--text-control);
+  color: var(--fg-muted);
 }
 
 .explorer__notice {
   display: flex;
-  gap: 0.75rem;
+  gap: var(--gap-md);
   align-items: center;
-  margin: 0 0 0.75rem;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--error);
-  border-radius: 6px;
-  font-size: 0.9rem;
-}
-
-.explorer__workspace {
-  display: flex;
-  gap: 0.75rem;
-  align-items: baseline;
-  margin: 0 0 0.5rem;
-  min-width: 0;
-}
-
-.explorer__workspace code {
-  color: var(--muted);
-  font-size: 0.8rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  margin: 0;
+  padding: var(--gap-sm) var(--gap-md);
+  background: var(--error-wash);
+  font-size: var(--text-control);
 }
 
 .explorer__empty {
-  color: var(--muted);
+  color: var(--fg-muted);
   margin: 0;
+  padding: 0 var(--gap-md);
+  font-size: var(--text-control);
 }
 
 .tree {
   list-style: none;
   margin: 0;
-  padding: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85rem;
-  max-height: 60vh;
+  padding: 2px var(--gap-sm) var(--gap);
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  line-height: var(--row-h);
+  flex: 1;
+  min-height: 0;
   overflow: auto;
-}
-
-.shell__sidebar .tree {
-  max-height: none;
 }
 
 .tree__row {
   display: flex;
-  gap: 0.4rem;
+  gap: var(--gap-sm);
   align-items: center;
-  padding-top: 0.1rem;
-  padding-bottom: 0.1rem;
-  padding-right: 0.5rem;
+  padding-right: var(--gap-sm);
+  border-radius: var(--radius);
   white-space: nowrap;
+  color: var(--fg-dim);
 }
 
 .tree__row:hover {
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  background: var(--ghost);
 }
 
 .tree__toggle {
-  width: 1.4rem;
+  width: 14px;
   padding: 0;
   border: none;
   background: transparent;
-  color: var(--muted);
+  color: var(--fg-faint);
+  font-size: var(--text-meta);
   text-align: center;
+}
+
+.tree__toggle:hover:not(:disabled) {
+  background: transparent;
+  color: var(--fg);
 }
 
 .tree__toggle:disabled {
@@ -504,8 +730,8 @@ button:disabled {
 }
 
 .tree__glyph {
-  width: 1rem;
-  color: var(--muted);
+  width: 10px;
+  color: var(--fg-faint);
   text-align: center;
 }
 
@@ -516,29 +742,29 @@ button:disabled {
 }
 
 .tree__name--hidden {
-  opacity: 0.6;
+  opacity: 0.55;
 }
 
 .tree__badge {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  font-size: 0.7rem;
-  color: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0 0.4rem;
+  font-family: var(--font-ui);
+  font-size: var(--text-label);
+  color: var(--fg-muted);
+  background: var(--surface-control);
+  border-radius: var(--radius-sm);
+  padding: 0 5px;
 }
 
 .tree__size {
   margin-left: auto;
-  color: var(--muted);
-  font-size: 0.75rem;
+  color: var(--fg-muted);
+  font-size: var(--text-meta);
 }
 
 .tree__row--more button,
 .tree__row--error button,
 .tree__row--loading button {
-  padding: 0.1rem 0.5rem;
-  font-size: 0.8rem;
+  padding: 1px 7px;
+  font-size: var(--text-meta);
 }
 
 .tree__row--error {
@@ -546,14 +772,17 @@ button:disabled {
 }
 
 .tree__row--loading {
-  color: var(--muted);
+  color: var(--fg-muted);
 }
 
 /* Explorer file buttons (T030) */
 
+/* The whole row already lights up on hover, so the name itself only needs to
+   go from dim to full — an underline on top of that reads as a hyperlink. */
 .tree__name--file {
   padding: 0;
   border: none;
+  border-radius: 0;
   background: transparent;
   color: inherit;
   font: inherit;
@@ -561,34 +790,31 @@ button:disabled {
   cursor: pointer;
 }
 
-.tree__name--file:hover {
-  text-decoration: underline;
+.tree__name--file:hover:not(:disabled) {
+  background: transparent;
+  color: var(--fg);
 }
 
 /* Editor pane (T040): Monaco bound to the core's buffers */
 
 .editor {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.75rem 1rem 0.6rem;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  background: var(--surface-base);
 }
 
+/* A 36px strip of pill tabs and nothing else — no pane title. The file names
+   are the title. */
 .editor__bar {
+  height: var(--tabs-h);
+  flex: none;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 0.75rem;
+  gap: var(--gap-xs);
   align-items: center;
-}
-
-.editor__title {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
+  padding: 0 10px;
+  overflow: hidden;
 }
 
 .tabs {
@@ -596,22 +822,30 @@ button:disabled {
   margin: 0;
   padding: 0;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
+  gap: var(--gap-xs);
   flex: 1;
   min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tabs__item {
   display: flex;
-  align-items: stretch;
-  border: 1px solid transparent;
-  border-radius: 4px;
+  align-items: center;
+  border-radius: var(--radius-md);
+  flex: none;
 }
 
 .tabs__item--active {
-  border-color: var(--border);
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  background: var(--surface-control);
+}
+
+.tabs__item:not(.tabs__item--active):hover {
+  background: var(--ghost);
 }
 
 .tabs__item--dragging {
@@ -620,87 +854,126 @@ button:disabled {
 
 .tabs__tab {
   display: flex;
-  gap: 0.35rem;
+  gap: var(--gap-sm);
   align-items: center;
   border: none;
-  border-radius: 4px 0 0 4px;
-  padding: 0.2rem 0.3rem 0.2rem 0.5rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85rem;
-  color: var(--muted);
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+  background: transparent;
+  padding: 5px 4px 5px 10px;
+  font-family: var(--font-mono);
+  font-size: var(--text-control);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.tabs__tab:hover:not(:disabled) {
+  background: transparent;
 }
 
 .tabs__item--active .tabs__tab {
   color: var(--fg);
 }
 
+/* The unsaved marker leads the name, so a column of tabs reads down one edge. */
 .tabs__dot {
   display: inline-block;
   width: 0.7em;
   font-size: 0.7em;
+  color: var(--accent);
 }
 
+/* Quiet until the tab is active or hovered: a strip of close buttons is noise. */
 .tabs__close {
   border: none;
-  border-radius: 0 4px 4px 0;
-  padding: 0 0.45rem;
-  color: var(--muted);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: transparent;
+  padding: 5px 8px;
+  color: var(--fg-faint);
   line-height: 1;
+  opacity: 0;
 }
 
-.tabs__close:hover {
+.tabs__item--active .tabs__close,
+.tabs__item:hover .tabs__close,
+.tabs__close:focus-visible {
+  opacity: 1;
+}
+
+.tabs__close:hover:not(:disabled) {
   color: var(--fg);
-  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  background: var(--ghost-strong);
 }
 
-.prefs summary {
+/* Disclosure popovers (editor preferences, terminal settings). */
+
+.prefs {
+  position: relative;
+  flex: none;
+}
+
+.prefs > summary {
   cursor: pointer;
-  font-size: 0.85rem;
-  color: var(--muted);
+  list-style: none;
+  font-size: var(--text-meta);
+  color: var(--fg-muted);
+  border-radius: var(--radius);
+  padding: 3px 7px;
+}
+
+.prefs > summary::-webkit-details-marker {
+  display: none;
+}
+
+.prefs > summary:hover {
+  background: var(--ghost);
+  color: var(--fg);
 }
 
 .prefs__form {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 15;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: var(--gap);
   align-items: center;
-  padding: 0.4rem 0;
-  font-size: 0.85rem;
+  width: max-content;
+  max-width: 34rem;
+  padding: 10px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 35%);
+  font-size: var(--text-control);
 }
 
 .prefs__form label {
   display: flex;
-  gap: 0.35rem;
+  gap: var(--gap-sm);
   align-items: center;
-  color: var(--muted);
+  color: var(--fg-muted);
 }
 
 .prefs__form input[type="number"],
 .prefs__form select {
-  width: 4rem;
-  padding: 0.15rem 0.3rem;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--fg);
-  font: inherit;
+  width: 4.5rem;
 }
 
 /* T050: Monaco and the Markdown preview side by side */
 
 .editor__surfaces {
   display: flex;
-  gap: 0.75rem;
   flex: 1;
-  min-height: 16rem;
+  min-height: 0;
+  background: var(--surface-editor);
+  overflow: hidden;
 }
 
 .editor__monaco {
   flex: 1 1 50%;
   min-width: 0;
-  min-height: 16rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -711,103 +984,137 @@ button:disabled {
 .editor__empty,
 .editor__placeholder,
 .editor__hint {
-  color: var(--muted);
+  color: var(--fg-muted);
   margin: 0;
+  padding: var(--gap) var(--gap-md);
+  font-size: var(--text-control);
 }
 
 .editor__placeholder {
   display: flex;
-  gap: 0.75rem;
+  gap: var(--gap);
   align-items: center;
   flex-wrap: wrap;
 }
 
+/* Notices (T048): the shared banner. A tinted wash carries the severity, a
+   hairline top and bottom separate it from what it interrupts, and the actions
+   sit inline on the right — the same shape whether it is the editor, the
+   session or the explorer speaking. */
+.editor__banner,
+.editor__warning,
+.editor__notice,
+.session-notice,
+.drop-notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap) var(--gap-md);
+  align-items: center;
+  flex: none;
+  margin: 0;
+  padding: var(--gap-sm) var(--gap-md);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-control);
+  background: var(--accent-wash);
+}
+
 .editor__banner {
-  border: 1px solid var(--error);
-  border-left-width: 3px;
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.9rem;
+  background: var(--error-wash);
+  border-color: color-mix(in srgb, var(--error) 25%, transparent);
+  color: var(--error-text);
 }
 
 .editor__banner--notice,
 .editor__warning {
-  border-color: var(--border);
-  border-left: 3px solid var(--muted);
-}
-
-.editor__warning {
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.85rem;
+  background: var(--warn-wash);
+  border-color: color-mix(in srgb, var(--warn) 25%, transparent);
+  color: inherit;
 }
 
 .editor__warning p,
-.editor__banner p {
-  margin: 0 0 0.5rem;
+.editor__banner p,
+.editor__notice p {
+  margin: 0;
 }
 
 .editor__warning ul {
   margin: 0;
   padding-left: 1.2rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
 }
 
 .editor__banner-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: var(--gap-sm);
   align-items: center;
-}
-
-.editor__notice {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  margin: 0;
-  padding: 0.4rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 0.85rem;
+  margin-left: auto;
 }
 
 .editor__danger,
 .dialog__danger {
-  border-color: var(--error);
-  color: var(--error);
+  background: transparent;
+  color: var(--error-text);
   align-self: flex-start;
 }
 
+.editor__danger:hover:not(:disabled),
+.dialog__danger:hover:not(:disabled) {
+  background: var(--error-wash);
+}
+
+/* App status bar (T048): the last 26px of the window. Build facts on the left,
+   the active document on the right. */
 .statusbar {
+  height: var(--status-h);
+  flex: none;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem 0.9rem;
+  gap: var(--gap-lg);
   align-items: center;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.78rem;
-  color: var(--muted);
+  padding: 0 var(--gap-md);
+  border-top: 1px solid var(--border);
+  background: var(--surface-chrome);
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  color: var(--fg-muted);
+  overflow: hidden;
+}
+
+.statusbar__build {
+  color: var(--ok);
+  white-space: nowrap;
+  flex: none;
+}
+
+.statusbar__build--loading {
+  color: var(--fg-muted);
+}
+
+.statusbar__build--error {
+  color: var(--error-text);
 }
 
 .statusbar__path {
-  color: var(--fg);
+  color: var(--fg-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 24rem;
+  flex: none;
 }
 
+.statusbar > span,
 .statusbar__state {
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0 0.4rem;
+  white-space: nowrap;
+  flex: none;
 }
 
 .statusbar__state--modified_externally,
 .statusbar__state--conflicted,
 .statusbar__state--deleted_externally {
-  color: var(--error);
-  border-color: var(--error);
+  color: var(--error-text);
 }
 
 .statusbar__spacer {
@@ -816,12 +1123,14 @@ button:disabled {
 
 .statusbar__actions {
   display: flex;
-  gap: 0.4rem;
+  gap: var(--gap-xs);
+  flex: none;
 }
 
 .statusbar__actions button {
-  padding: 0.15rem 0.5rem;
-  font-size: 0.8rem;
+  padding: 2px 8px;
+  font-size: var(--text-micro);
+  font-family: var(--font-ui);
 }
 
 .dialog__backdrop {
@@ -835,124 +1144,166 @@ button:disabled {
 }
 
 .dialog {
-  background: var(--bg);
+  background: var(--surface-raised);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1rem 1.25rem;
+  border-radius: var(--radius-lg);
+  padding: var(--gap-md) var(--gap-lg);
   max-width: 30rem;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 35%);
 }
 
 .dialog h3 {
-  margin: 0 0 0.5rem;
-  font-size: 1rem;
+  margin: 0 0 var(--gap-sm);
+  font-size: var(--text-body);
+  font-weight: 600;
 }
 
 .dialog p {
-  margin: 0 0 0.5rem;
+  margin: 0 0 var(--gap-sm);
+  font-size: var(--text-control);
 }
 
 .dialog__error {
-  color: var(--error);
-  font-size: 0.85rem;
+  color: var(--error-text);
+  font-size: var(--text-control);
 }
 
 .dialog__actions {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--gap-sm);
   justify-content: flex-end;
-  margin-top: 0.75rem;
+  margin-top: var(--gap-md);
+}
+
+.orphans {
+  flex: none;
+  padding: var(--gap-sm) var(--gap-md);
+  border-top: 1px solid var(--border);
 }
 
 .orphans h3 {
-  margin: 0 0 0.25rem;
-  font-size: 0.9rem;
+  margin: 0 0 3px;
+  font-size: var(--text-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--fg-muted);
 }
 
 .orphans__hint {
-  color: var(--muted);
-  margin: 0 0 0.4rem;
-  font-size: 0.85rem;
+  color: var(--fg-muted);
+  margin: 0 0 var(--gap-sm);
+  font-size: var(--text-control);
 }
 
 .orphans__item summary {
   display: flex;
-  gap: 0.75rem;
+  gap: var(--gap-md);
   align-items: center;
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: var(--text-control);
 }
 
 .orphans__item textarea {
   width: 100%;
-  margin-top: 0.4rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.8rem;
-  background: transparent;
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  margin-top: var(--gap-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
 }
 
 /* Markdown (T050): toolbar, preview island, rendered content */
 
+/* The view switch is a segmented control riding at the right of the tab strip:
+   one track, one selected cell, no row of its own. */
 .mdbar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem 0.75rem;
+  gap: var(--gap-sm);
   align-items: center;
-  font-size: 0.85rem;
+  flex: none;
+  font-size: var(--text-control);
+}
+
+.mdbar__modes {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--surface-raised);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  flex: none;
+}
+
+.mdbar__mode {
+  background: transparent;
+  border-radius: var(--radius-sm);
+  padding: 3px 9px;
+  color: var(--fg-muted);
+  font-size: var(--text-control);
+  white-space: nowrap;
+}
+
+.mdbar__mode:hover:not(:disabled) {
+  background: var(--ghost);
+  color: var(--fg);
 }
 
 .mdbar__mode[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--fg) 12%, transparent);
-  border-color: var(--fg);
+  background: var(--surface-active);
+  color: var(--fg);
 }
 
 .mdbar__badge,
 .tabs__badge {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  font-size: 0.7rem;
-  color: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0 0.4rem;
+  font-family: var(--font-ui);
+  font-size: var(--text-label);
+  color: var(--fg-muted);
+  background: var(--surface-control);
+  border-radius: var(--radius-sm);
+  padding: 0 5px;
+  white-space: nowrap;
 }
 
 .tabs__badge {
-  margin-left: 0.35rem;
+  margin-left: var(--gap-xs);
 }
 
 .mdbar__notice {
   display: inline-flex;
-  gap: 0.5rem;
+  gap: var(--gap-sm);
   align-items: center;
-  padding: 0.2rem 0.6rem;
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--error);
-  border-radius: 6px;
+  padding: 2px 8px;
+  border-radius: var(--radius);
+  background: var(--error-wash);
+  color: var(--error-text);
+  font-size: var(--text-meta);
+  white-space: nowrap;
 }
 
+/* The preview shares the editor surface; the hairline between the two panes is
+   the only thing separating them. */
 .md-preview {
   flex: 1 1 50%;
   min-width: 0;
-  min-height: 16rem;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border-left: 1px solid var(--border);
   overflow: hidden;
+}
+
+.md-preview:only-child {
+  border-left: none;
 }
 
 .md-preview__banner {
   display: flex;
-  gap: 0.75rem;
+  gap: var(--gap-md);
   align-items: center;
   justify-content: space-between;
-  padding: 0.4rem 0.75rem;
+  padding: var(--gap-sm) var(--gap-md);
   border-bottom: 1px solid var(--border);
-  font-size: 0.85rem;
-  color: var(--muted);
+  font-size: var(--text-control);
+  color: var(--fg-muted);
 }
 
 .md-preview__content {
@@ -960,16 +1311,16 @@ button:disabled {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 0.75rem 1.25rem 2rem;
+  padding: var(--gap-md) 1.25rem 2rem;
   line-height: 1.55;
 }
 
 .md-preview__meta {
-  padding: 0.15rem 0.75rem;
+  padding: 2px var(--gap-md);
   border-top: 1px solid var(--border);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.7rem;
-  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  color: var(--fg-muted);
 }
 
 .md-content h1,
@@ -1021,32 +1372,27 @@ button:disabled {
 .md-content blockquote {
   padding: 0 1em;
   border-left: 3px solid var(--border);
-  color: var(--muted);
+  color: var(--fg-muted);
 }
 
 .md-content code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 0.85em;
-  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  background: var(--ghost);
   border-radius: 3px;
   padding: 0.1em 0.3em;
 }
 
+/* Fenced code is colorized by Monaco (ADR-013), so its background has to be the
+   one Monaco's token colors were designed against. That is now the same token
+   the editor paints itself with, so the two cannot drift apart. */
 .md-content pre {
   padding: 0.7rem 0.9rem;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   overflow: auto;
-  /* Monaco's token colors are designed against its editor background. */
-  background: #1e1e1e;
-  color: #d4d4d4;
-}
-
-@media (prefers-color-scheme: light) {
-  .md-content pre {
-    background: #fffffe;
-    color: #000000;
-  }
+  background: var(--surface-editor);
+  color: var(--fg-dim);
 }
 
 .md-content pre code {
@@ -1068,7 +1414,7 @@ button:disabled {
 }
 
 .md-content th {
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  background: var(--ghost);
 }
 
 .md-content hr {
@@ -1082,7 +1428,7 @@ button:disabled {
 }
 
 .md-content a.md-link {
-  color: #4c8dff;
+  color: var(--accent);
   text-decoration: underline;
   cursor: pointer;
 }
@@ -1094,8 +1440,8 @@ button:disabled {
 
 .md-content .md-link--unsupported,
 .md-content .md-image {
-  color: var(--muted);
-  border-bottom: 1px dotted var(--muted);
+  color: var(--fg-muted);
+  border-bottom: 1px dotted var(--fg-muted);
   cursor: help;
 }
 
@@ -1109,64 +1455,75 @@ button:disabled {
 }
 
 /* Session (T060): notices and the recovery prompt */
+/* Stacked directly under the top bar: the shared banner shape, so a session
+   notice reads the same as an editor one. */
 .session-notices {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  padding: 0.25rem 1rem 0;
+  flex: none;
 }
 
 .session-notice {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--muted);
-  border-radius: 4px;
-  font-size: 0.9rem;
+  background: var(--warn-wash);
+  border-color: color-mix(in srgb, var(--warn) 25%, transparent);
+}
+
+.session-notice + .session-notice {
+  border-top: none;
 }
 
 .session-notice--degraded {
-  border-left-color: var(--error);
+  background: var(--error-wash);
+  border-color: color-mix(in srgb, var(--error) 25%, transparent);
 }
 
 .session-notice__path {
-  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  color: var(--fg-muted);
   word-break: break-all;
 }
 
+.session-notice button,
+.drop-notice button {
+  margin-left: auto;
+}
+
+.session-notice button + button,
+.drop-notice button + button {
+  margin-left: 0;
+}
+
 .recovery__list {
-  margin: 0.5rem 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: var(--gap-xs);
+  flex-basis: 100%;
 }
 
 .recovery__item {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
-  font-size: 0.85rem;
+  gap: var(--gap-sm);
+  font-size: var(--text-control);
 }
 
 .recovery__state,
 .recovery__status {
-  color: var(--muted);
+  color: var(--fg-muted);
 }
 
 .recovery__error {
-  color: var(--error);
+  color: var(--error-text);
 }
 
 .recovery__actions {
   display: inline-flex;
-  gap: 0.35rem;
+  gap: var(--gap-xs);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1178,16 +1535,24 @@ button:disabled {
   display: flex;
   flex-direction: column;
   flex: 0 0 auto;
+  background: var(--surface-base);
 }
 
 .shell__dock-toggle {
   align-self: flex-start;
-  background: none;
+  background: transparent;
   border: none;
-  color: var(--muted);
+  border-radius: var(--radius);
+  color: var(--fg-muted);
   cursor: pointer;
-  font: inherit;
-  padding: 4px 12px;
+  font-size: var(--text-control);
+  margin: 3px 0 3px 10px;
+  padding: 3px 9px;
+}
+
+.shell__dock-toggle:hover:not(:disabled) {
+  background: var(--ghost);
+  color: var(--fg);
 }
 
 .shell__dock-toggle[aria-expanded="true"] {
@@ -1195,11 +1560,11 @@ button:disabled {
 }
 
 .shell__dock-count {
-  background: var(--border);
-  border-radius: 8px;
-  font-size: 11px;
-  margin-left: 6px;
-  padding: 0 6px;
+  background: var(--surface-control);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-label);
+  margin-left: var(--gap-sm);
+  padding: 1px 5px;
 }
 
 .shell__dock-body {
@@ -1219,22 +1584,33 @@ button:disabled {
   align-items: center;
   border-top: 1px solid var(--border);
   display: flex;
-  gap: 8px;
+  gap: var(--gap);
+  height: var(--section-h);
+  flex: none;
   justify-content: space-between;
-  padding: 4px 8px;
+  padding: 0 10px;
 }
 
 .terminal-panel__tabs {
   display: flex;
-  gap: 4px;
+  gap: var(--gap-xs);
   overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.terminal-panel__tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .terminal-panel__actions {
   align-items: center;
   display: flex;
   flex: 0 0 auto;
-  gap: 6px;
+  gap: var(--gap-sm);
+}
+
+.terminal-panel__actions button {
+  padding: 3px 9px;
 }
 
 /* Opening the settings grows the bar and shrinks the surface below it, which
@@ -1247,13 +1623,8 @@ button:disabled {
 /* Sits with the actions, so it reads as part of "start a new terminal"
    rather than as a property of the session on screen. */
 .terminal-panel__profile {
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: inherit;
-  font: inherit;
   max-width: 14rem;
-  padding: 2px 4px;
+  padding: 3px 6px;
 }
 
 /* The settings popover reuses the editor's `.prefs` shell; only what is
@@ -1261,16 +1632,16 @@ button:disabled {
 .terminal-settings__shells {
   /* `.prefs__form` is a wrapping row; the shell list wants a row of its own. */
   flex-basis: 100%;
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  background: var(--surface-control);
+  border-radius: var(--radius-md);
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 6px 8px 8px;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm) var(--gap) var(--gap);
 }
 
 .terminal-settings__hint {
-  color: var(--muted);
+  color: var(--fg-muted);
   margin: 0;
   max-width: 32rem;
 }
@@ -1287,21 +1658,22 @@ button:disabled {
 .terminal-settings__list li {
   align-items: baseline;
   display: flex;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: var(--text-control);
+  gap: var(--gap);
   justify-content: space-between;
 }
 
 /* A shell that no longer runs stays listed, struck through, with the reason:
    the user typed it, so silence would be worse than an ugly row. */
 .terminal-settings__broken {
-  color: var(--muted);
+  color: var(--fg-muted);
   text-decoration: line-through;
 }
 
 .terminal-settings__reason,
 .terminal-settings__error {
-  color: var(--error);
+  color: var(--error-text);
   flex: 1 1 auto;
   font-family: inherit;
   margin: 0;
@@ -1309,7 +1681,7 @@ button:disabled {
 
 .terminal-settings__add {
   display: flex;
-  gap: 6px;
+  gap: var(--gap-sm);
 }
 
 .terminal-settings__add input {
@@ -1317,72 +1689,102 @@ button:disabled {
   min-width: 0;
 }
 
+/* The same pill as an editor tab: one tab idiom for the whole window. */
 .terminal-tab {
   align-items: center;
-  border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   display: flex;
+  flex: none;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-control);
+}
+
+.terminal-tab:not(.terminal-tab--active):hover {
+  background: var(--ghost);
 }
 
 .terminal-tab--active {
-  background: color-mix(in srgb, var(--fg) 8%, transparent);
-  border-color: var(--border);
+  background: var(--surface-control);
+  color: var(--fg);
 }
 
 .terminal-tab--exited .terminal-tab__name {
-  color: var(--muted);
+  color: var(--fg-faint);
 }
 
 .terminal-tab__label,
 .terminal-tab__close {
-  background: none;
+  background: transparent;
   border: none;
+  border-radius: var(--radius-md);
   color: inherit;
   cursor: pointer;
   font: inherit;
-  padding: 3px 6px;
+  padding: 4px 9px;
+  white-space: nowrap;
+}
+
+.terminal-tab__label:hover:not(:disabled) {
+  background: transparent;
+}
+
+.terminal-tab__close {
+  color: var(--fg-faint);
+  padding: 4px 7px;
+  opacity: 0;
+}
+
+.terminal-tab--active .terminal-tab__close,
+.terminal-tab:hover .terminal-tab__close,
+.terminal-tab__close:focus-visible {
+  opacity: 1;
+}
+
+.terminal-tab__close:hover:not(:disabled) {
+  background: var(--ghost-strong);
+  color: var(--fg);
 }
 
 /* Sized to the tab it replaces so the strip does not jump when a rename
    starts or ends. */
 .terminal-tab__rename {
-  background: var(--bg);
-  border: 1px solid var(--ok);
-  border-radius: 4px;
-  color: inherit;
-  font: inherit;
+  border-color: var(--accent);
+  font-family: var(--font-mono);
   min-width: 0;
-  padding: 2px 5px;
+  padding: 3px 6px;
   width: 10rem;
 }
 
 .terminal-tab__status {
-  color: var(--muted);
-  font-size: 11px;
-  margin-left: 6px;
+  color: var(--fg-faint);
+  font-size: var(--text-label);
+  margin-left: var(--gap-sm);
 }
 
 .terminal-panel__error {
   border-bottom: 1px solid var(--border);
-  padding: 8px;
+  padding: var(--gap);
 }
 
 .terminal-panel__surface {
   flex: 1 1 auto;
   min-height: 0;
   position: relative;
+  background: var(--surface-base);
 }
 
 .terminal-panel__empty {
-  color: var(--muted);
+  color: var(--fg-muted);
   margin: 0;
-  padding: 12px;
+  padding: var(--gap-md);
+  font-size: var(--text-control);
 }
 
 /* xterm measures this element, so it must have a real size. */
 .terminal-view {
   height: 100%;
-  padding: 4px 0 0 8px;
+  padding: 2px 0 var(--gap) var(--gap-md);
   width: 100%;
 }
 
@@ -1390,11 +1792,11 @@ button:disabled {
    enter and leave only, so it never repaints while the cursor moves. */
 .drop-overlay {
   align-items: center;
-  background: color-mix(in srgb, var(--bg) 70%, transparent);
-  border: 2px dashed var(--ok);
-  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-base) 70%, transparent);
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-lg);
   display: flex;
-  inset: 8px;
+  inset: var(--gap);
   justify-content: center;
   pointer-events: none;
   position: fixed;
@@ -1402,21 +1804,12 @@ button:disabled {
 }
 
 .drop-overlay__label {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 14px;
+  background: var(--surface-raised);
+  border-radius: var(--radius-md);
+  font-size: var(--text-body);
   margin: 0;
   padding: 10px 16px;
-}
-
-.drop-notice {
-  align-items: center;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
-  padding: 8px 12px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 35%);
 }
 
 .drop-notice p {
@@ -1426,5 +1819,6 @@ button:disabled {
 .drop-notice__actions {
   display: flex;
   flex: 0 0 auto;
-  gap: 8px;
+  gap: var(--gap);
+  margin-left: auto;
 }

@@ -1,9 +1,66 @@
-import { type EditorTheme, setEditorTheme } from './editor-host';
+import { defineEditorTheme, type EditorTheme, setEditorTheme } from './editor-host';
 
-/** Follow the OS light/dark preference (the app CSS already uses `color-scheme: light dark`). */
+/**
+ * Read a design token off the document root. The app's CSS owns the palette
+ * (ADR-016); Monaco reads it back rather than keeping a second copy, so the
+ * editor surface cannot drift from the chrome around it.
+ */
+function token(name: string, fallback: string): string {
+  if (typeof window === 'undefined') return fallback;
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value === '' ? fallback : value;
+}
+
+/**
+ * Monaco's color keys accept `#rgb` forms only, so a token that resolves to
+ * something else (a `color-mix`, an `oklch`, an `rgba`) has to be dropped
+ * rather than passed through — Monaco throws on a color it cannot parse, and a
+ * missing key just falls back to the base theme.
+ */
+function hexOnly(colors: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(colors).filter(([, value]) => /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6,8})$/i.test(value)),
+  );
+}
+
+/** The chrome colors Monaco paints, mapped from the app's tokens. */
+function colorsFor(dark: boolean): Record<string, string> {
+  const surface = token('--surface-editor', dark ? '#15181c' : '#fffffe');
+  return hexOnly({
+    'editor.background': surface,
+    'editor.foreground': token('--fg-dim', dark ? '#c3cad4' : '#3d444d'),
+    'editorGutter.background': surface,
+    'editorLineNumber.foreground': token('--fg-gutter', dark ? '#4d5763' : '#8c959f'),
+    'editorLineNumber.activeForeground': token('--fg-muted', dark ? '#9aa4b2' : '#59636e'),
+    'editorCursor.foreground': token('--accent', dark ? '#4c8dff' : '#0969da'),
+    'editorWidget.background': token('--surface-raised', dark ? '#161b21' : '#f0f2f5'),
+    'editorWidget.border': token('--border', dark ? '#1d232a' : '#d0d7de'),
+    'editorSuggestWidget.background': token('--surface-raised', dark ? '#161b21' : '#f0f2f5'),
+    'editorHoverWidget.background': token('--surface-raised', dark ? '#161b21' : '#f0f2f5'),
+    'editorStickyScroll.background': token('--surface-editor', dark ? '#15181c' : '#fffffe'),
+    'minimap.background': surface,
+    'scrollbarSlider.background': token('--border', dark ? '#1d232a' : '#d0d7de'),
+    focusBorder: token('--accent', dark ? '#4c8dff' : '#0969da'),
+  });
+}
+
+/**
+ * Follow the OS light/dark preference, which is the same signal the app's CSS
+ * keys off — so the palette is read fresh on every change and the editor is
+ * re-themed in place, live editors included.
+ */
 export function watchColorScheme(apply: (theme: EditorTheme) => void = setEditorTheme): () => void {
   const query = window.matchMedia('(prefers-color-scheme: dark)');
-  const update = () => apply(query.matches ? 'vs-dark' : 'vs');
+  const update = () => {
+    const dark = query.matches;
+    // Defined on every change, not once: the tokens have new values by then.
+    defineEditorTheme(
+      dark ? 'gritty-dark' : 'gritty-light',
+      dark ? 'vs-dark' : 'vs',
+      colorsFor(dark),
+    );
+    apply(dark ? 'gritty-dark' : 'gritty-light');
+  };
   update();
   query.addEventListener('change', update);
   return () => query.removeEventListener('change', update);

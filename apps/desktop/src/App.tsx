@@ -1,15 +1,17 @@
-import { type CoreError, type HealthReport, toCoreError } from '@gritty/protocol';
+import { toCoreError, type Workspace } from '@gritty/protocol';
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { ErrorEnvelope } from './components/error-envelope';
 import { Splitter } from './components/splitter';
 import { boundsWithin } from './components/splitter-geometry';
 import { core } from './core/client';
-import { describeHealth } from './core/health';
+import { activeTab } from './features/documents/documents-reducer';
 import { useDocuments } from './features/documents/use-documents';
 import { DropOverlay } from './features/drop/drop-overlay';
 import { useFileDrop } from './features/drop/use-file-drop';
+import { CloseDialog } from './features/editor/close-dialog';
 import { EditorPane } from './features/editor/editor-pane';
 import { useEditorPreferences } from './features/editor/editor-preferences';
+import { StatusBar } from './features/editor/status-bar';
+import { useCloseFlow } from './features/editor/use-close-flow';
 import { useEditorBinding } from './features/editor/use-editor-binding';
 import { ExplorerPanel } from './features/explorer/explorer-panel';
 import { viewModesReducer } from './features/markdown/view-modes';
@@ -17,17 +19,13 @@ import { OperationsPanel } from './features/operations/operations-panel';
 import { DEFAULT_LAYOUT, type Layout, PANE_LIMITS } from './features/session/persisted-layout';
 import { SessionNotices } from './features/session/session-notices';
 import { useSession } from './features/session/use-session';
+import { AppBar, type HealthState } from './features/shell/app-bar';
 import { TerminalPanel } from './features/terminal/terminal-panel';
 import { useTerminals } from './features/terminal/use-terminals';
 
 /** What the editor needs beside the sidebar, and above the dock. */
 const EDITOR_MIN_WIDTH = 360;
 const EDITOR_MIN_HEIGHT = 200;
-
-type HealthState =
-  | { status: 'loading' }
-  | { status: 'ready'; health: HealthReport }
-  | { status: 'error'; error: CoreError };
 
 export function App() {
   const [state, setState] = useState<HealthState>({ status: 'loading' });
@@ -45,6 +43,9 @@ export function App() {
   // through the ordinary commands).
   const drop = useFileDrop(documents);
   const [layout, setLayout] = useState<Layout>(DEFAULT_LAYOUT);
+  // The top bar names the open workspace; the explorer owns the subscription
+  // and reports it up (T048).
+  const [workspace, setWorkspace] = useState<Workspace | null>(null);
   // The gutters write their CSS variables straight onto this element while
   // dragging, so a drag never re-renders the shell (T046).
   const shell = useRef<HTMLElement | null>(null);
@@ -52,6 +53,11 @@ export function App() {
   // passes through editor state (T090).
   const terminals = useTerminals(layout.terminal.customShells);
   const [terminalOpen, setTerminalOpen] = useState(false);
+  // Closing a tab with unsaved edits asks first. The tab strip raises the
+  // request and the status bar does too, so the flow belongs to the shell.
+  const closeFlow = useCloseFlow(documents);
+  const active = activeTab(documents.state);
+  const activeEol = active ? (editor.eols[active.document.id] ?? null) : null;
   const session = useSession({
     documents,
     editor,
@@ -110,22 +116,7 @@ export function App() {
         } as React.CSSProperties
       }
     >
-      <header className="shell__header">
-        <div>
-          <h1>Gritty</h1>
-          <p className="shell__tagline">Agent-native development environment. Phase 0 shell.</p>
-        </div>
-        <section className="shell__status" aria-live="polite">
-          {state.status === 'loading' && <p>Contacting core…</p>}
-          {state.status === 'ready' && <HealthFacts health={state.health} />}
-          {state.status === 'error' && (
-            <>
-              <p className="shell__error">Core unreachable or incompatible.</p>
-              <ErrorEnvelope error={state.error} />
-            </>
-          )}
-        </section>
-      </header>
+      <AppBar health={state} workspace={workspace} />
       <SessionNotices session={session} />
       <DropOverlay drop={drop} />
       <div className="shell__body">
@@ -136,6 +127,7 @@ export function App() {
             onShowHiddenChange={(showHidden) =>
               setLayout((current) => ({ ...current, explorer: { showHidden } }))
             }
+            onWorkspaceChange={setWorkspace}
           />
           {import.meta.env.DEV && <OperationsPanel />}
         </aside>
@@ -160,6 +152,7 @@ export function App() {
           modes={modes}
           dispatchMode={dispatchMode}
           session={session}
+          onRequestClose={closeFlow.request}
         />
       </div>
       <footer className="shell__dock">
@@ -206,34 +199,25 @@ export function App() {
           />
         </div>
       </footer>
+      {/* The last 26px of the window, below the dock: what is running, and what
+          the contract knows about the active document (T048). */}
+      <StatusBar
+        health={state}
+        tab={active}
+        eol={activeEol}
+        subscribeCursor={editor.subscribeCursor}
+        documents={documents}
+        onClose={closeFlow.request}
+      />
+      {closeFlow.tab && (
+        <CloseDialog
+          tab={closeFlow.tab}
+          busy={closeFlow.busy}
+          onCancel={closeFlow.cancel}
+          onDiscard={closeFlow.discard}
+          onSave={closeFlow.save}
+        />
+      )}
     </main>
-  );
-}
-
-function HealthFacts({ health }: { health: HealthReport }) {
-  return (
-    <details>
-      <summary className="shell__ok">{describeHealth(health)}</summary>
-      <dl className="shell__facts">
-        <dt>App</dt>
-        <dd>{health.shell.appVersion}</dd>
-        <dt>Core</dt>
-        <dd>{health.coreVersion}</dd>
-        <dt>Protocol</dt>
-        <dd>{health.protocolVersion}</dd>
-        <dt>Runtime</dt>
-        <dd>
-          {health.shell.runtime} {health.shell.runtimeVersion}
-        </dd>
-        <dt>WebView</dt>
-        <dd>{health.shell.webviewVersion ?? 'unknown'}</dd>
-        <dt>Platform</dt>
-        <dd>
-          {health.os}/{health.arch}
-        </dd>
-        <dt>Build</dt>
-        <dd>{health.debug ? 'debug' : 'release'}</dd>
-      </dl>
-    </details>
   );
 }

@@ -9,6 +9,9 @@ const UNKNOWN_ID = 'does-not-exist' as OperationId;
 /**
  * Development-only control surface for the operation model: start the demo
  * operation, watch progress, cancel, and force errors to see the envelope.
+ *
+ * Collapsed by default (T048): it is a debug affordance sharing a column with
+ * the file tree, so it earns a row until asked for, not a panel.
  */
 export function OperationsPanel() {
   const { operations, error, startDemo, cancel, clearError } = useOperations();
@@ -24,42 +27,44 @@ export function OperationsPanel() {
   }
 
   return (
-    <section className="panel" aria-labelledby="operations-title">
-      <h2 id="operations-title">Operations (development)</h2>
-      <form className="panel__form" onSubmit={onSubmit}>
-        <label>
-          steps
-          <input value={steps} onChange={(e) => setSteps(e.target.value)} inputMode="numeric" />
-        </label>
-        <label>
-          stepMs
-          <input value={stepMs} onChange={(e) => setStepMs(e.target.value)} inputMode="numeric" />
-        </label>
-        <label>
-          failAtStep
-          <input
-            value={failAtStep}
-            onChange={(e) => setFailAtStep(e.target.value)}
-            inputMode="numeric"
-            placeholder="none"
-          />
-        </label>
-        <button type="submit">Start demo</button>
-        <button type="button" onClick={() => void cancel(UNKNOWN_ID)}>
-          Cancel unknown id
-        </button>
-      </form>
-      {error && <ErrorEnvelope error={error} onDismiss={clearError} />}
-      {operations.length === 0 ? (
-        <p className="panel__empty">No operations yet.</p>
-      ) : (
-        <ul className="ops">
-          {operations.map((operation) => (
-            <OperationRow key={operation.id} operation={operation} onCancel={cancel} />
-          ))}
-        </ul>
-      )}
-    </section>
+    <details className="panel">
+      <summary>Operations (development)</summary>
+      <div className="panel__body">
+        <form className="panel__form" onSubmit={onSubmit}>
+          <label>
+            steps
+            <input value={steps} onChange={(e) => setSteps(e.target.value)} inputMode="numeric" />
+          </label>
+          <label>
+            stepMs
+            <input value={stepMs} onChange={(e) => setStepMs(e.target.value)} inputMode="numeric" />
+          </label>
+          <label>
+            failAtStep
+            <input
+              value={failAtStep}
+              onChange={(e) => setFailAtStep(e.target.value)}
+              inputMode="numeric"
+              placeholder="none"
+            />
+          </label>
+          <button type="submit">Start demo</button>
+          <button type="button" onClick={() => void cancel(UNKNOWN_ID)}>
+            Cancel unknown id
+          </button>
+        </form>
+        {error && <ErrorEnvelope error={error} onDismiss={clearError} />}
+        {operations.length === 0 ? (
+          <p className="panel__empty">No operations yet.</p>
+        ) : (
+          <ul className="ops">
+            {operations.map((operation) => (
+              <OperationRow key={operation.id} operation={operation} onCancel={cancel} />
+            ))}
+          </ul>
+        )}
+      </div>
+    </details>
   );
 }
 

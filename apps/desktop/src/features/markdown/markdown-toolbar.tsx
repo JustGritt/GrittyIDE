@@ -17,31 +17,35 @@ export function MarkdownToolbar({
 }) {
   return (
     <div className="mdbar">
-      {VIEW_MODES.map((candidate) => (
-        <button
-          key={candidate}
-          type="button"
-          className="mdbar__mode"
-          aria-pressed={mode === candidate}
-          onClick={() => onMode(candidate)}
-        >
-          {LABELS[candidate]}
-        </button>
-      ))}
+      {notice && (
+        <span className="mdbar__notice" role="status">
+          {notice}
+          <button type="button" className="btn--bare" onClick={onDismissNotice}>
+            Dismiss
+          </button>
+        </span>
+      )}
+      {/* One track, one selected cell: the three modes are a choice, not three
+          independent buttons. */}
+      <div className="mdbar__modes">
+        {VIEW_MODES.map((candidate) => (
+          <button
+            key={candidate}
+            type="button"
+            className="mdbar__mode"
+            aria-pressed={mode === candidate}
+            onClick={() => onMode(candidate)}
+          >
+            {LABELS[candidate]}
+          </button>
+        ))}
+      </div>
       {instructionFile && (
         <span
           className="mdbar__badge"
           title="README.md and AGENTS.md are recognized as instruction files; nothing vendor-specific is attached to them."
         >
           instruction file
-        </span>
-      )}
-      {notice && (
-        <span className="mdbar__notice" role="status">
-          {notice}
-          <button type="button" onClick={onDismissNotice}>
-            Dismiss
-          </button>
         </span>
       )}
     </div>

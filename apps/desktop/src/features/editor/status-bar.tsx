@@ -4,19 +4,26 @@ import type { DocumentId } from '@gritty/protocol';
 import { useEffect, useState } from 'react';
 import { type DocumentTab, isUnsaved, pendingExternalState } from '../documents/documents-reducer';
 import type { DocumentsController } from '../documents/use-documents';
+import type { HealthState } from '../shell/app-bar';
 
 /**
- * Everything the contract knows about the active document, plus the cursor.
- * The cursor lives here as local state so a cursor move re-renders this bar only.
+ * The last 26px of the window (T048). What is running is on the left, what the
+ * contract knows about the active document is on the right, and the cursor
+ * lives here as local state so a cursor move re-renders this bar only.
+ *
+ * The bar is always present — with no document open it still answers "what am I
+ * running" — so the document half is what disappears, not the bar.
  */
 export function StatusBar({
+  health,
   tab,
   eol,
   subscribeCursor,
   documents,
   onClose,
 }: {
-  tab: DocumentTab;
+  health: HealthState;
+  tab: DocumentTab | null;
   eol: Eol | null;
   subscribeCursor: (listener: (position: CursorPosition) => void) => () => void;
   documents: DocumentsController;
@@ -24,13 +31,54 @@ export function StatusBar({
 }) {
   const [cursor, setCursor] = useState<CursorPosition | null>(null);
   useEffect(() => subscribeCursor(setCursor), [subscribeCursor]);
+
+  return (
+    <div className="statusbar">
+      <span className={`statusbar__build statusbar__build--${health.status}`}>
+        {buildLabel(health)}
+      </span>
+      {tab ? (
+        <DocumentFacts
+          tab={tab}
+          eol={eol}
+          cursor={cursor}
+          documents={documents}
+          onClose={onClose}
+        />
+      ) : (
+        <span className="statusbar__spacer" />
+      )}
+    </div>
+  );
+}
+
+function buildLabel(health: HealthState): string {
+  if (health.status === 'loading') return 'starting…';
+  if (health.status === 'error') return 'core unreachable';
+  const { coreVersion, protocolVersion, shell } = health.health;
+  return `core ${coreVersion} · ${shell.runtime} ${shell.runtimeVersion} · protocol ${protocolVersion}`;
+}
+
+function DocumentFacts({
+  tab,
+  eol,
+  cursor,
+  documents,
+  onClose,
+}: {
+  tab: DocumentTab;
+  eol: Eol | null;
+  cursor: CursorPosition | null;
+  documents: DocumentsController;
+  onClose: (documentId: DocumentId) => void;
+}) {
   const { document } = tab;
   const id = document.id;
   const unsaved = isUnsaved(tab);
   const external = pendingExternalState(tab);
 
   return (
-    <div className="statusbar">
+    <>
       <code className="statusbar__path" title={document.path}>
         {document.path}
       </code>
@@ -78,6 +126,6 @@ export function StatusBar({
           Close
         </button>
       </div>
-    </div>
+    </>
   );
 }
