@@ -1,6 +1,8 @@
 import { type CoreError, type HealthReport, toCoreError } from '@gritty/protocol';
-import { useEffect, useReducer, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { ErrorEnvelope } from './components/error-envelope';
+import { Splitter } from './components/splitter';
+import { boundsWithin } from './components/splitter-geometry';
 import { core } from './core/client';
 import { describeHealth } from './core/health';
 import { useDocuments } from './features/documents/use-documents';
@@ -12,11 +14,15 @@ import { useEditorBinding } from './features/editor/use-editor-binding';
 import { ExplorerPanel } from './features/explorer/explorer-panel';
 import { viewModesReducer } from './features/markdown/view-modes';
 import { OperationsPanel } from './features/operations/operations-panel';
-import { DEFAULT_LAYOUT, type Layout } from './features/session/persisted-layout';
+import { DEFAULT_LAYOUT, type Layout, PANE_LIMITS } from './features/session/persisted-layout';
 import { SessionNotices } from './features/session/session-notices';
 import { useSession } from './features/session/use-session';
 import { TerminalPanel } from './features/terminal/terminal-panel';
 import { useTerminals } from './features/terminal/use-terminals';
+
+/** What the editor needs beside the sidebar, and above the dock. */
+const EDITOR_MIN_WIDTH = 360;
+const EDITOR_MIN_HEIGHT = 200;
 
 type HealthState =
   | { status: 'loading' }
@@ -39,6 +45,9 @@ export function App() {
   // through the ordinary commands).
   const drop = useFileDrop(documents);
   const [layout, setLayout] = useState<Layout>(DEFAULT_LAYOUT);
+  // The gutters write their CSS variables straight onto this element while
+  // dragging, so a drag never re-renders the shell (T046).
+  const shell = useRef<HTMLElement | null>(null);
   // Terminal sessions live beside the editor, not inside it: output never
   // passes through editor state (T090).
   const terminals = useTerminals(layout.terminal.customShells);
@@ -69,8 +78,38 @@ export function App() {
     };
   }, []);
 
+  const sidebarBounds = useCallback(
+    (root: HTMLElement) =>
+      boundsWithin(
+        root.clientWidth,
+        PANE_LIMITS.sidebar.min,
+        EDITOR_MIN_WIDTH,
+        PANE_LIMITS.sidebar.max,
+      ),
+    [],
+  );
+  const terminalBounds = useCallback(
+    (root: HTMLElement) =>
+      boundsWithin(
+        root.clientHeight,
+        PANE_LIMITS.terminal.min,
+        EDITOR_MIN_HEIGHT,
+        PANE_LIMITS.terminal.max,
+      ),
+    [],
+  );
+
   return (
-    <main className="shell">
+    <main
+      className="shell"
+      ref={shell}
+      style={
+        {
+          '--sidebar-width': `${layout.panes.sidebarWidth}px`,
+          '--terminal-height': `${layout.panes.terminalHeight}px`,
+        } as React.CSSProperties
+      }
+    >
       <header className="shell__header">
         <div>
           <h1>Gritty</h1>
@@ -100,6 +139,19 @@ export function App() {
           />
           {import.meta.env.DEV && <OperationsPanel />}
         </aside>
+        <Splitter
+          orientation="vertical"
+          label="Resize the sidebar"
+          value={layout.panes.sidebarWidth}
+          fallback={PANE_LIMITS.sidebar.default}
+          direction={1}
+          target={shell}
+          property="--sidebar-width"
+          bounds={sidebarBounds}
+          onCommit={(sidebarWidth) =>
+            setLayout((current) => ({ ...current, panes: { ...current.panes, sidebarWidth } }))
+          }
+        />
         <EditorPane
           documents={documents}
           editor={editor}
@@ -111,6 +163,25 @@ export function App() {
         />
       </div>
       <footer className="shell__dock">
+        {/* Only while the dock is open: resizing a collapsed panel means
+            nothing, and an invisible tab stop is worse than no gutter. */}
+        {terminalOpen && (
+          <Splitter
+            orientation="horizontal"
+            label="Resize the terminal panel"
+            value={layout.panes.terminalHeight}
+            fallback={PANE_LIMITS.terminal.default}
+            // The dock is anchored to the bottom, so it grows as the pointer
+            // moves up — against the axis.
+            direction={-1}
+            target={shell}
+            property="--terminal-height"
+            bounds={terminalBounds}
+            onCommit={(terminalHeight) =>
+              setLayout((current) => ({ ...current, panes: { ...current.panes, terminalHeight } }))
+            }
+          />
+        )}
         <button
           type="button"
           className="shell__dock-toggle"

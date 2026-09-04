@@ -7,6 +7,7 @@ import {
   DEFAULT_TERMINAL_LAYOUT,
   isViewMode,
   MAX_CUSTOM_SHELLS,
+  PANE_LIMITS,
   parseLayout,
   serializeLayout,
   viewStateOf,
@@ -41,9 +42,10 @@ describe('layout blob', () => {
         fontFamily: 'MesloLGS NF',
         fontSize: 15,
       },
+      panes: { sidebarWidth: 260, terminalHeight: 340 },
     };
     const blob = serializeLayout(layout);
-    expect(blob.version).toBe(3);
+    expect(blob.version).toBe(4);
     expect(parseLayout(blob)).toEqual(layout);
     expect(parseLayout(undefined)).toEqual(DEFAULT_LAYOUT);
     expect(parseLayout({ version: 9, explorer: { showHidden: 'yes' } })).toEqual(DEFAULT_LAYOUT);
@@ -56,6 +58,7 @@ describe('layout blob', () => {
     expect(parseLayout({ version: 1, explorer: { showHidden: true } })).toEqual({
       explorer: { showHidden: true },
       terminal: DEFAULT_TERMINAL_LAYOUT,
+      panes: DEFAULT_LAYOUT.panes,
     });
   });
 
@@ -81,6 +84,27 @@ describe('layout blob', () => {
     expect(parseLayout({ terminal: { customShells: many } }).terminal.customShells).toHaveLength(
       MAX_CUSTOM_SHELLS,
     );
+  });
+
+  it('clamps a stored pane size instead of discarding it', () => {
+    // A blob from a larger monitor should still open a usable sidebar.
+    const huge = parseLayout({ panes: { sidebarWidth: 5000, terminalHeight: 5000 } }).panes;
+    expect(huge).toEqual({
+      sidebarWidth: PANE_LIMITS.sidebar.max,
+      terminalHeight: PANE_LIMITS.terminal.max,
+    });
+
+    const tiny = parseLayout({ panes: { sidebarWidth: 1, terminalHeight: -10 } }).panes;
+    expect(tiny).toEqual({
+      sidebarWidth: PANE_LIMITS.sidebar.min,
+      terminalHeight: PANE_LIMITS.terminal.min,
+    });
+  });
+
+  it('falls back to the default pane sizes for anything that is not a number', () => {
+    for (const panes of [null, {}, { sidebarWidth: '320' }, { sidebarWidth: Number.NaN }]) {
+      expect(parseLayout({ panes }).panes.sidebarWidth).toBe(PANE_LIMITS.sidebar.default);
+    }
   });
 
   it('rejects a font size outside the range the input allows', () => {

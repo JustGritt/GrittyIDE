@@ -286,8 +286,17 @@ button:disabled {
 
 .shell__body {
   display: grid;
-  grid-template-columns: minmax(18rem, 24rem) minmax(0, 1fr);
-  gap: 1rem;
+  /* The sidebar track is the gutter's variable; the middle track is the gutter
+     itself, so it occupies the space the gap used to and nothing shifts.
+
+     `min()` enforces the editor's minimum in CSS rather than in JavaScript, so
+     shrinking the window past a stored sidebar width narrows the sidebar
+     instead of squeezing the editor to nothing. The drag has the same bound;
+     this is what holds when nothing is being dragged. */
+  grid-template-columns:
+    min(var(--sidebar-width, 20rem), calc(100% - 1rem - 22.5rem))
+    1rem
+    minmax(0, 1fr);
   min-height: 0;
   flex: 1;
 }
@@ -302,8 +311,72 @@ button:disabled {
 
 @media (max-width: 60rem) {
   .shell__body {
+    gap: 1rem;
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(24rem, 1fr);
+  }
+}
+
+/* Draggable gutters (T046).
+
+   Each one fills the space between two panes rather than being drawn on top of
+   them, so the hit area is the whole gutter and nothing moves when one
+   appears. The visible line is a centred pseudo-element, so a comfortable
+   target does not mean a thick rule. */
+.splitter {
+  background: none;
+  border: none;
+  padding: 0;
+  position: relative;
+  /* Without this a drag on a trackpad or touch screen scrolls the shell. */
+  touch-action: none;
+}
+
+.splitter::before {
+  background: var(--border);
+  content: "";
+  opacity: 0;
+  position: absolute;
+  transition: opacity 120ms ease-out;
+}
+
+.splitter:hover::before,
+.splitter:focus-visible::before {
+  opacity: 1;
+}
+
+.splitter:focus-visible {
+  outline: 2px solid var(--ok);
+  outline-offset: -2px;
+}
+
+.splitter--vertical {
+  cursor: col-resize;
+}
+
+.splitter--vertical::before {
+  inset: 0 calc(50% - 1px);
+}
+
+.splitter--horizontal {
+  cursor: row-resize;
+  /* Straddles the dock's top border so the line you see is the one you grab. */
+  height: 9px;
+  margin-bottom: -9px;
+  position: relative;
+  top: -5px;
+  z-index: 1;
+}
+
+.splitter--horizontal::before {
+  inset: calc(50% - 1px) 0;
+}
+
+/* Stacked, there is no vertical gutter to drag. Placed after the rules above
+   so specificity ascends down the file. */
+@media (max-width: 60rem) {
+  .shell__body > .splitter--vertical {
+    display: none;
   }
 }
 
@@ -1130,7 +1203,9 @@ button:disabled {
 }
 
 .shell__dock-body {
-  height: 280px;
+  /* Same reasoning as the sidebar track: a stored height from a taller window
+     must not leave the editor with no room. */
+  height: min(var(--terminal-height, 280px), calc(100vh - 22rem));
   overflow: hidden;
 }
 

@@ -65,6 +65,16 @@
   },
   "overrides": [
     {
+      "includes": ["apps/desktop/src/components/splitter.tsx"],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "useSemanticElements": "off"
+          }
+        }
+      }
+    },
+    {
       "includes": ["packages/protocol/src/transport/**"],
       "linter": {
         "rules": {

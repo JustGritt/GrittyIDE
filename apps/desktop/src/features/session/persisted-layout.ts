@@ -8,14 +8,28 @@ import { VIEW_MODES, type ViewMode, type ViewModes } from '../markdown/view-mode
  * blob the core stores opaquely. Every field falls back to its default so a
  * blob from another version never breaks startup.
  */
-export const LAYOUT_VERSION = 3;
+export const LAYOUT_VERSION = 4;
 
 export interface Layout {
   readonly explorer: {
     readonly showHidden: boolean;
   };
   readonly terminal: TerminalLayout;
+  /** Pane sizes in CSS pixels, set by dragging the gutters (T046). */
+  readonly panes: {
+    readonly sidebarWidth: number;
+    readonly terminalHeight: number;
+  };
 }
+
+/**
+ * Pane bounds, shared by the layout parser and the gutters themselves so a
+ * stored size and a dragged one obey the same rules.
+ */
+export const PANE_LIMITS = {
+  sidebar: { min: 180, max: 640, default: 320 },
+  terminal: { min: 120, max: 900, default: 280 },
+} as const;
 
 export interface TerminalLayout {
   /**
@@ -47,6 +61,10 @@ export const DEFAULT_TERMINAL_LAYOUT: TerminalLayout = {
 export const DEFAULT_LAYOUT: Layout = {
   explorer: { showHidden: false },
   terminal: DEFAULT_TERMINAL_LAYOUT,
+  panes: {
+    sidebarWidth: PANE_LIMITS.sidebar.default,
+    terminalHeight: PANE_LIMITS.terminal.default,
+  },
 };
 
 /** Custom shells kept, matching the core's own bound on the request. */
@@ -65,6 +83,10 @@ export function parseLayout(value: unknown): Layout {
     typeof raw.terminal === 'object' && raw.terminal !== null
       ? (raw.terminal as Record<string, unknown>)
       : {};
+  const panes =
+    typeof raw.panes === 'object' && raw.panes !== null
+      ? (raw.panes as Record<string, unknown>)
+      : {};
   return {
     explorer: {
       showHidden:
@@ -80,7 +102,21 @@ export function parseLayout(value: unknown): Layout {
       fontFamily: nonEmptyString(terminal.fontFamily),
       fontSize: parseFontSize(terminal.fontSize),
     },
+    panes: {
+      // A stored size is clamped, not discarded: a blob from a larger monitor
+      // should still open a usable sidebar rather than silently reset it.
+      sidebarWidth: parsePane(panes.sidebarWidth, PANE_LIMITS.sidebar),
+      terminalHeight: parsePane(panes.terminalHeight, PANE_LIMITS.terminal),
+    },
   };
+}
+
+function parsePane(
+  value: unknown,
+  limits: { readonly min: number; readonly max: number; readonly default: number },
+): number {
+  if (typeof value !== 'number' || Number.isNaN(value)) return limits.default;
+  return Math.min(Math.max(Math.round(value), limits.min), limits.max);
 }
 
 function nonEmptyString(value: unknown): string | null {
@@ -123,6 +159,10 @@ export type SerializedLayout = {
     readonly fontFamily: string | null;
     readonly fontSize: number | null;
   };
+  readonly panes: {
+    readonly sidebarWidth: number;
+    readonly terminalHeight: number;
+  };
 };
 
 export function serializeLayout(layout: Layout): SerializedLayout {
@@ -134,6 +174,10 @@ export function serializeLayout(layout: Layout): SerializedLayout {
       customShells: [...layout.terminal.customShells],
       fontFamily: layout.terminal.fontFamily,
       fontSize: layout.terminal.fontSize,
+    },
+    panes: {
+      sidebarWidth: layout.panes.sidebarWidth,
+      terminalHeight: layout.panes.terminalHeight,
     },
   };
 }

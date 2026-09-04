@@ -12,6 +12,7 @@ domain abstraction before its upstream contract exists.
 | [T030](T030-file-io-documents.md) | File I/O + document/buffer contract (Gate B) | 0/1A | T020 | done |
 | [T040](T040-monaco-shell.md) | Monaco shell | 0/1A | T030 | done |
 | [T045](T045-drag-and-drop.md) | Drag and drop files/folders onto the window | 1A | T030, T040 | in-progress |
+| [T046](T046-resizable-panes.md) | Resizable panes | 1A | T040, T060, T095 | review |
 | [T050](T050-markdown.md) | Markdown | 0/1B | T030, T040 | done |
 | [T060](T060-session-persistence.md) | Session persistence + recovery | 0/1B | T030, T040 | done |
 | [T090](T090-terminal-pty.md) | Terminal (PTY) spike | 0/2 | T010 | done |
