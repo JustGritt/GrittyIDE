@@ -9,15 +9,20 @@
 //!   from Rust; the WebView is granted none of its commands. External URLs
 //!   are opened by the core's shell service (T050) through [`shell::SystemOpener`],
 //!   and a navigation guard keeps the WebView on the application origin.
+//! - Session persistence (T060): the application data directory is resolved
+//!   here (`tauri::path`, never from the WebView), window geometry is
+//!   captured from window events and restored before the window shows.
 
 mod commands;
 pub mod core;
 mod shell;
+pub mod window_state;
 
 use std::sync::Arc;
 
-use gritty_core::shell::ExternalOpener;
 use tauri::{Manager, Url};
+
+pub use core::CoreOptions;
 use tracing_subscriber::EnvFilter;
 
 /// Environment variable controlling log filtering, e.g. `GRITTY_LOG=debug`.
@@ -52,8 +57,10 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(navigation_guard())
+        .on_window_event(window_state::on_window_event)
         .setup(|app| {
             attach_core(app.handle());
+            window_state::restore_main_window(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -73,22 +80,33 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::documents_status,
             commands::documents_list,
             commands::shell_open_external,
+            commands::session_restore,
+            commands::session_candidates,
+            commands::session_recover,
+            commands::session_discard,
+            commands::session_update,
         ])
 }
 
 /// Build the core (event bus, operation registry, workspace and document
-/// managers, shell service) and manage it as app state.
+/// managers, shell and session services) and manage it as app state.
 pub fn attach_core<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    attach_core_with(app, Arc::new(shell::SystemOpener));
+    let data_dir = core::resolve_data_dir(app);
+    attach_core_with(
+        app,
+        CoreOptions {
+            opener: Arc::new(shell::SystemOpener),
+            data_dir,
+        },
+    );
 }
 
-/// [`attach_core`] with an injected opener for external URLs; tests use a
-/// recording fake so nothing ever opens a browser.
-pub fn attach_core_with<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-    opener: Arc<dyn ExternalOpener>,
-) {
-    app.manage(core::Core::with_opener(app.clone(), opener));
+/// [`attach_core`] with injected dependencies: tests use a recording opener
+/// so nothing ever opens a browser, and a temporary data directory so no test
+/// touches the real session database.
+pub fn attach_core_with<R: tauri::Runtime>(app: &tauri::AppHandle<R>, options: CoreOptions) {
+    app.manage(window_state::WindowTracker::default());
+    app.manage(core::Core::with_options(app.clone(), options));
 }
 
 /// A link the WebView tries to follow (a click the preview did not intercept,

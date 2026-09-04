@@ -4,7 +4,7 @@ import { createFakeTransport } from './testing/fake-transport';
 import type { HealthReport } from './types';
 
 const health: HealthReport = {
-  protocolVersion: '1.2.0',
+  protocolVersion: '1.3.0',
   coreVersion: '0.1.0',
   os: 'macos',
   arch: 'aarch64',

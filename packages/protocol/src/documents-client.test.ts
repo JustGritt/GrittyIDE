@@ -8,7 +8,7 @@ const WS_ID = 'ws-1' as WorkspaceId;
 const DOC_ID = 'doc-1' as DocumentId;
 
 const health: HealthReport = {
-  protocolVersion: '1.2.0',
+  protocolVersion: '1.3.0',
   coreVersion: '0.1.0',
   os: 'linux',
   arch: 'x86_64',

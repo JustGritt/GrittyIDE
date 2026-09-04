@@ -20,6 +20,11 @@ export const COMMANDS = {
   'documents.status': 'documents_status',
   'documents.list': 'documents_list',
   'shell.openExternal': 'shell_open_external',
+  'session.restore': 'session_restore',
+  'session.candidates': 'session_candidates',
+  'session.recover': 'session_recover',
+  'session.discard': 'session_discard',
+  'session.update': 'session_update',
 } as const;
 
 export type CommandName = keyof typeof COMMANDS;

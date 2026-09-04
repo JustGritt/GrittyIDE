@@ -1183,6 +1183,7 @@ name = "gritty-desktop"
 version = "0.1.0"
 dependencies = [
  "gritty-core",
+ "gritty-persistence",
  "open",
  "serde",
  "serde_json",
