@@ -123,18 +123,20 @@ unexpected child death stays contained.
 
 | Command | Result |
 |---|---|
-| `cargo test -p gritty-terminal` | 15 unit + 15 real-PTY integration, all pass (1.6 s) |
+| `cargo test -p gritty-terminal` | 16 unit + 16 real-PTY integration, all pass (1.6 s) |
 | `cargo test -p gritty-core` | 106 pass (17 new terminal tests) |
 | `cargo test -p gritty-desktop` | 26 pass (7 new terminal adapter tests) |
 | `pnpm exec vitest run` | 220 pass across 39 files (22 new) |
 | `pnpm --filter @gritty/desktop build` | clean; xterm's CSS lands in the app's own stylesheet |
 | `GRITTY_LOG=debug pnpm dev` | boots on protocol 1.4.0; WebView health round trip completes in WKWebView 21624.4.5; no panic or error in the log |
 | `pnpm check` | green |
+| Linux CI | PR #8 and PR #9 both failed on the output-storm test; PR #10 carries the fix that makes it machine-independent (see the third finding) |
 
 The real-PTY tests cover: echo and clean exit, non-zero exit codes, the
 requested cwd, `TERM`/`COLORTERM`, `stty size` before and after a resize, size
 clamping, process-tree kill verified by the background job's pid, an output
-storm (`yes`) with truncation reported and a resize completing during it,
+storm (`yes`) with truncation reported, delivery rate limiting with a resize
+completing mid-flood,
 `SIGKILL` behind Gritty's back, idempotent kill with writes refused afterwards,
 a dropped handle killing the shell, concurrent sessions not crossing, and spawn
 failures for a missing shell and an unusable cwd.
@@ -163,7 +165,7 @@ Recorded in ADR-015. The ones that shaped the code most:
 - **A workspace-relative `cwd`**, resolved through the root like every other
   path (ADR-010).
 
-### Two findings worth keeping
+### Three findings worth keeping
 
 - **A fake host earns its place.** `FakePtyHost` calls the sink from inside
   `kill()`; the sink re-enters the manager to record the exit. The first
@@ -177,6 +179,19 @@ Recorded in ADR-015. The ones that shaped the code most:
   does not affect a human (who types after seeing a prompt), but anything
   driving a terminal programmatically — an agent, T300 — must wait for
   readiness.
+- **A timing assertion that passes locally can be an assertion about the
+  machine**, and it took two attempts to stop being one. The first output-storm
+  test required the flood to overflow the production 1 MiB buffer faster than a
+  60 Hz drain could empty it: true on the development Mac, false on a Linux CI
+  runner, where it failed. The second attempt slowed the *consumer*, which only
+  widened the drain window from 16 ms to 66 ms — `take()` empties the buffer
+  completely, so a slower consumer does not change the throughput the test
+  demands — and it failed on CI as well. The cap is now injectable
+  (`SystemPtyHost::with_max_pending_bytes`, the same kind of test hook as
+  `Database::inject_write_failures`), the integration test uses 16 KiB, which
+  is smaller than one read, and the production cap is pinned by the
+  deterministic unit tests in `batch.rs`. The Phase 0 performance baseline (§C)
+  is all thresholds and will fail the same way if calibrated on one machine.
 
 ### Dependencies added
 

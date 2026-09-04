@@ -26,7 +26,7 @@ running application. Exit: ADR-001 go/no-go.
 | # | Test | Steps | Pass condition | Result |
 |---|---|---|---|---|
 | B1 | Dirty-buffer crash | open workspace → edit without saving → `kill -9` Gritty → restart | unsaved content is recoverable; no silent loss | 2026-09-04, macOS 26 arm64: automated in `crates/gritty-core/tests/crash_recovery.rs` (snapshot written within the debounce, process state dropped without close/flush/checkpoint, relaunch offers `SAME_AS_DISK` and recovers the text; changed and deleted files recover as `CONFLICTED` / `DELETED_EXTERNALLY`) and through the adapters; the real `kill -9` of the app while typing pending reviewer |
-| B2 | PTY failure | spawn PTY → produce output → kill the child unexpectedly | renderer stays responsive; terminal reports termination | 2026-09-04, macOS 26 arm64: `killing_the_child_unexpectedly_reports_termination` (`crates/terminal/tests/pty.rs`) SIGKILLs the shell behind Gritty's back; the session reports `signal: SIGKILL`, `code: None`, exactly one `TerminalExited`, and no output after it. Renderer containment is structural (output never enters React state, delivery capped at ~60 Hz) and is asserted in `an_output_storm_stays_bounded_and_reports_what_it_dropped`: a resize still completes while `yes` floods. The renderer staying responsive on screen is pending reviewer |
+| B2 | PTY failure | spawn PTY → produce output → kill the child unexpectedly | renderer stays responsive; terminal reports termination | 2026-09-04, macOS 26 arm64: `killing_the_child_unexpectedly_reports_termination` (`crates/terminal/tests/pty.rs`) SIGKILLs the shell behind Gritty's back; the session reports `signal: SIGKILL`, `code: None`, exactly one `TerminalExited`, and no output after it. Renderer containment is structural (output never enters React state, delivery capped at ~60 Hz) and is asserted in `output_delivery_is_rate_limited_and_does_not_starve_the_control_path`: a resize still completes while `yes` floods. The renderer staying responsive on screen is pending reviewer |
 | B3 | Operation cancellation | start a long operation (search or fixture op) → receive progress → cancel | prompt cancellation; no stale successful completion | 2026-09-03, demo operation (T010): automated in `cargo test -p gritty-core` (registry) and `cargo test -p gritty-desktop` (mock runtime through the real adapters): progress observed → cancel → `CANCELLED` in < 1 s, no `OperationCompleted`, `seq` contiguous. Manual UI pass pending reviewer; re-run with search (T080) |
 | B4 | Renderer reload | reload/recreate the WebView while core/workspace exist | durable state rehydrates without corruption | 2026-09-04: `documents.list` + `documents.open` rehydration kept (`useDocuments.rehydrate`, always run by the session flow); a second `session.restore` in the same process reports the open workspace without reopening (core and adapter tests); the WebView flow is unit-tested for the reload path; a Cmd+R in `pnpm dev` with dirty tabs pending reviewer |
 | B5 | Filesystem storm | generate rapid file changes in `fixtures/large-repo` | UI responsive; events batched/bounded; final state converges | |
@@ -93,12 +93,28 @@ following it, and the registry marks the session `EXITED` and drops the pid.
 The exit signal is normalized: `strsignal` says "Killed: 9" on macOS and
 "Killed" on Linux, which is platform text, not a protocol value.
 
-**Flooding does not reach the renderer.** `yes` overflows the 1 MiB cap; the
-oldest bytes go, the count is reported as `truncatedBytes` and drawn as a
-visible marker, batches stay under the cap and delivery stays rate limited
-(asserted against a measured ceiling of ~70/s). A resize completes during the
+**Flooding does not reach the renderer.** A `yes` flood overflows the buffer:
+the oldest bytes go, the count is reported as `truncatedBytes` and drawn as a
+visible marker, and batches stay under the cap. Separately, delivery stays rate
+limited against a measured ceiling of ~70/s and a resize completes during the
 flood, so the control path is not starved. Output never passes through React
 state at all.
+
+Getting that test right took two attempts and the lesson is worth more than the
+test. The first version asserted that the flood overflowed the production 1 MiB
+buffer — which requires the shell to outrun a 60 Hz drain, true on the
+development Mac and false on a Linux CI runner, where it failed. The second
+version slowed the *consumer* down, which only widened the drain window from
+16 ms to 66 ms: still a throughput assumption, and it failed on CI too. The
+buffer cap is now injectable, the integration test uses a 16 KiB one (smaller
+than a single read, so overflow is certain on any machine), and the size of the
+production cap is pinned by the deterministic unit tests in `batch.rs`.
+
+**Worth carrying into §C below.** The performance baseline is entirely
+thresholds. A threshold calibrated on this Mac will pass here and fail in CI
+exactly the way this did. Record the machine with every number, and where a
+test must assert a bound, force the condition rather than relying on the
+hardware to produce it.
 
 Remaining for the reviewer: the same checks with a human at the window (`vim`,
 `less`, `top`, Ctrl+C, tab close verified with `pgrep`, the flood on screen).

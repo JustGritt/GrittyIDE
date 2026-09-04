@@ -40,8 +40,13 @@ pub struct OutputBatch {
 }
 
 /// The per-session buffer shared between the reader thread and the flusher.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct PendingOutput {
+    /// Cap for this buffer. A field rather than the constant so a test can
+    /// make overflow certain instead of hoping the machine outruns the
+    /// flusher: whether a real flood overflows a 1 MiB buffer depends on how
+    /// fast the machine is, which is not a property worth asserting.
+    cap: usize,
     bytes: Vec<u8>,
     /// Bytes of an incomplete UTF-8 sequence held back from the last flush.
     tail: Vec<u8>,
@@ -50,17 +55,33 @@ pub struct PendingOutput {
     finished: bool,
 }
 
+impl Default for PendingOutput {
+    fn default() -> Self {
+        Self::with_cap(MAX_PENDING_BYTES)
+    }
+}
+
 impl PendingOutput {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_cap(cap: usize) -> Self {
+        Self {
+            cap: cap.max(1),
+            bytes: Vec::new(),
+            tail: Vec::new(),
+            truncated_bytes: 0,
+            finished: false,
+        }
     }
 
     /// Append what the reader just read. Never blocks and never grows past
     /// [`MAX_PENDING_BYTES`]; the overflow is counted, not queued.
     pub fn push(&mut self, chunk: &[u8]) {
         // A single read larger than the whole cap: keep only its tail.
-        if chunk.len() >= MAX_PENDING_BYTES {
-            let keep = MAX_PENDING_BYTES;
+        if chunk.len() >= self.cap {
+            let keep = self.cap;
             let dropped = self.bytes.len() as u64 + (chunk.len() - keep) as u64;
             self.bytes.clear();
             self.bytes.extend_from_slice(&chunk[chunk.len() - keep..]);
@@ -68,8 +89,8 @@ impl PendingOutput {
             return;
         }
         self.bytes.extend_from_slice(chunk);
-        if self.bytes.len() > MAX_PENDING_BYTES {
-            let excess = self.bytes.len() - MAX_PENDING_BYTES;
+        if self.bytes.len() > self.cap {
+            let excess = self.bytes.len() - self.cap;
             self.bytes.drain(..excess);
             self.truncated_bytes += excess as u64;
         }
@@ -215,6 +236,16 @@ mod tests {
         assert_eq!(batch.text.len(), MAX_PENDING_BYTES);
         assert!(batch.text.ends_with("newest"));
         assert_eq!(batch.truncated_bytes, (7 + overflow) as u64);
+    }
+
+    #[test]
+    fn a_smaller_cap_is_honoured() {
+        // What the integration test relies on to force overflow deterministically.
+        let mut pending = PendingOutput::with_cap(16);
+        pending.push(b"0123456789abcdefghij");
+        let batch = pending.take().expect("a batch");
+        assert_eq!(batch.text, "456789abcdefghij");
+        assert_eq!(batch.truncated_bytes, 4);
     }
 
     #[test]

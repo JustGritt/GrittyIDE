@@ -82,7 +82,7 @@ session writer is flushed.
 
 | Bound | Value | Why |
 |---|---|---|
-| Pending output per session | 1 MiB | more scrollback than fits between two frames |
+| Pending output per session | 1 MiB | more scrollback than fits between two frames (`SystemPtyHost::with_max_pending_bytes` lowers it for tests) |
 | Delivery rate | ~60 Hz | one batch per frame, not one per read |
 | Read size | 64 KiB | one `read` per wakeup under a flood |
 | Concurrent sessions | 16 | each costs a shell, two threads and a buffer |
@@ -92,8 +92,10 @@ session writer is flushed.
 ## Tests
 
 - `crates/terminal/tests/pty.rs` — a real PTY: echo, exit codes, cwd, `TERM`,
-  resize through `stty size`, process-tree kill verified by pid, output storm,
-  unexpected `SIGKILL`, idempotent kill, concurrent sessions, spawn failures.
+  resize through `stty size`, process-tree kill verified by pid, output storm
+  (against an injected 16 KiB cap, so overflow does not depend on how fast the
+  machine is), delivery rate limiting, unexpected `SIGKILL`, idempotent kill,
+  concurrent sessions, spawn failures.
   These pin a shell and generate its rc files: run against a developer's own
   login shell, an interactive line editor rewrites input as it arrives and the
   assertions depend on whose machine they run on.
