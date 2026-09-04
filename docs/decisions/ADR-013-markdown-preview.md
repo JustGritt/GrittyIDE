@@ -72,7 +72,7 @@ editor and to the outside world.
   re-renders while typing keep colorized blocks; misses are filled by an
   asynchronous pass that is aborted by the next render.
 - **View modes** (`source | split | preview`, Markdown defaults to split) are
-  per tab and in memory; T060 persists them.
+  per tab and in memory; T060 persists them (done: ADR-014, per root and path).
 - **Instruction files** (`README.md`, `AGENTS.md`, case-insensitive basename)
   get a badge in the explorer, the tab strip and the toolbar and nothing else.
 
