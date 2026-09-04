@@ -25,7 +25,12 @@ export function AppBar({
     <header className="appbar">
       <div className="appbar__identity">
         <h1 className="appbar__wordmark">Gritty</h1>
-        {workspace && <span className="appbar__workspace">{workspace.name}</span>}
+        {workspace ? (
+          <span className="appbar__workspace">{workspace.name}</span>
+        ) : (
+          // Says the state rather than leaving a gap where a name goes (T049).
+          <span className="appbar__workspace appbar__workspace--empty">No workspace open</span>
+        )}
       </div>
       {workspace && (
         <code className="appbar__path" title={workspace.root}>

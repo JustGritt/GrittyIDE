@@ -1,7 +1,7 @@
 # Task T047 — Naming terminal sessions
 
 - **Phase:** 1A
-- **Status:** review
+- **Status:** done
 - **Depends on:** T090, T095
 
 ## Objective

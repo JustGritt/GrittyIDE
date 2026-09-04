@@ -46,7 +46,10 @@ use crate::protocol::actor::Actor;
 use crate::protocol::error::{CoreError, CoreErrorCode};
 use crate::protocol::ids::CorrelationId;
 use crate::protocol::time::Timestamp;
-use crate::workspace::{UnsavedPolicy, WorkspaceManager};
+use crate::workspace::{
+    ForgetWorkspaceRequest, RecentWorkspace, RecentWorkspacesRequest, UnsavedPolicy,
+    WorkspaceManager, recents,
+};
 
 /// Intents buffered between the bus and the writer before overflow triggers a resync.
 pub const TAP_CAPACITY: usize = 1024;
@@ -465,6 +468,54 @@ impl SessionService {
         }
     }
 
+    /// `workspace.recents`: the workspace history behind the startup screen
+    /// (T049). Lives here rather than on `WorkspaceManager` because this is
+    /// where the database handle is; the logic is `workspace::recents`.
+    ///
+    /// **Never fails for persistence reasons.** With the store unavailable the
+    /// history is empty, not an error — the same rule `restore` follows, and
+    /// the reason the launcher can render before it knows whether the database
+    /// opened. `PersistenceUnavailable` already says why in the notices.
+    pub async fn recents(
+        &self,
+        request: RecentWorkspacesRequest,
+        _correlation: CorrelationId,
+    ) -> Result<Vec<RecentWorkspace>, CoreError> {
+        let Some(database) = self.database.clone() else {
+            return Ok(Vec::new());
+        };
+        let limit = request.limit.unwrap_or(recents::DEFAULT_RECENTS);
+        // `$HOME` is resolved per call rather than cached: it is one `getenv`
+        // and a process whose environment changed under it should not keep
+        // rendering the old `~`.
+        let home = home_directory();
+        let entries = self
+            .blocking(database, move |db| {
+                recents::load(db, limit, home.as_deref())
+            })
+            .await?;
+        tracing::debug!(entries = entries.len(), "workspace history read");
+        Ok(entries)
+    }
+
+    /// `workspace.forget`: drop one root from the history, and the
+    /// last-workspace pointer with it when they are the same root.
+    ///
+    /// Idempotent, and narrow on purpose: tabs and recovery snapshots stored
+    /// under the root stay (ADR-014).
+    pub async fn forget(
+        &self,
+        request: ForgetWorkspaceRequest,
+        _correlation: CorrelationId,
+    ) -> Result<(), CoreError> {
+        let database = self.database()?;
+        let root = request.root.clone();
+        self.blocking(database, move |db| recents::forget(db, &root))
+            .await?;
+        tracing::info!(root = %request.root, "workspace forgotten");
+        Ok(())
+    }
+
     /// `session.candidates`: every snapshot of the workspace's root compared
     /// with the disk. Documents that are open and dirty are the live truth
     /// and are skipped.
@@ -706,6 +757,23 @@ impl SessionService {
             .await
             .map_err(|join| CoreError::internal(format!("session task failed: {join}")))?
             .map_err(persistence_error)
+    }
+}
+
+/// The user's home directory, for shortening a displayed path (T049).
+///
+/// Reuses the terminal crate's resolver — `$HOME` first, then the account's
+/// own home from the password database — because it is the one place that
+/// already answers this question correctly for an app launched without an
+/// environment. A failure is not an error here: a path that could not be
+/// shortened is shown in full.
+fn home_directory() -> Option<std::path::PathBuf> {
+    match gritty_terminal::shell::home_directory(|key| std::env::var(key).ok()) {
+        Ok(home) => Some(home),
+        Err(error) => {
+            tracing::debug!(%error, "no home directory; recent paths stay absolute");
+            None
+        }
     }
 }
 
@@ -1599,6 +1667,95 @@ mod tests {
             .unwrap_err();
         assert_eq!(error.code, CoreErrorCode::Io);
         assert_eq!(error.details.unwrap()["persistence"]["available"], false);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_workspace_history_follows_what_was_opened() {
+        let data = TempDir::new("recents-service");
+        let db = data.join(DB_FILE_NAME);
+        let h = start(&db, FAST);
+        let first = workspace_dir("recents-one");
+        let second = workspace_dir("recents-two");
+
+        assert!(
+            h.session
+                .recents(RecentWorkspacesRequest::default(), CorrelationId::new())
+                .await
+                .unwrap()
+                .is_empty(),
+            "nothing has been opened yet"
+        );
+
+        // The roots the history records are the canonical ones the manager
+        // resolved, not the paths handed to it.
+        let one = h.open_ws(&first);
+        let two = h.open_ws(&second);
+        assert!(h.session.flush(Duration::from_secs(2)).await);
+
+        let entries = h
+            .session
+            .recents(RecentWorkspacesRequest::default(), CorrelationId::new())
+            .await
+            .unwrap();
+        // Set, not sequence: two opens this close together share a millisecond
+        // on a fast machine and the root breaks the tie. Recency ordering is
+        // pinned deterministically in `workspace::recents`; what this test
+        // owns is that opening a workspace records its *canonical* root at all.
+        let mut roots = entries.iter().map(|e| e.root.as_str()).collect::<Vec<_>>();
+        roots.sort_unstable();
+        let mut expected = vec![one.root.as_str(), two.root.as_str()];
+        expected.sort_unstable();
+        assert_eq!(roots, expected);
+        assert!(entries.iter().all(|entry| entry.exists));
+        assert!(entries.iter().any(|entry| entry.name == two.name));
+
+        h.session
+            .forget(
+                ForgetWorkspaceRequest {
+                    root: two.root.clone(),
+                },
+                CorrelationId::new(),
+            )
+            .await
+            .unwrap();
+        let after = h
+            .session
+            .recents(RecentWorkspacesRequest::default(), CorrelationId::new())
+            .await
+            .unwrap();
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].root, one.root);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_unavailable_store_has_an_empty_history_rather_than_an_error() {
+        let h = start_with(
+            Path::new("/nonexistent/gritty.sqlite"),
+            FAST,
+            SessionStore::unavailable("disk on fire"),
+        );
+        // The startup screen renders before it knows whether the database
+        // opened; an error here would replace the launcher with a stack trace.
+        assert!(
+            h.session
+                .recents(RecentWorkspacesRequest::default(), CorrelationId::new())
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        // Forgetting, by contrast, is an action the user took and must not
+        // silently appear to succeed.
+        let error = h
+            .session
+            .forget(
+                ForgetWorkspaceRequest {
+                    root: "/anything".into(),
+                },
+                CorrelationId::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::Io);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

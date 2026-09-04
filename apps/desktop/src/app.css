@@ -1822,3 +1822,269 @@ textarea:focus-visible {
   gap: var(--gap);
   margin-left: auto;
 }
+
+/* Startup screen (T049, artboard 3a): what fills the window while no
+   workspace is open. It replaces the sidebar-and-editor body only — the top
+   bar, session notices, the terminal dock and the status bar stay put, so the
+   window never loses its chrome.
+
+   Centred with `margin: auto` on the panel rather than `align-items: center`
+   on the scroller: a centred flex child taller than its container has its top
+   clipped and unreachable, and this panel grows with the history. */
+.launcher {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: auto;
+  padding: var(--gap-lg);
+  background: var(--surface-base);
+}
+
+.launcher__panel {
+  margin: auto;
+  width: 35rem;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-lg);
+}
+
+.launcher__intro {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+
+.launcher__title {
+  margin: 0;
+  font-size: var(--text-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.launcher__tagline {
+  margin: 0;
+  font-size: var(--text-body);
+  color: var(--fg-muted);
+  line-height: 1.5;
+}
+
+/* Three ways in, or two when there is nothing to reopen. `auto-fit` rather
+   than a fixed three columns so the missing tile closes the gap instead of
+   leaving one, and so the row reflows before it overflows. */
+.launcher__ways {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: var(--gap-sm);
+}
+
+.launcher__way {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--gap);
+  padding: var(--gap-md);
+  background: var(--surface-raised);
+  border-radius: var(--radius-lg);
+  text-align: left;
+  font-size: var(--text-body);
+  min-width: 0;
+}
+
+.launcher__way:hover:not(:disabled) {
+  background: var(--surface-control);
+}
+
+.launcher__way-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.launcher__way-hint {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  color: var(--fg-muted);
+}
+
+/* Drawn rather than drawn *from*: three glyphs do not earn an icon set, and
+   an icon font would be a dependency and a second theme to keep in step. */
+.launcher__glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 16px;
+  border: 1.5px solid var(--fg-muted);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--fg-muted);
+}
+
+.launcher__glyph--folder {
+  border-color: var(--accent-text);
+  border-top-width: 5px;
+}
+
+.launcher__glyph--reopen {
+  border-color: var(--ok-text);
+  color: var(--ok-text);
+}
+
+.launcher__path {
+  display: flex;
+  gap: var(--gap-sm);
+}
+
+.launcher__path input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+}
+
+.launcher__recents {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+}
+
+.launcher__recents-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap);
+  padding: 0 var(--gap-xs) var(--gap-xs);
+}
+
+.launcher__recents-head .btn--bare {
+  color: var(--accent-text);
+  padding: 0;
+}
+
+.launcher__spacer {
+  flex: 1;
+}
+
+.launcher__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.launcher__row {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-md);
+}
+
+.launcher__row:hover {
+  background: var(--surface-raised);
+}
+
+.launcher__recent {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap);
+  padding: var(--gap-sm) var(--gap);
+  background: transparent;
+  font-size: var(--text-code);
+}
+
+.launcher__recent:hover:not(:disabled) {
+  background: transparent;
+}
+
+.launcher__recent-name {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 1 auto;
+}
+
+/* A missing root is listed, not hidden: the user opened it once, and dropping
+   it silently would explain nothing. It is struck through and unclickable,
+   and Forget is the way out. */
+.launcher__row--missing .launcher__recent:disabled {
+  opacity: 1;
+}
+
+.launcher__row--missing .launcher__recent-name {
+  text-decoration: line-through;
+  color: var(--fg-muted);
+}
+
+.launcher__recent-when {
+  font-size: var(--text-meta);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.launcher__recent-gone {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  color: var(--error-text);
+  white-space: nowrap;
+}
+
+/* Truncated at the end, plainly. `direction: rtl` would move the ellipsis to
+   the front — which is the more useful end of a path to lose — but it also
+   reorders the neutral characters, and `~/Desktop/Projects` comes out as
+   `/~Desktop/Projects`. A path that reads wrong is worse than one that reads
+   short, and the row's `title` carries the whole root either way. */
+.launcher__recent-parent {
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+  min-width: 0;
+}
+
+/* Quiet until the row is reached for: a column of Forget buttons is a column
+   of ways to lose something. The same rule the tab strip's close button
+   follows, including staying visible while it has focus so the keyboard can
+   reach it. */
+.launcher__forget {
+  margin-right: var(--gap-sm);
+  color: var(--fg-muted);
+  opacity: 0;
+}
+
+.launcher__row:hover .launcher__forget,
+.launcher__forget:focus-visible {
+  opacity: 1;
+}
+
+.launcher__forget:hover {
+  color: var(--error-text);
+  background: var(--error-wash);
+}
+
+.launcher__drop {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  margin: 0;
+  padding: 11px var(--gap-md);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+  font-size: var(--text-code);
+  color: var(--fg-muted);
+}
+
+.launcher__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+  flex: none;
+}

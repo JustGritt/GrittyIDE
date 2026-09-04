@@ -879,6 +879,81 @@ fn shell_open_external_reports_a_handler_failure_as_io() {
 }
 
 #[test]
+fn the_workspace_history_survives_a_restart_and_forget_removes_one_entry() {
+    let data = TempData::new("recents");
+    let kept = TempWorkspace::new("recents-kept");
+    let dropped = TempWorkspace::new("recents-dropped");
+    let kept_root = fs::canonicalize(&kept.0).unwrap();
+    let dropped_root = fs::canonicalize(&dropped.0).unwrap();
+
+    {
+        let h = Harness::with_data_dir(&data.0);
+        assert_eq!(
+            h.invoke("workspace_recents", json!({ "request": {} }))
+                .expect("recents"),
+            json!([]),
+            "a first run has no history"
+        );
+        h.open_workspace(&kept.0);
+        h.open_workspace(&dropped.0);
+        h.flush();
+    }
+
+    // The next process reads what the previous one recorded.
+    let h = Harness::with_data_dir(&data.0);
+    let entries = h
+        .invoke("workspace_recents", json!({ "request": {} }))
+        .expect("recents");
+    let roots = |value: &Value| {
+        let mut roots = value
+            .as_array()
+            .expect("array")
+            .iter()
+            .map(|entry| entry["root"].as_str().expect("root").to_owned())
+            .collect::<Vec<_>>();
+        roots.sort();
+        roots
+    };
+    let mut expected = vec![
+        kept_root.to_string_lossy().into_owned(),
+        dropped_root.to_string_lossy().into_owned(),
+    ];
+    expected.sort();
+    assert_eq!(roots(&entries), expected);
+    let entry = entries.as_array().unwrap().iter().next().unwrap();
+    assert_eq!(entry["exists"], true);
+    assert!(entry["displayRoot"].is_string());
+    assert!(entry["name"].is_string());
+    assert!(entry["lastOpenedAt"].is_number());
+
+    h.invoke(
+        "workspace_forget",
+        json!({ "request": { "root": dropped_root.to_string_lossy() } }),
+    )
+    .expect("forget");
+    assert_eq!(
+        roots(
+            &h.invoke("workspace_recents", json!({ "request": {} }))
+                .expect("recents")
+        ),
+        vec![kept_root.to_string_lossy().into_owned()]
+    );
+    // Idempotent: pressing Forget twice is not an error.
+    h.invoke(
+        "workspace_forget",
+        json!({ "request": { "root": dropped_root.to_string_lossy() } }),
+    )
+    .expect("forget again");
+
+    let error = h
+        .invoke("workspace_forget", json!({ "request": { "root": 42 } }))
+        .unwrap_err();
+    assert_eq!(error["code"], "InvalidInput");
+    assert_eq!(error["details"]["field"], "request");
+    assert!(error["correlationId"].is_string());
+}
+
+#[test]
 fn session_restore_reopens_the_last_workspace_with_its_tabs_after_a_restart() {
     let data = TempData::new("session-restore");
     let root = TempWorkspace::new("session-restore");

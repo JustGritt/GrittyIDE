@@ -12,6 +12,8 @@ export const COMMANDS = {
   'workspace.close': 'workspace_close',
   'workspace.current': 'workspace_current',
   'workspace.list': 'workspace_list',
+  'workspace.recents': 'workspace_recents',
+  'workspace.forget': 'workspace_forget',
   'documents.open': 'documents_open',
   'documents.close': 'documents_close',
   'documents.update': 'documents_update',

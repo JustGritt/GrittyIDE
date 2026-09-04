@@ -30,8 +30,8 @@ use crate::terminal::wire::{
     SpawnTerminalRequest, Terminal, TerminalProfile, WriteTerminalRequest,
 };
 use crate::workspace::{
-    CloseWorkspaceRequest, ListDirectoryRequest, ListDirectoryResponse, OpenWorkspaceRequest,
-    Workspace,
+    CloseWorkspaceRequest, ForgetWorkspaceRequest, ListDirectoryRequest, ListDirectoryResponse,
+    OpenWorkspaceRequest, RecentWorkspace, RecentWorkspacesRequest, Workspace,
 };
 
 /// Relative to this crate's `Cargo.toml`.
@@ -65,6 +65,9 @@ fn export_bindings() {
     CloseWorkspaceRequest::export_all(&cfg).expect("export CloseWorkspaceRequest");
     ListDirectoryRequest::export_all(&cfg).expect("export ListDirectoryRequest");
     ListDirectoryResponse::export_all(&cfg).expect("export ListDirectoryResponse");
+    RecentWorkspace::export_all(&cfg).expect("export RecentWorkspace");
+    RecentWorkspacesRequest::export_all(&cfg).expect("export RecentWorkspacesRequest");
+    ForgetWorkspaceRequest::export_all(&cfg).expect("export ForgetWorkspaceRequest");
     DocumentContent::export_all(&cfg).expect("export DocumentContent");
     OpenDocumentRequest::export_all(&cfg).expect("export OpenDocumentRequest");
     CloseDocumentRequest::export_all(&cfg).expect("export CloseDocumentRequest");

@@ -1,7 +1,7 @@
 # Task T046 — Resizable panes, and a terminal on opening
 
 - **Phase:** 1A
-- **Status:** review
+- **Status:** done
 - **Depends on:** T040 (editor pane), T060 (persisted layout), T090/T095 (dock)
 
 ## Objective

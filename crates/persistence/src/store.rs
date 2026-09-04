@@ -87,12 +87,14 @@ pub mod workspace {
         Ok(())
     }
 
-    /// Most recently opened first.
-    pub fn list(conn: &Connection) -> Result<Vec<WorkspaceRow>> {
+    /// Most recently opened first, at most `limit` rows. The table grows without
+    /// bound — one row per root ever opened — so every reader states how many it
+    /// wants rather than paying for the whole history.
+    pub fn list(conn: &Connection, limit: i64) -> Result<Vec<WorkspaceRow>> {
         let mut statement = conn.prepare(
-            "SELECT root, last_opened_at FROM workspace ORDER BY last_opened_at DESC, root",
+            "SELECT root, last_opened_at FROM workspace ORDER BY last_opened_at DESC, root LIMIT ?1",
         )?;
-        let rows = statement.query_map([], |row| {
+        let rows = statement.query_map(params![limit], |row| {
             Ok(WorkspaceRow {
                 root: row.get(0)?,
                 last_opened_at: row.get(1)?,
@@ -100,6 +102,16 @@ pub mod workspace {
         })?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(Into::into)
+    }
+
+    /// Drop one root from the history. Returns whether a row was there.
+    ///
+    /// Deliberately narrow: the tabs and recovery snapshots stored under this
+    /// root are left alone. ADR-014 keeps rows under a root that moved rather
+    /// than discarding unsaved work the user never chose to lose.
+    pub fn forget(conn: &Connection, root: &str) -> Result<bool> {
+        let removed = conn.execute("DELETE FROM workspace WHERE root = ?1", params![root])?;
+        Ok(removed > 0)
     }
 }
 

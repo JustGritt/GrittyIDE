@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { createCoreClient } from './client';
 import { CoreError } from './errors';
 import { createFakeTransport } from './testing/fake-transport';
-import type { HealthReport, ListDirectoryResponse, Workspace, WorkspaceId } from './types';
+import type {
+  HealthReport,
+  ListDirectoryResponse,
+  RecentWorkspace,
+  Workspace,
+  WorkspaceId,
+} from './types';
 import { PROTOCOL_VERSION } from './types';
 
 const WS_ID = 'ws-1' as WorkspaceId;
@@ -18,6 +24,11 @@ const health: HealthReport = {
 
 const workspace: Workspace = { id: WS_ID, root: '/ws', name: 'ws', openedAt: 1 };
 
+const recents: RecentWorkspace[] = [
+  { root: '/home/me/ws', displayRoot: '~/ws', name: 'ws', lastOpenedAt: 2, exists: true },
+  { root: '/gone', displayRoot: '/gone', name: 'gone', lastOpenedAt: 1, exists: false },
+];
+
 function setup() {
   const transport = createFakeTransport();
   transport.handlers.set('core_health', () => health);
@@ -27,6 +38,8 @@ function setup() {
   });
   transport.handlers.set('workspace_close', () => workspace);
   transport.handlers.set('workspace_current', () => null);
+  transport.handlers.set('workspace_recents', () => recents);
+  transport.handlers.set('workspace_forget', () => null);
   transport.handlers.set('workspace_list', (args) => {
     const request = args?.request as { path: string };
     if (request.path === '..') {
@@ -48,6 +61,24 @@ describe('workspace commands', () => {
     await expect(client.workspace.open('/ws')).resolves.toEqual(workspace);
     const opens = transport.calls.filter((c) => c.command === 'workspace_open');
     expect(opens.map((c) => c.args)).toEqual([{ request: {} }, { request: { path: '/ws' } }]);
+  });
+
+  it('sends the recents limit only when given, and forget as a request object', async () => {
+    const { client, transport } = setup();
+    await expect(client.workspace.recents()).resolves.toEqual(recents);
+    await client.workspace.recents(5);
+    await client.workspace.forget('/gone');
+    expect(
+      transport.calls
+        .filter((c) => c.command.startsWith('workspace_'))
+        .map((c) => [c.command, c.args]),
+    ).toEqual([
+      // An omitted limit is an absent field, not `undefined`: the core's
+      // default is the one that applies.
+      ['workspace_recents', { request: {} }],
+      ['workspace_recents', { request: { limit: 5 } }],
+      ['workspace_forget', { request: { root: '/gone' } }],
+    ]);
   });
 
   it('wraps close, current and list arguments as request objects', async () => {

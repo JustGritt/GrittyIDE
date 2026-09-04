@@ -9,6 +9,8 @@
 //! job continues as a cancellable `workspace.list` operation whose completion
 //! event carries the page. Wire types are exported to TypeScript from here.
 
+pub mod recents;
+
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::Duration;
@@ -101,6 +103,49 @@ pub struct ListDirectoryRequest {
 pub enum ListDirectoryResponse {
     Ready { page: DirectoryPage },
     Pending { operation: Box<Operation> },
+}
+
+/// One entry of the workspace history (T049), for the startup screen.
+///
+/// Not a [`Workspace`]: nothing here is open, so there is no [`WorkspaceId`].
+/// The key is the canonical root, which is what the history is stored under.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentWorkspace {
+    /// Canonical absolute root in the platform's native form. Pass it back to
+    /// `workspace.open` or `workspace.forget`.
+    pub root: String,
+    /// The same path shortened for display: `~` for the user's home directory,
+    /// otherwise identical to `root`. The renderer has no filesystem and does
+    /// not know `$HOME`, so the shortening happens here.
+    pub display_root: String,
+    /// Last component of the root (the whole root for a drive root).
+    pub name: String,
+    pub last_opened_at: Timestamp,
+    /// Whether the root is still a directory. A `false` entry is shown as
+    /// unavailable rather than hidden: the user chose to open it once, and
+    /// silently dropping it would explain nothing.
+    pub exists: bool,
+}
+
+/// `workspace.recents`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentWorkspacesRequest {
+    /// How many entries to return, `1..=MAX_RECENTS`; defaults to
+    /// [`DEFAULT_RECENTS`]. Every entry costs one `stat`, so the caller says
+    /// how many it will actually show.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub limit: Option<u32>,
+}
+
+/// `workspace.forget`: drop one root from the history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ForgetWorkspaceRequest {
+    /// Canonical root, as returned by `workspace.recents`.
+    pub root: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

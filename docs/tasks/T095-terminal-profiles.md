@@ -1,7 +1,7 @@
 # Task T095 — Terminal shell profiles and rooting
 
 - **Phase:** 0 / 2
-- **Status:** review
+- **Status:** done
 - **Depends on:** T090
 
 ## Objective

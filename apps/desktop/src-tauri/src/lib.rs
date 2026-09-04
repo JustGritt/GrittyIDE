@@ -178,6 +178,8 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::workspace_close,
             commands::workspace_current,
             commands::workspace_list,
+            commands::workspace_recents,
+            commands::workspace_forget,
             commands::documents_open,
             commands::documents_close,
             commands::documents_update,
