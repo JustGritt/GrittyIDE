@@ -13,6 +13,8 @@ import { OperationsPanel } from './features/operations/operations-panel';
 import { DEFAULT_LAYOUT, type Layout } from './features/session/persisted-layout';
 import { SessionNotices } from './features/session/session-notices';
 import { useSession } from './features/session/use-session';
+import { TerminalPanel } from './features/terminal/terminal-panel';
+import { useTerminals } from './features/terminal/use-terminals';
 
 type HealthState =
   | { status: 'loading' }
@@ -32,6 +34,10 @@ export function App() {
   );
   const editor = useEditorBinding(documents, prefs);
   const [layout, setLayout] = useState<Layout>(DEFAULT_LAYOUT);
+  // Terminal sessions live beside the editor, not inside it: output never
+  // passes through editor state (T090).
+  const terminals = useTerminals();
+  const [terminalOpen, setTerminalOpen] = useState(false);
   const session = useSession({
     documents,
     editor,
@@ -96,6 +102,24 @@ export function App() {
           session={session}
         />
       </div>
+      <footer className="shell__dock">
+        <button
+          type="button"
+          className="shell__dock-toggle"
+          aria-expanded={terminalOpen}
+          onClick={() => setTerminalOpen((open) => !open)}
+        >
+          Terminal
+          {terminals.terminals.length > 0 && (
+            <span className="shell__dock-count">{terminals.terminals.length}</span>
+          )}
+        </button>
+        {/* Kept mounted while collapsed: unmounting would dispose every xterm
+            and lose the scrollback of running shells. */}
+        <div className="shell__dock-body" hidden={!terminalOpen}>
+          <TerminalPanel terminals={terminals} />
+        </div>
+      </footer>
     </main>
   );
 }

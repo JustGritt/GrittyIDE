@@ -25,6 +25,11 @@ export const COMMANDS = {
   'session.recover': 'session_recover',
   'session.discard': 'session_discard',
   'session.update': 'session_update',
+  'terminal.spawn': 'terminal_spawn',
+  'terminal.write': 'terminal_write',
+  'terminal.resize': 'terminal_resize',
+  'terminal.kill': 'terminal_kill',
+  'terminal.list': 'terminal_list',
 } as const;
 
 export type CommandName = keyof typeof COMMANDS;

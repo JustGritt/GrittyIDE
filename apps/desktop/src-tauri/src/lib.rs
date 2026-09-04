@@ -85,6 +85,11 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::session_recover,
             commands::session_discard,
             commands::session_update,
+            commands::terminal_spawn,
+            commands::terminal_write,
+            commands::terminal_resize,
+            commands::terminal_kill,
+            commands::terminal_list,
         ])
 }
 
@@ -97,6 +102,7 @@ pub fn attach_core<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         CoreOptions {
             opener: Arc::new(shell::SystemOpener),
             data_dir,
+            pty_host: Arc::new(gritty_terminal::SystemPtyHost::new()),
         },
     );
 }

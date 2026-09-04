@@ -1095,3 +1095,124 @@ button:disabled {
   display: inline-flex;
   gap: 0.35rem;
 }
+
+/* ---------------------------------------------------------------------------
+   Terminal dock (T090)
+   --------------------------------------------------------------------------- */
+
+.shell__dock {
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+}
+
+.shell__dock-toggle {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  padding: 4px 12px;
+}
+
+.shell__dock-toggle[aria-expanded="true"] {
+  color: var(--fg);
+}
+
+.shell__dock-count {
+  background: var(--border);
+  border-radius: 8px;
+  font-size: 11px;
+  margin-left: 6px;
+  padding: 0 6px;
+}
+
+.shell__dock-body {
+  height: 280px;
+  overflow: hidden;
+}
+
+.terminal-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.terminal-panel__bar {
+  align-items: center;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 4px 8px;
+}
+
+.terminal-panel__tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+}
+
+.terminal-panel__actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.terminal-tab {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  display: flex;
+}
+
+.terminal-tab--active {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  border-color: var(--border);
+}
+
+.terminal-tab--exited .terminal-tab__name {
+  color: var(--muted);
+}
+
+.terminal-tab__label,
+.terminal-tab__close {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 3px 6px;
+}
+
+.terminal-tab__status {
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: 6px;
+}
+
+.terminal-panel__error {
+  border-bottom: 1px solid var(--border);
+  padding: 8px;
+}
+
+.terminal-panel__surface {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+
+.terminal-panel__empty {
+  color: var(--muted);
+  margin: 0;
+  padding: 12px;
+}
+
+/* xterm measures this element, so it must have a real size. */
+.terminal-view {
+  height: 100%;
+  padding: 4px 0 0 8px;
+  width: 100%;
+}

@@ -17,6 +17,7 @@ tauri-build = { workspace = true }
 
 [dependencies]
 gritty-core = { workspace = true }
+gritty-terminal = { workspace = true }
 gritty-persistence = { workspace = true }
 open = { workspace = true }
 tauri = { workspace = true }
@@ -30,6 +31,7 @@ tracing-subscriber = { workspace = true }
 [dev-dependencies]
 # `test` enables the mock runtime used by tests/commands.rs to invoke commands headlessly.
 tauri = { workspace = true, features = ["test"] }
+gritty-terminal = { workspace = true }
 
 [lints]
 workspace = true

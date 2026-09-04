@@ -29,6 +29,7 @@ use crate::protocol::actor::Actor;
 use crate::protocol::error::CoreError;
 use crate::protocol::ids::{CorrelationId, DocumentId, OperationId, WorkspaceId};
 use crate::session::wire::PersistenceStatusPayload;
+use crate::terminal::wire::{TerminalExitedPayload, TerminalOutputPayload};
 use crate::workspace::{Workspace, WorkspaceClosedReason};
 
 /// Envelope fields that are not the event itself.
@@ -72,6 +73,11 @@ pub enum CoreEvent {
     /// The session database became unavailable or healthy again, or was
     /// replaced after a failed integrity check (T060). Emitted on transitions.
     PersistenceStatusChanged(PersistenceStatusPayload),
+    /// A coalesced batch of terminal output (T090). Batched and bounded by the
+    /// session's flusher, never one event per read.
+    TerminalOutput(TerminalOutputPayload),
+    /// A terminal session ended, exactly once, after its last output.
+    TerminalExited(TerminalExitedPayload),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -179,6 +185,8 @@ impl CoreEvent {
             Self::DocumentExternalChangeDetected(_) => "DocumentExternalChangeDetected",
             Self::DocumentClosed(_) => "DocumentClosed",
             Self::PersistenceStatusChanged(_) => "PersistenceStatusChanged",
+            Self::TerminalOutput(_) => "TerminalOutput",
+            Self::TerminalExited(_) => "TerminalExited",
         }
     }
 
@@ -197,7 +205,9 @@ impl CoreEvent {
             | Self::DocumentSaved(_)
             | Self::DocumentExternalChangeDetected(_)
             | Self::DocumentClosed(_)
-            | Self::PersistenceStatusChanged(_) => None,
+            | Self::PersistenceStatusChanged(_)
+            | Self::TerminalOutput(_)
+            | Self::TerminalExited(_) => None,
         }
     }
 

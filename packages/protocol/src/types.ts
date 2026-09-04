@@ -34,6 +34,7 @@ export type { DocumentStatusRequest } from './generated/DocumentStatusRequest';
 export type { EventMeta } from './generated/EventMeta';
 export type { ExternalModificationState } from './generated/ExternalModificationState';
 export type { HealthReport } from './generated/HealthReport';
+export type { KillTerminalRequest } from './generated/KillTerminalRequest';
 export type { ListDirectoryRequest } from './generated/ListDirectoryRequest';
 export type { ListDirectoryResponse } from './generated/ListDirectoryResponse';
 export type { OpenDocumentRequest } from './generated/OpenDocumentRequest';
@@ -55,15 +56,22 @@ export type { RecoverSnapshotRequest } from './generated/RecoverSnapshotRequest'
 export type { RecoveryCandidate } from './generated/RecoveryCandidate';
 export type { RecoveryState } from './generated/RecoveryState';
 export type { ReloadDocumentRequest } from './generated/ReloadDocumentRequest';
+export type { ResizeTerminalRequest } from './generated/ResizeTerminalRequest';
 export type { SaveDocumentRequest } from './generated/SaveDocumentRequest';
 export type { SessionNotice } from './generated/SessionNotice';
 export type { SessionNoticeKind } from './generated/SessionNoticeKind';
 export type { SessionRestoreResponse } from './generated/SessionRestoreResponse';
 export type { SessionTab } from './generated/SessionTab';
 export type { ShellInfo } from './generated/ShellInfo';
+export type { SpawnTerminalRequest } from './generated/SpawnTerminalRequest';
 export type { StartDemoRequest } from './generated/StartDemoRequest';
 export type { SymlinkInfo } from './generated/SymlinkInfo';
 export type { JsonValue } from './generated/serde_json/JsonValue';
+export type { Terminal } from './generated/Terminal';
+export type { TerminalExitedPayload } from './generated/TerminalExitedPayload';
+export type { TerminalId } from './generated/TerminalId';
+export type { TerminalOutputPayload } from './generated/TerminalOutputPayload';
+export type { TerminalStatus } from './generated/TerminalStatus';
 export type { TextPosition } from './generated/TextPosition';
 export type { Timestamp } from './generated/Timestamp';
 export type { UpdateDocumentRequest } from './generated/UpdateDocumentRequest';
@@ -75,6 +83,7 @@ export type { WorkspaceClosedReason } from './generated/WorkspaceClosedReason';
 export type { WorkspaceId } from './generated/WorkspaceId';
 export type { WorkspaceOpenedPayload } from './generated/WorkspaceOpenedPayload';
 export type { WorkspacePath } from './generated/WorkspacePath';
+export type { WriteTerminalRequest } from './generated/WriteTerminalRequest';
 
 /**
  * What arrives on the event channel: `{ name, seq, workspaceId?, correlationId?, actor, payload }`.

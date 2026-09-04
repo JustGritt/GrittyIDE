@@ -76,7 +76,11 @@ impl Intent {
             CoreEvent::OperationCancelled(p) => durable(&p.operation),
             CoreEvent::OperationProgress(_)
             | CoreEvent::DocumentExternalChangeDetected(_)
-            | CoreEvent::PersistenceStatusChanged(_) => None,
+            | CoreEvent::PersistenceStatusChanged(_)
+            // Terminal buffers are an explicit T090 non-goal: nothing a shell
+            // prints is persisted.
+            | CoreEvent::TerminalOutput(_)
+            | CoreEvent::TerminalExited(_) => None,
         }
     }
 }

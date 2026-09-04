@@ -23,6 +23,10 @@ use gritty_core::session::{
     SessionRestoreResponse, UpdateSessionRequest,
 };
 use gritty_core::shell::OpenExternalRequest;
+use gritty_core::terminal::wire::{
+    KillTerminalRequest, ResizeTerminalRequest, SpawnTerminalRequest, Terminal,
+    WriteTerminalRequest,
+};
 use gritty_core::workspace::{
     CloseWorkspaceRequest, DEFAULT_LIST_BUDGET, ListDirectoryRequest, ListDirectoryResponse,
     OpenWorkspaceRequest, UnsavedPolicy, Workspace,
@@ -354,6 +358,75 @@ pub async fn session_update(
         let request: UpdateSessionRequest = parse_request(request)?;
         session.update(request, correlation).await
     })
+    .await
+}
+
+/// `terminal.spawn`
+#[tauri::command]
+pub async fn terminal_spawn(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Terminal, CoreError> {
+    let terminals = core.terminals.clone();
+    guard("terminal.spawn", move |correlation| async move {
+        let request: SpawnTerminalRequest = parse_request(request)?;
+        terminals.spawn(request, Actor::User, correlation)
+    })
+    .await
+}
+
+/// `terminal.write`
+///
+/// The payload is what the user typed; it is never logged, only its size is.
+#[tauri::command]
+pub async fn terminal_write(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<(), CoreError> {
+    let terminals = core.terminals.clone();
+    guard("terminal.write", move |_| async move {
+        let request: WriteTerminalRequest = parse_request(request)?;
+        terminals.write(request)
+    })
+    .await
+}
+
+/// `terminal.resize`
+#[tauri::command]
+pub async fn terminal_resize(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Terminal, CoreError> {
+    let terminals = core.terminals.clone();
+    guard("terminal.resize", move |_| async move {
+        let request: ResizeTerminalRequest = parse_request(request)?;
+        terminals.resize(request)
+    })
+    .await
+}
+
+/// `terminal.kill`
+#[tauri::command]
+pub async fn terminal_kill(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Terminal, CoreError> {
+    let terminals = core.terminals.clone();
+    guard("terminal.kill", move |_| async move {
+        let request: KillTerminalRequest = parse_request(request)?;
+        terminals.kill(request)
+    })
+    .await
+}
+
+/// `terminal.list`
+#[tauri::command]
+pub async fn terminal_list(core: State<'_, Core>) -> Result<Vec<Terminal>, CoreError> {
+    let terminals = core.terminals.clone();
+    guard(
+        "terminal.list",
+        move |_| async move { Ok(terminals.list()) },
+    )
     .await
 }
 

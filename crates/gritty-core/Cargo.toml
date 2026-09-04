@@ -10,6 +10,7 @@ publish.workspace = true
 
 [dependencies]
 gritty-persistence = { workspace = true }
+gritty-terminal = { workspace = true }
 gritty-workspace = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -15,8 +15,11 @@ use gritty_core::event::{EventBus, EventEnvelope, EventSink, FanOutSink};
 use gritty_core::operation::OperationRegistry;
 use gritty_core::session::{SessionService, SessionStore, SessionTap, TAP_CAPACITY, WriterConfig};
 use gritty_core::shell::{ExternalOpener, ShellService};
+use gritty_core::terminal::TerminalManager;
 use gritty_core::workspace::WorkspaceManager;
 use gritty_persistence::DB_FILE_NAME;
+use gritty_terminal::SystemPtyHost;
+use gritty_terminal::host::PtyHost;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::shell::SystemOpener;
@@ -33,6 +36,8 @@ pub struct CoreOptions {
     pub opener: Arc<dyn ExternalOpener>,
     /// Directory of the session database; `None` runs without persistence.
     pub data_dir: Option<PathBuf>,
+    /// Opens PTY sessions. Tests inject a fake so no test spawns a shell.
+    pub pty_host: Arc<dyn PtyHost>,
 }
 
 pub struct Core {
@@ -41,6 +46,7 @@ pub struct Core {
     pub documents: Arc<DocumentManager>,
     pub shell: Arc<ShellService>,
     pub session: Arc<SessionService>,
+    pub terminals: Arc<TerminalManager>,
 }
 
 /// Delivers every envelope on the single core event channel. Failures are
@@ -66,6 +72,7 @@ impl Core {
             CoreOptions {
                 opener: Arc::new(SystemOpener),
                 data_dir,
+                pty_host: Arc::new(SystemPtyHost::new()),
             },
         )
     }
@@ -87,6 +94,7 @@ impl Core {
             DocumentLimits::default(),
         );
         let shell = ShellService::new(handle.clone(), options.opener);
+        let terminals = TerminalManager::new(events.clone(), workspaces.clone(), options.pty_host);
         // Synchronous: a small database opens in milliseconds and the window
         // geometry must be known before the window shows.
         let store = match options.data_dir {
@@ -108,6 +116,7 @@ impl Core {
             documents,
             shell,
             session,
+            terminals,
         }
     }
 
@@ -122,8 +131,11 @@ impl Core {
             .count();
         tracing::info!(
             running,
-            "shutting down: flushing the session and cancelling running operations"
+            "shutting down: killing terminals, flushing the session and cancelling operations"
         );
+        // Terminals first: a shell left behind outlives the window, and its
+        // output would arrive after the session writer has been flushed.
+        self.terminals.shutdown();
         tauri::async_runtime::block_on(async {
             if !self.session.flush(SHUTDOWN_GRACE).await {
                 tracing::warn!("session writer did not flush before exit");
