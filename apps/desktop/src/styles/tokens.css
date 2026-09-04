@@ -1,0 +1,174 @@
+/* ---------------------------------------------------------------------------
+   Design tokens (T048, ADR-016)
+
+   The single source of truth for the shell's appearance. CSS owns the palette;
+   Monaco (`packages/editor/src/monaco/theme.ts`) and xterm
+   (`features/terminal/terminal-view.tsx`) read the computed values back out
+   rather than keying off `prefers-color-scheme` themselves, so the three
+   surfaces cannot drift apart.
+
+   Values are taken from design artboard 2a ("Cockpit, refined"). Its premise is
+   that depth comes from layered surfaces, not from borders: the hairline is
+   reserved for boundaries that are real. Dark is the designed theme; the light
+   ramp is derived from it on the same roles.
+   --------------------------------------------------------------------------- */
+
+:root {
+  color-scheme: dark light;
+
+  /* Surfaces, from the back of the window to the front. */
+  --surface-base: #0f1216;
+  --surface-chrome: #12161a;
+  --surface-editor: #15181c;
+  --surface-raised: #161b21;
+  --surface-control: #181d23;
+  --surface-active: #22282f;
+  --border: #1d232a;
+
+  /* Text, from loudest to quietest. */
+  --fg: #e6e9ef;
+  --fg-dim: #c3cad4;
+  --fg-muted: #9aa4b2;
+  --fg-faint: #68727f;
+  --fg-gutter: #4d5763;
+
+  /* Accent: the colour of "something is happening here". */
+  --accent: #4c8dff;
+  --accent-text: #7ea9f5;
+  --accent-on: #cfe1ff;
+  --accent-fill: #22303f;
+  --accent-wash: rgba(76, 141, 255, 0.1);
+  --accent-wash-strong: rgba(76, 141, 255, 0.16);
+
+  /* Status. */
+  --ok: #7bd88f;
+  --ok-fill: #1f3b2a;
+  --ok-text: #9ce6ae;
+  --warn: oklch(0.78 0.13 85);
+  --warn-text: oklch(0.82 0.11 85);
+  --warn-wash: rgba(232, 181, 74, 0.1);
+  --error: #ff7b72;
+  --error-text: #ff9b94;
+  --error-wash: rgba(255, 123, 114, 0.1);
+
+  /* The borderless control fill. Every quiet button is this. */
+  --ghost: rgba(230, 233, 239, 0.08);
+  --ghost-strong: rgba(230, 233, 239, 0.14);
+
+  /* Type. Named by role: 2a uses eight sizes between 10px and 14px, and the
+     role is what stays stable when a size is tuned. */
+  --font-ui: -apple-system, blinkmacsystemfont, "Segoe UI", roboto, helvetica, arial, sans-serif;
+  --font-mono: ui-monospace, sfmono-regular, menlo, monospace;
+  --text-label: 10px;
+  --text-meta: 10.5px;
+  --text-micro: 11px;
+  --text-control: 11.5px;
+  --text-code: 12px;
+  --text-body: 13px;
+  --text-title: 14px;
+  --tracking-label: 0.09em;
+
+  /* Geometry. */
+  --radius-sm: 4px;
+  --radius: 5px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --bar-h: 44px;
+  --section-h: 32px;
+  --tabs-h: 36px;
+  --notice-h: 30px;
+  --status-h: 26px;
+  --row-h: 22px;
+  --gap-xs: 4px;
+  --gap-sm: 6px;
+  --gap: 8px;
+  --gap-md: 12px;
+  --gap-lg: 14px;
+
+  /* Terminal ANSI palette, read by xterm. Kept here so the terminal cannot
+     drift from the rest of the window. */
+  --term-selection: rgba(76, 141, 255, 0.28);
+  --term-cursor-accent: #0f1216;
+  --ansi-black: #0f1216;
+  --ansi-red: #ff7b72;
+  --ansi-green: #7bd88f;
+  --ansi-yellow: #e8b54a;
+  --ansi-blue: #4c8dff;
+  --ansi-magenta: #d2a8ff;
+  --ansi-cyan: #76e3ea;
+  --ansi-white: #c3cad4;
+  --ansi-bright-black: #68727f;
+  --ansi-bright-red: #ffa198;
+  --ansi-bright-green: #9ce6ae;
+  --ansi-bright-yellow: #f0c674;
+  --ansi-bright-blue: #7ea9f5;
+  --ansi-bright-magenta: #e2c5ff;
+  --ansi-bright-cyan: #a5f3f7;
+  --ansi-bright-white: #e6e9ef;
+
+  font-family: var(--font-ui);
+  /* The rem base stays 14px — every `rem` already in the stylesheet is measured
+     against it. Body text is 13px (`--text-body`), set on `body`, which is the
+     same split the artboard uses. */
+  font-size: 14px;
+}
+
+/* The light ramp keeps every role and inverts the depth: surfaces get lighter
+   toward the front, which is the opposite of the dark theme and the reason the
+   two cannot share one set of numbers. */
+@media (prefers-color-scheme: light) {
+  :root {
+    --surface-base: #ffffff;
+    --surface-chrome: #f6f8fa;
+    --surface-editor: #fffffe;
+    --surface-raised: #f0f2f5;
+    --surface-control: #e8ebef;
+    --surface-active: #dbe0e6;
+    --border: #d0d7de;
+
+    --fg: #1f2328;
+    --fg-dim: #3d444d;
+    --fg-muted: #59636e;
+    --fg-faint: #818b98;
+    --fg-gutter: #8c959f;
+
+    --accent: #0969da;
+    --accent-text: #0550ae;
+    --accent-on: #ffffff;
+    --accent-fill: #0969da;
+    --accent-wash: rgba(9, 105, 218, 0.08);
+    --accent-wash-strong: rgba(9, 105, 218, 0.14);
+
+    --ok: #1a7f37;
+    --ok-fill: #dafbe1;
+    --ok-text: #116329;
+    --warn: oklch(0.68 0.13 75);
+    --warn-text: oklch(0.52 0.11 75);
+    --warn-wash: rgba(154, 103, 0, 0.1);
+    --error: #cf222e;
+    --error-text: #a40e26;
+    --error-wash: rgba(207, 34, 46, 0.08);
+
+    --ghost: rgba(31, 35, 40, 0.06);
+    --ghost-strong: rgba(31, 35, 40, 0.11);
+
+    --term-selection: rgba(9, 105, 218, 0.22);
+    --term-cursor-accent: #ffffff;
+    --ansi-black: #24292f;
+    --ansi-red: #cf222e;
+    --ansi-green: #1a7f37;
+    --ansi-yellow: #9a6700;
+    --ansi-blue: #0969da;
+    --ansi-magenta: #8250df;
+    --ansi-cyan: #1b7c83;
+    --ansi-white: #6e7781;
+    --ansi-bright-black: #57606a;
+    --ansi-bright-red: #a40e26;
+    --ansi-bright-green: #116329;
+    --ansi-bright-yellow: #7d4e00;
+    --ansi-bright-blue: #0550ae;
+    --ansi-bright-magenta: #6639ba;
+    --ansi-bright-cyan: #3192aa;
+    --ansi-bright-white: #1f2328;
+  }
+}
