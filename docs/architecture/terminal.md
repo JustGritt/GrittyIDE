@@ -92,8 +92,10 @@ session writer is flushed.
 ## Tests
 
 - `crates/terminal/tests/pty.rs` — a real PTY: echo, exit codes, cwd, `TERM`,
-  resize through `stty size`, process-tree kill verified by pid, output storm,
-  unexpected `SIGKILL`, idempotent kill, concurrent sessions, spawn failures.
+  resize through `stty size`, process-tree kill verified by pid, output storm
+  (overflow forced with a slow consumer, so it does not depend on how fast the
+  machine is), delivery rate limiting, unexpected `SIGKILL`, idempotent kill,
+  concurrent sessions, spawn failures.
   These pin a shell and generate its rc files: run against a developer's own
   login shell, an interactive line editor rewrites input as it arrives and the
   assertions depend on whose machine they run on.

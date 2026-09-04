@@ -25,6 +25,12 @@ use gritty_terminal::{OutputBatch, SystemPtyHost, TerminalError};
 /// Generous: a login shell sources the user's profile before it answers.
 const DEADLINE: Duration = Duration::from_secs(20);
 
+/// Output kept for assertions. Bounds what a flood test holds in memory.
+const MAX_RECORDED_TEXT: usize = 256 * 1024;
+
+/// How much of the recorded output a failure prints.
+const FAILURE_EXCERPT: usize = 2048;
+
 #[derive(Default)]
 struct Recorded {
     text: String,
@@ -41,11 +47,24 @@ struct TestSink {
     recorded: Mutex<Recorded>,
     exited: AtomicBool,
     output_calls: AtomicUsize,
+    /// Time spent inside `output`, simulating a consumer that cannot keep up.
+    consumer_delay: Duration,
 }
 
 impl TestSink {
     fn new() -> Arc<Self> {
         Arc::new(Self::default())
+    }
+
+    /// A sink that is slower than the shell writing into it. Overflow then
+    /// depends on the *consumer* falling behind, which is the situation the
+    /// cap exists for, rather than on the machine being fast enough to outrun
+    /// a 60 Hz drain — which a developer's Mac is and a CI runner is not.
+    fn slow() -> Arc<Self> {
+        Arc::new(Self {
+            consumer_delay: Duration::from_millis(50),
+            ..Self::default()
+        })
     }
 
     fn text(&self) -> String {
@@ -69,10 +88,15 @@ impl TestSink {
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-        panic!(
-            "timed out waiting for {what}; output so far:\n{}",
-            self.text()
-        );
+        // A flood test's output is megabytes of `y`; print enough to diagnose.
+        let text = self.text();
+        let excerpt: String = text.chars().take(FAILURE_EXCERPT).collect();
+        let elided = if text.len() > excerpt.len() {
+            " […]"
+        } else {
+            ""
+        };
+        panic!("timed out waiting for {what}; output so far:\n{excerpt}{elided}");
     }
 
     fn wait_for_text(&self, needle: &str) {
@@ -88,6 +112,9 @@ impl TestSink {
 
 impl TerminalSink for TestSink {
     fn output(&self, batch: OutputBatch) {
+        if !self.consumer_delay.is_zero() {
+            std::thread::sleep(self.consumer_delay);
+        }
         self.output_calls.fetch_add(1, Ordering::SeqCst);
         let exited = self.exited.load(Ordering::SeqCst);
         let mut recorded = self.lock();
@@ -97,7 +124,12 @@ impl TerminalSink for TestSink {
         recorded.batches += 1;
         recorded.largest_batch = recorded.largest_batch.max(batch.text.len());
         recorded.truncated_bytes += batch.truncated_bytes;
-        recorded.text.push_str(&batch.text);
+        // A flood test would otherwise hoard every byte `yes` produced. Every
+        // marker the tests look for is printed before the flood starts, so
+        // keeping the head is enough.
+        if recorded.text.len() < MAX_RECORDED_TEXT {
+            recorded.text.push_str(&batch.text);
+        }
     }
 
     fn exited(&self, exit: TerminalExit) {
@@ -156,12 +188,19 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        Self::in_dir(TempDir::new("pty"))
+        Self::with(TempDir::new("pty"), TestSink::new())
     }
 
     fn in_dir(dir: TempDir) -> Self {
+        Self::with(dir, TestSink::new())
+    }
+
+    fn with_sink(sink: Arc<TestSink>) -> Self {
+        Self::with(TempDir::new("pty"), sink)
+    }
+
+    fn with(dir: TempDir, sink: Arc<TestSink>) -> Self {
         let home = pristine_home();
-        let sink = TestSink::new();
         let session = SystemPtyHost::new()
             .spawn(request(dir.path(), &home), sink.clone())
             .expect("spawn a shell");
@@ -349,19 +388,50 @@ fn kill_terminates_the_whole_process_tree() {
 }
 
 #[test]
-fn an_output_storm_stays_bounded_and_reports_what_it_dropped() {
+fn an_output_storm_is_bounded_and_reports_what_it_dropped() {
+    // The consumer is deliberately slower than the shell, so the buffer fills
+    // whatever the machine's speed. What is asserted is the mechanism: the cap
+    // holds, the oldest bytes go, and the count of what went is reported.
+    let fixture = Fixture::with_sink(TestSink::slow());
+    fixture.run("echo storm-ready");
+    fixture.sink.wait_for_text("storm-ready");
+
+    fixture.run("yes gritty");
+    fixture
+        .sink
+        .wait_for("the buffer to overflow and report it", |sink| {
+            sink.lock().truncated_bytes > 0
+        });
+
+    fixture.session().kill();
+    fixture.sink.wait_for_exit();
+
+    let recorded = fixture.sink.lock();
+    assert!(
+        recorded.largest_batch <= MAX_PENDING_BYTES + 4,
+        "a batch never exceeds the cap (was {})",
+        recorded.largest_batch
+    );
+    assert_eq!(
+        recorded.output_after_exit, 0,
+        "no output may follow the exit, flood or not"
+    );
+}
+
+#[test]
+fn output_delivery_is_rate_limited_and_does_not_starve_the_control_path() {
+    // No assertion here depends on the machine being fast: a slower machine
+    // produces *fewer* batches, which still satisfies the ceiling.
     let fixture = Fixture::new();
     fixture.run("echo storm-ready");
     fixture.sink.wait_for_text("storm-ready");
 
     let started = Instant::now();
     fixture.run("yes gritty");
-    // Long enough for the cap to engage several times over.
     std::thread::sleep(Duration::from_millis(1500));
     let flooding_for = started.elapsed();
 
-    // The control path is not starved: a resize still gets through while the
-    // child is writing as fast as it can.
+    // A resize still gets through while the child writes as fast as it can.
     fixture
         .session()
         .resize(PtyGrid { cols: 90, rows: 30 })
@@ -372,13 +442,8 @@ fn an_output_storm_stays_bounded_and_reports_what_it_dropped() {
 
     let recorded = fixture.sink.lock();
     assert!(
-        recorded.truncated_bytes > 0,
-        "the flood should have overflowed the buffer and been reported"
-    );
-    assert!(
-        recorded.largest_batch <= MAX_PENDING_BYTES + 4,
-        "a batch never exceeds the cap (was {})",
-        recorded.largest_batch
+        recorded.batches > 0,
+        "the flood produced no output at all, which means the test proved nothing"
     );
     // ~60 Hz plus slack; the point is that the sink is not called once per read.
     let ceiling = (flooding_for.as_secs_f64() * 70.0).ceil() as usize + 20;
@@ -388,7 +453,6 @@ fn an_output_storm_stays_bounded_and_reports_what_it_dropped() {
         recorded.batches,
         flooding_for
     );
-    assert_eq!(recorded.output_after_exit, 0);
 }
 
 #[test]
