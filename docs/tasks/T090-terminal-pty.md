@@ -123,14 +123,14 @@ unexpected child death stays contained.
 
 | Command | Result |
 |---|---|
-| `cargo test -p gritty-terminal` | 15 unit + 16 real-PTY integration, all pass (1.6 s) |
+| `cargo test -p gritty-terminal` | 16 unit + 16 real-PTY integration, all pass (1.6 s) |
 | `cargo test -p gritty-core` | 106 pass (17 new terminal tests) |
 | `cargo test -p gritty-desktop` | 26 pass (7 new terminal adapter tests) |
 | `pnpm exec vitest run` | 220 pass across 39 files (22 new) |
 | `pnpm --filter @gritty/desktop build` | clean; xterm's CSS lands in the app's own stylesheet |
 | `GRITTY_LOG=debug pnpm dev` | boots on protocol 1.4.0; WebView health round trip completes in WKWebView 21624.4.5; no panic or error in the log |
 | `pnpm check` | green |
-| Linux CI (PR #8) | first run failed on the output-storm test (see below); green after the fix |
+| Linux CI | PR #8 and PR #9 both failed on the output-storm test; PR #10 carries the fix that makes it machine-independent (see the third finding) |
 
 The real-PTY tests cover: echo and clean exit, non-zero exit codes, the
 requested cwd, `TERM`/`COLORTERM`, `stty size` before and after a resize, size
@@ -180,13 +180,18 @@ Recorded in ADR-015. The ones that shaped the code most:
   driving a terminal programmatically — an agent, T300 — must wait for
   readiness.
 - **A timing assertion that passes locally can be an assertion about the
-  machine.** The first output-storm test required the flood to overflow a 1 MiB
-  buffer faster than a 60 Hz drain could empty it. That is true on the
-  development Mac and false on a Linux CI runner, where it failed. Overflow is
-  now forced by making the *consumer* slow — which is the situation the cap
-  exists for — and the rate-limit assertion moved to its own test, where a
-  slower machine produces fewer batches and still passes. The Phase 0
-  performance baseline (§C) should be written with the same care.
+  machine**, and it took two attempts to stop being one. The first output-storm
+  test required the flood to overflow the production 1 MiB buffer faster than a
+  60 Hz drain could empty it: true on the development Mac, false on a Linux CI
+  runner, where it failed. The second attempt slowed the *consumer*, which only
+  widened the drain window from 16 ms to 66 ms — `take()` empties the buffer
+  completely, so a slower consumer does not change the throughput the test
+  demands — and it failed on CI as well. The cap is now injectable
+  (`SystemPtyHost::with_max_pending_bytes`, the same kind of test hook as
+  `Database::inject_write_failures`), the integration test uses 16 KiB, which
+  is smaller than one read, and the production cap is pinned by the
+  deterministic unit tests in `batch.rs`. The Phase 0 performance baseline (§C)
+  is all thresholds and will fail the same way if calibrated on one machine.
 
 ### Dependencies added
 

@@ -14,7 +14,6 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use gritty_terminal::batch::MAX_PENDING_BYTES;
 use gritty_terminal::host::{
     PtyGrid, PtyHost, PtySession, SpawnRequest, TerminalExit, TerminalSink,
 };
@@ -47,24 +46,11 @@ struct TestSink {
     recorded: Mutex<Recorded>,
     exited: AtomicBool,
     output_calls: AtomicUsize,
-    /// Time spent inside `output`, simulating a consumer that cannot keep up.
-    consumer_delay: Duration,
 }
 
 impl TestSink {
     fn new() -> Arc<Self> {
         Arc::new(Self::default())
-    }
-
-    /// A sink that is slower than the shell writing into it. Overflow then
-    /// depends on the *consumer* falling behind, which is the situation the
-    /// cap exists for, rather than on the machine being fast enough to outrun
-    /// a 60 Hz drain — which a developer's Mac is and a CI runner is not.
-    fn slow() -> Arc<Self> {
-        Arc::new(Self {
-            consumer_delay: Duration::from_millis(50),
-            ..Self::default()
-        })
     }
 
     fn text(&self) -> String {
@@ -112,9 +98,6 @@ impl TestSink {
 
 impl TerminalSink for TestSink {
     fn output(&self, batch: OutputBatch) {
-        if !self.consumer_delay.is_zero() {
-            std::thread::sleep(self.consumer_delay);
-        }
         self.output_calls.fetch_add(1, Ordering::SeqCst);
         let exited = self.exited.load(Ordering::SeqCst);
         let mut recorded = self.lock();
@@ -195,13 +178,23 @@ impl Fixture {
         Self::with(dir, TestSink::new())
     }
 
-    fn with_sink(sink: Arc<TestSink>) -> Self {
-        Self::with(TempDir::new("pty"), sink)
+    /// A session whose buffer is small enough that a flood is guaranteed to
+    /// overflow it on any machine.
+    fn with_small_buffer(cap: usize) -> Self {
+        Self::build(
+            TempDir::new("pty"),
+            TestSink::new(),
+            SystemPtyHost::with_max_pending_bytes(cap),
+        )
     }
 
     fn with(dir: TempDir, sink: Arc<TestSink>) -> Self {
+        Self::build(dir, sink, SystemPtyHost::new())
+    }
+
+    fn build(dir: TempDir, sink: Arc<TestSink>, host: SystemPtyHost) -> Self {
         let home = pristine_home();
-        let session = SystemPtyHost::new()
+        let session = host
             .spawn(request(dir.path(), &home), sink.clone())
             .expect("spawn a shell");
         // Input written before the shell is ready is simply lost; a user types
@@ -389,10 +382,15 @@ fn kill_terminates_the_whole_process_tree() {
 
 #[test]
 fn an_output_storm_is_bounded_and_reports_what_it_dropped() {
-    // The consumer is deliberately slower than the shell, so the buffer fills
-    // whatever the machine's speed. What is asserted is the mechanism: the cap
-    // holds, the oldest bytes go, and the count of what went is reported.
-    let fixture = Fixture::with_sink(TestSink::slow());
+    // The session's buffer is 16 KiB here, smaller than a single read, so a
+    // flood overflows it immediately whatever the machine's speed. Asserting
+    // that a *megabyte* fills before the flusher drains it would be an
+    // assertion about the machine: it holds on a developer's Mac and not on a
+    // CI runner. The size of the cap in production is pinned by the unit
+    // tests in `batch.rs`; what is proven here is that a real PTY flood goes
+    // through the same path and reports what it dropped.
+    const SMALL_CAP: usize = 16 * 1024;
+    let fixture = Fixture::with_small_buffer(SMALL_CAP);
     fixture.run("echo storm-ready");
     fixture.sink.wait_for_text("storm-ready");
 
@@ -408,7 +406,7 @@ fn an_output_storm_is_bounded_and_reports_what_it_dropped() {
 
     let recorded = fixture.sink.lock();
     assert!(
-        recorded.largest_batch <= MAX_PENDING_BYTES + 4,
+        recorded.largest_batch <= SMALL_CAP + 4,
         "a batch never exceeds the cap (was {})",
         recorded.largest_batch
     );

@@ -32,7 +32,7 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
-use crate::batch::{FLUSH_INTERVAL, PendingOutput, READ_BUFFER_BYTES};
+use crate::batch::{FLUSH_INTERVAL, MAX_PENDING_BYTES, PendingOutput, READ_BUFFER_BYTES};
 use crate::error::TerminalError;
 use crate::host::{PtyGrid, PtyHost, PtySession, SpawnRequest, TerminalExit, TerminalSink};
 use crate::shell::{COLORTERM_VALUE, TERM_VALUE, check_cwd, resolve_shell};
@@ -41,7 +41,6 @@ use crate::shell::{COLORTERM_VALUE, TERM_VALUE, check_cwd, resolve_shell};
 const ESCALATION_STEP: Duration = Duration::from_millis(250);
 
 /// State shared by the reader, the flusher and the public handle.
-#[derive(Default)]
 struct Shared {
     pending: PendingOutput,
     /// Set by the reader once the child has been reaped.
@@ -56,9 +55,13 @@ struct Channel {
 }
 
 impl Channel {
-    fn new() -> Arc<Self> {
+    fn new(max_pending_bytes: usize) -> Arc<Self> {
         Arc::new(Self {
-            state: Mutex::new(Shared::default()),
+            state: Mutex::new(Shared {
+                pending: PendingOutput::with_cap(max_pending_bytes),
+                exit: None,
+                delivered: false,
+            }),
             signal: Condvar::new(),
         })
     }
@@ -93,12 +96,30 @@ impl Channel {
 }
 
 /// Opens PTY sessions through the operating system.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct SystemPtyHost;
+#[derive(Debug, Clone, Copy)]
+pub struct SystemPtyHost {
+    max_pending_bytes: usize,
+}
+
+impl Default for SystemPtyHost {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl SystemPtyHost {
     pub fn new() -> Self {
-        Self
+        Self {
+            max_pending_bytes: MAX_PENDING_BYTES,
+        }
+    }
+
+    /// A host whose sessions hold less undelivered output before dropping the
+    /// oldest. Tests use it to make overflow certain: whether a real flood
+    /// overflows a megabyte before the flusher drains it depends on the
+    /// machine, and that is not something worth asserting.
+    pub fn with_max_pending_bytes(max_pending_bytes: usize) -> Self {
+        Self { max_pending_bytes }
     }
 }
 
@@ -162,7 +183,7 @@ impl PtyHost for SystemPtyHost {
         let killer = child.clone_killer();
         let pid = child.process_id();
 
-        let channel = Channel::new();
+        let channel = Channel::new(self.max_pending_bytes);
         spawn_reader(channel.clone(), reader, child);
         spawn_flusher(channel.clone(), sink);
 

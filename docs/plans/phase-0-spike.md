@@ -93,21 +93,28 @@ following it, and the registry marks the session `EXITED` and drops the pid.
 The exit signal is normalized: `strsignal` says "Killed: 9" on macOS and
 "Killed" on Linux, which is platform text, not a protocol value.
 
-**Flooding does not reach the renderer.** With a consumer slower than the
-shell, `yes` overflows the 1 MiB cap: the oldest bytes go, the count is
-reported as `truncatedBytes` and drawn as a visible marker, and batches stay
-under the cap. Separately, delivery stays rate limited against a measured
-ceiling of ~70/s and a resize completes during the flood, so the control path
-is not starved. Output never passes through React state at all.
+**Flooding does not reach the renderer.** A `yes` flood overflows the buffer:
+the oldest bytes go, the count is reported as `truncatedBytes` and drawn as a
+visible marker, and batches stay under the cap. Separately, delivery stays rate
+limited against a measured ceiling of ~70/s and a resize completes during the
+flood, so the control path is not starved. Output never passes through React
+state at all.
 
-The first version of that test asserted overflow with a *fast* consumer, which
-made it an assertion about the machine: it passed on the development Mac and
-failed on Linux CI, where the runner could not outrun a 60 Hz drain. Overflow
-is now forced by a slow consumer, which is the situation the cap exists for,
-and the rate-limit assertion was split into its own test where a slower machine
-produces fewer batches and still passes. Worth remembering for the performance
-work in §C: a threshold that depends on how fast the machine is will pass
-locally and fail in CI.
+Getting that test right took two attempts and the lesson is worth more than the
+test. The first version asserted that the flood overflowed the production 1 MiB
+buffer — which requires the shell to outrun a 60 Hz drain, true on the
+development Mac and false on a Linux CI runner, where it failed. The second
+version slowed the *consumer* down, which only widened the drain window from
+16 ms to 66 ms: still a throughput assumption, and it failed on CI too. The
+buffer cap is now injectable, the integration test uses a 16 KiB one (smaller
+than a single read, so overflow is certain on any machine), and the size of the
+production cap is pinned by the deterministic unit tests in `batch.rs`.
+
+**Worth carrying into §C below.** The performance baseline is entirely
+thresholds. A threshold calibrated on this Mac will pass here and fail in CI
+exactly the way this did. Record the machine with every number, and where a
+test must assert a bound, force the condition rather than relying on the
+hardware to produce it.
 
 Remaining for the reviewer: the same checks with a human at the window (`vim`,
 `less`, `top`, Ctrl+C, tab close verified with `pgrep`, the flood on screen).
