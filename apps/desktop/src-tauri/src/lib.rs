@@ -15,6 +15,7 @@
 
 mod commands;
 pub mod core;
+mod file_drop;
 mod shell;
 pub mod window_state;
 
@@ -133,7 +134,10 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(navigation_guard())
-        .on_window_event(window_state::on_window_event)
+        .on_window_event(|window, event| {
+            window_state::on_window_event(window, event);
+            file_drop::on_window_event(window, event);
+        })
         .setup(|app| {
             attach_core(app.handle());
             window_state::restore_main_window(app.handle());

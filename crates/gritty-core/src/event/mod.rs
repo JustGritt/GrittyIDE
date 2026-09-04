@@ -24,6 +24,7 @@ use gritty_workspace::WorkspacePath;
 use crate::document::{
     Document, DocumentChangeCause, DocumentClosedReason, ExternalModificationState,
 };
+use crate::file_drop::{DropHoverPayload, PathsDroppedPayload};
 use crate::operation::{Operation, OperationProgress};
 use crate::protocol::actor::Actor;
 use crate::protocol::error::CoreError;
@@ -78,6 +79,13 @@ pub enum CoreEvent {
     TerminalOutput(TerminalOutputPayload),
     /// A terminal session ended, exactly once, after its last output.
     TerminalExited(TerminalExitedPayload),
+    /// Files or directories were dropped onto the window, already classified
+    /// against the open workspace. Nothing was opened: the renderer decides
+    /// and calls `workspace.open` / `documents.open` itself.
+    PathsDropped(PathsDroppedPayload),
+    /// A drag entered or left the window, so the UI can show its drop target.
+    /// Enter and leave only, never the moves in between (rule 8).
+    DropHoverChanged(DropHoverPayload),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -187,6 +195,8 @@ impl CoreEvent {
             Self::PersistenceStatusChanged(_) => "PersistenceStatusChanged",
             Self::TerminalOutput(_) => "TerminalOutput",
             Self::TerminalExited(_) => "TerminalExited",
+            Self::PathsDropped(_) => "PathsDropped",
+            Self::DropHoverChanged(_) => "DropHoverChanged",
         }
     }
 
@@ -207,7 +217,9 @@ impl CoreEvent {
             | Self::DocumentClosed(_)
             | Self::PersistenceStatusChanged(_)
             | Self::TerminalOutput(_)
-            | Self::TerminalExited(_) => None,
+            | Self::TerminalExited(_)
+            | Self::PathsDropped(_)
+            | Self::DropHoverChanged(_) => None,
         }
     }
 

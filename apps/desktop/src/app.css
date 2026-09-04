@@ -1216,3 +1216,46 @@ button:disabled {
   padding: 4px 0 0 8px;
   width: 100%;
 }
+
+/* Drag and drop: the overlay follows DropHoverChanged, which the core emits on
+   enter and leave only, so it never repaints while the cursor moves. */
+.drop-overlay {
+  align-items: center;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  border: 2px dashed var(--accent, currentColor);
+  border-radius: 8px;
+  display: flex;
+  inset: 8px;
+  justify-content: center;
+  pointer-events: none;
+  position: fixed;
+  z-index: 20;
+}
+
+.drop-overlay__label {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+  margin: 0;
+  padding: 10px 16px;
+}
+
+.drop-notice {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 8px 12px;
+}
+
+.drop-notice p {
+  margin: 0;
+}
+
+.drop-notice__actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}

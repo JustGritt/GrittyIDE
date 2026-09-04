@@ -80,7 +80,12 @@ impl Intent {
             // Terminal buffers are an explicit T090 non-goal: nothing a shell
             // prints is persisted.
             | CoreEvent::TerminalOutput(_)
-            | CoreEvent::TerminalExited(_) => None,
+            | CoreEvent::TerminalExited(_)
+            // A drop is a gesture, not state. What it leads to — a workspace
+            // opened, a document opened — is persisted by those events; the
+            // gesture itself must not survive a restart (T045).
+            | CoreEvent::PathsDropped(_)
+            | CoreEvent::DropHoverChanged(_) => None,
         }
     }
 }

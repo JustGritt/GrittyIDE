@@ -107,29 +107,33 @@ Workspace: `fixtures/small-repo`.
 | 2.10 | Type accented characters: press-and-hold `e` → `é`, and dead keys if you use a layout that has them | The composition popup appears over the caret, in the right place, and commits once |
 | 2.11 | Ctrl+Cmd+Space, insert an emoji | Inserted once, at the caret, not duplicated |
 | 2.12 | Select text in the editor and drag it a few lines down | Text moves; no ghost, no duplicate |
-| 2.13 | Drag a file from Finder onto the window | Note what happens — opening it, nothing, or the WebView navigating away (the last one is a defect: `dragDropEnabled`) |
-| 2.14 | Drag a tab to reorder it | Reorders. If this does nothing, that is the known HTML5-drag-vs-Tauri risk — say so |
+| 2.13 | Drag a file from Finder onto the window | A dashed drop target appears while the drag is over the window, and disappears when it leaves |
+| 2.14 | Drop `fixtures/small-repo/src/index.ts` (a file in the open workspace) | Opens as a tab. Dropping three files opens three tabs |
+| 2.15 | Drop a file from `~/Downloads` (outside the workspace) | A notice offering to open its *folder* — the workspace is not swapped and no tab appears until you accept |
+| 2.16 | Drop the folder `fixtures/markdown` | Becomes the workspace. With a dirty tab open it asks first, offering "Discard changes and open" |
+| 2.17 | Drop two folders at once, and a folder together with a file | One folder opens; the notice names what it skipped and why |
+| 2.18 | Drag a tab to reorder it | Reorders. OS file drops are enabled (`dragDropEnabled: true`), so if the tab drag stopped working, that is the T040 interaction risk — say so, it decides whether these two can coexist |
 
 **Files that misbehave** (`fixtures/weird-files/generated`, opened as a workspace)
 
 | # | Do | Expect |
 |---|---|---|
-| 2.15 | Open `crlf.txt`, edit, save, then `file crlf.txt` and check bytes | CRLF preserved, not silently converted |
-| 2.16 | Open `mixed-eol.txt` | Read-only normalized view with an explicit "Normalize to LF / CRLF" action |
-| 2.17 | Open `utf8-bom.txt`, save without editing | BOM still there |
-| 2.18 | Open a binary file | Placeholder, not garbage, not a hang |
-| 2.19 | Open `one-line-100k.txt` | Opens; scrolling stays usable |
-| 2.20 | Open `large-text.txt` (12 MiB) | Read-only degraded view with "Enable editing" |
-| 2.21 | **§C typing responsiveness:** Enable editing on `large-text.txt`, start a Web Inspector *Timelines* recording, type continuously for 30 s, stop | Report the number of frames over 16 ms and the worst frame. Repeat briefly in `small-repo/src/*.ts` for comparison |
+| 2.19 | Open `crlf.txt`, edit, save, then `file crlf.txt` and check bytes | CRLF preserved, not silently converted |
+| 2.20 | Open `mixed-eol.txt` | Read-only normalized view with an explicit "Normalize to LF / CRLF" action |
+| 2.21 | Open `utf8-bom.txt`, save without editing | BOM still there |
+| 2.22 | Open a binary file | Placeholder, not garbage, not a hang |
+| 2.23 | Open `one-line-100k.txt` | Opens; scrolling stays usable |
+| 2.24 | Open `large-text.txt` (12 MiB) | Read-only degraded view with "Enable editing" |
+| 2.25 | **§C typing responsiveness:** Enable editing on `large-text.txt`, start a Web Inspector *Timelines* recording, type continuously for 30 s, stop | Report the number of frames over 16 ms and the worst frame. Repeat briefly in `small-repo/src/*.ts` for comparison |
 
 **Conflict and close**
 
 | # | Do | Expect |
 |---|---|---|
-| 2.22 | With a dirty tab, run `sed -i '' 's/a/b/' <that file>` elsewhere, then click back into the window | CONFLICTED banner offering reload / keep / overwrite; nothing resolved silently |
-| 2.23 | Close a dirty tab | Dialog: save / discard / cancel — all three do what they say |
-| 2.24 | Close the workspace with a dirty tab open | Refused, with the dirty documents named; after discarding, orphans are shown |
-| 2.25 | **§C open latency:** open a normal source file and judge it | Instant, or a visible delay? The log line `command completed command="documents.open"` gives the core-side number to compare against what you felt |
+| 2.26 | With a dirty tab, run `sed -i '' 's/a/b/' <that file>` elsewhere, then click back into the window | CONFLICTED banner offering reload / keep / overwrite; nothing resolved silently |
+| 2.27 | Close a dirty tab | Dialog: save / discard / cancel — all three do what they say |
+| 2.28 | Close the workspace with a dirty tab open | Refused, with the dirty documents named; after discarding, orphans are shown |
+| 2.29 | **§C open latency:** open a normal source file and judge it | Instant, or a visible delay? The log line `command completed command="documents.open"` gives the core-side number to compare against what you felt |
 
 Rows filled: Input (all five), Editor (CRLF bytes, workers at runtime, typing
 frame drops, dirty close), Files (open/edit/save, weird files, external
