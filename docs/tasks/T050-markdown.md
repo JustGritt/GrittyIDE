@@ -1,7 +1,7 @@
 # Task T050 — Markdown
 
 - **Phase:** 0 / 1B
-- **Status:** review
+- **Status:** done
 - **Depends on:** T030, T040
 
 ## Objective

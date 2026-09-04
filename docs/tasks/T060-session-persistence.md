@@ -1,7 +1,7 @@
 # Task T060 — Session persistence + recovery
 
 - **Phase:** 0 / 1B
-- **Status:** todo
+- **Status:** in-progress
 - **Depends on:** T030, T040 (schema work can start after T010)
 
 ## Objective
