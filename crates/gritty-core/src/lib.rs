@@ -24,6 +24,8 @@
 //! - [`session`]: session persistence and crash recovery over the
 //!   `gritty-persistence` database (T060): tabs and layout, dirty-buffer
 //!   snapshots, startup reconciliation, durable operation records.
+//! - [`workstream`]: the durable model of work (T200, Gate C): the workstream
+//!   state machine and the decisions that block it, over the same database.
 
 pub mod document;
 pub mod event;
@@ -35,6 +37,7 @@ pub mod session;
 pub mod shell;
 pub mod terminal;
 pub mod workspace;
+pub mod workstream;
 
 pub use health::{HealthReport, ShellInfo, health};
 pub use protocol::error::{CoreError, CoreErrorCode};

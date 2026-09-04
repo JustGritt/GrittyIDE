@@ -7,7 +7,10 @@ import {
   type CloseDocumentRequest,
   type CloseWorkspaceRequest,
   CORE_EVENT_CHANNEL,
+  type CreateWorkstreamRequest,
+  type Decision,
   type DiscardSnapshotRequest,
+  type DismissDecisionRequest,
   type Document,
   type DocumentContent,
   type DocumentStatusRequest,
@@ -17,32 +20,40 @@ import {
   type ForgetWorkspaceRequest,
   type HealthReport,
   type KillTerminalRequest,
+  type ListDecisionsRequest,
   type ListDirectoryRequest,
   type ListDirectoryResponse,
   type ListProfilesRequest,
+  type ListWorkstreamsRequest,
   type OpenDocumentRequest,
   type OpenExternalRequest,
   type OpenWorkspaceRequest,
   type Operation,
   type OperationId,
   PROTOCOL_VERSION,
+  type RaiseDecisionRequest,
   type RecentWorkspace,
   type RecentWorkspacesRequest,
   type RecoverSnapshotRequest,
   type RecoveryCandidate,
   type ReloadDocumentRequest,
+  type RemoveWorkstreamRequest,
   type RenameTerminalRequest,
   type ResizeTerminalRequest,
+  type ResolveDecisionRequest,
   type SaveDocumentRequest,
   type SessionRestoreResponse,
   type SpawnTerminalRequest,
   type StartDemoRequest,
   type Terminal,
   type TerminalProfile,
+  type TransitionWorkstreamRequest,
   type UpdateDocumentRequest,
   type UpdateSessionRequest,
+  type UpdateWorkstreamRequest,
   type Workspace,
   type WorkspaceId,
+  type Workstream,
   type WriteTerminalRequest,
 } from './types';
 import { assertCompatible } from './version';
@@ -184,6 +195,39 @@ export interface CoreClient {
      */
     profiles(request?: ListProfilesRequest): Promise<TerminalProfile[]>;
   };
+  /**
+   * Workstreams (T200): the durable model of work. `create` starts a `DRAFT`;
+   * `transition` is the only way the state moves and refuses anything the
+   * state machine does not allow with `Conflict`, changing nothing. `update`
+   * touches title and goal only — an absent field is left alone, a blank goal
+   * clears it. `remove` deletes the workstream and its decisions; `ABANDONED`
+   * is the reversible version. Every call needs the workspace to be open, and
+   * every call needs the session database: without it they fail with `Io`
+   * rather than keeping work that would vanish at exit.
+   */
+  workstreams: {
+    list(request: ListWorkstreamsRequest): Promise<Workstream[]>;
+    create(request: CreateWorkstreamRequest): Promise<Workstream>;
+    update(request: UpdateWorkstreamRequest): Promise<Workstream>;
+    transition(request: TransitionWorkstreamRequest): Promise<Workstream>;
+    remove(request: RemoveWorkstreamRequest): Promise<void>;
+  };
+  /**
+   * Decisions (T200): the questions that block a workstream, oldest first.
+   *
+   * `raise` on work that is `IN_PROGRESS` blocks it, and answering the last
+   * open question resumes it — that rule lives in the core, so the UI cannot
+   * forget to apply it. `resolve` needs an answer: one of the offered option
+   * keys, or free text when the question offered none. `dismiss` records no
+   * answer at all, because inventing one would be a lie in the run log.
+   * Answering a decision twice is a `Conflict`.
+   */
+  decisions: {
+    list(request: ListDecisionsRequest): Promise<Decision[]>;
+    raise(request: RaiseDecisionRequest): Promise<Decision>;
+    resolve(request: ResolveDecisionRequest): Promise<Decision>;
+    dismiss(request: DismissDecisionRequest): Promise<Decision>;
+  };
   subscribe<N extends EventName>(name: N, handler: (event: EventOf<N>) => void): Unsubscribe;
   subscribeAll(handler: (event: EventEnvelope) => void): Unsubscribe;
   /** Stop listening for events. Commands still work. */
@@ -299,6 +343,19 @@ export function createCoreClient(
       list: () => command<Terminal[]>('terminal.list'),
       profiles: (request = { custom: [] }) =>
         command<TerminalProfile[]>('terminal.profiles', { request }),
+    },
+    workstreams: {
+      list: (request) => command<Workstream[]>('workstreams.list', { request }),
+      create: (request) => command<Workstream>('workstreams.create', { request }),
+      update: (request) => command<Workstream>('workstreams.update', { request }),
+      transition: (request) => command<Workstream>('workstreams.transition', { request }),
+      remove: (request) => command<void>('workstreams.remove', { request }),
+    },
+    decisions: {
+      list: (request) => command<Decision[]>('decisions.list', { request }),
+      raise: (request) => command<Decision>('decisions.raise', { request }),
+      resolve: (request) => command<Decision>('decisions.resolve', { request }),
+      dismiss: (request) => command<Decision>('decisions.dismiss', { request }),
     },
     subscribe: (name, handler) => hub.subscribe(name, handler),
     subscribeAll: (handler) => hub.subscribeAll(handler),

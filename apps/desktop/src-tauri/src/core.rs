@@ -18,6 +18,7 @@ use gritty_core::session::{SessionService, SessionStore, SessionTap, TAP_CAPACIT
 use gritty_core::shell::{ExternalOpener, ShellService};
 use gritty_core::terminal::TerminalManager;
 use gritty_core::workspace::WorkspaceManager;
+use gritty_core::workstream::WorkstreamManager;
 use gritty_persistence::DB_FILE_NAME;
 use gritty_terminal::SystemPtyHost;
 use gritty_terminal::host::PtyHost;
@@ -49,6 +50,7 @@ pub struct Core {
     pub shell: Arc<ShellService>,
     pub session: Arc<SessionService>,
     pub terminals: Arc<TerminalManager>,
+    pub workstreams: Arc<WorkstreamManager>,
 }
 
 /// Delivers every envelope on the single core event channel. Failures are
@@ -104,15 +106,20 @@ impl Core {
             Some(dir) => SessionStore::open(&dir.join(DB_FILE_NAME)),
             None => SessionStore::unavailable("no application data directory is available"),
         };
+        // Workstreams share the session database (T200): one file, one
+        // migration chain. Taken before the store is handed to the session
+        // service, which consumes it.
+        let workstream_db = store.database().cloned();
         let session = SessionService::start(
-            handle,
-            events,
+            handle.clone(),
+            events.clone(),
             documents.clone(),
             workspaces.clone(),
             store,
             receiver,
             WriterConfig::default(),
         );
+        let workstreams = WorkstreamManager::new(handle, events, workspaces.clone(), workstream_db);
         Self {
             registry,
             workspaces,
@@ -121,6 +128,7 @@ impl Core {
             shell,
             session,
             terminals,
+            workstreams,
         }
     }
 

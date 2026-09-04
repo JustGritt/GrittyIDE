@@ -15,7 +15,7 @@ WebView side.
 | Moved-aside copies | `gritty.sqlite.corrupt-<unix-ms>` next to it, kept for inspection |
 | Mode | WAL, `synchronous = NORMAL`, `foreign_keys = ON`, `busy_timeout = 5 s` |
 
-## Schema (version 1)
+## Schema (version 2)
 
 Owned by the runner: `schema_version (version PK, applied_at)`. Migrations
 (`crates/persistence/src/migrations/NNNN_*.sql`) are applied in order, one
@@ -30,6 +30,13 @@ build knows is refused.
 | `workspace_tab` | `(workspace_root, path)` | `position`, `active`, `view_mode`, `cursor_line/column`, `anchor_line/column`, `scroll_line`, `updated_at` | `session.update` (the whole set of a root, one transaction) |
 | `buffer_snapshot` | `(workspace_root, path)` | `text`, `encoding`, `saved_hash`, `current_version`, `updated_at` | writer (debounced), removed per the rules below |
 | `operation_record` | `id` | `kind`, `workspace_root`, `status`, `correlation_id`, `created_at`, `started_at`, `finished_at`, `updated_at` | writer, for `durable` operations; `INTERRUPTED` at startup |
+| `workstream` | `id` | `workspace_root`, `title`, `goal`, `state`, `created_at`, `updated_at` | `workstreams.*` commands, synchronously (T200) |
+| `decision` | `id` | `workstream_id` (cascade), `question`, `options`, `state`, `chosen`, `rationale`, `raised_by`, `raised_at`, `resolved_at` | `decisions.*` commands, synchronously (T200) |
+
+The last two are the workstream domain (T200); their rules live in
+`docs/architecture/workstreams.md`. Unlike everything above them they do not go
+through the debounced writer: a workstream is committed by the command that
+creates it, so nothing is lost if the process dies a moment later.
 
 The `workspace` table is the startup screen's history (T049).
 `workspace.recents` reads it newest-first under a caller-supplied limit and

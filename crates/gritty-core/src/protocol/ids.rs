@@ -91,6 +91,20 @@ string_id! {
 }
 
 string_id! {
+    /// Identifies a workstream (T200).
+    ///
+    /// Unlike the ids above this one is persisted: a workstream outlives the
+    /// process that created it, so the id in the database is the id on the wire.
+    WorkstreamId => "string & { readonly __brand: 'WorkstreamId' }"
+}
+
+string_id! {
+    /// Identifies a decision raised against a workstream (T200). Persisted,
+    /// like [`WorkstreamId`].
+    DecisionId => "string & { readonly __brand: 'DecisionId' }"
+}
+
+string_id! {
     /// Ties a command invocation, its operation, its events and its errors together.
     CorrelationId => "string & { readonly __brand: 'CorrelationId' }"
 }

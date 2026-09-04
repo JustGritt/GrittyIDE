@@ -34,6 +34,15 @@ export const COMMANDS = {
   'terminal.kill': 'terminal_kill',
   'terminal.list': 'terminal_list',
   'terminal.profiles': 'terminal_profiles',
+  'workstreams.list': 'workstreams_list',
+  'workstreams.create': 'workstreams_create',
+  'workstreams.update': 'workstreams_update',
+  'workstreams.transition': 'workstreams_transition',
+  'workstreams.remove': 'workstreams_remove',
+  'decisions.list': 'decisions_list',
+  'decisions.raise': 'decisions_raise',
+  'decisions.resolve': 'decisions_resolve',
+  'decisions.dismiss': 'decisions_dismiss',
 } as const;
 
 export type CommandName = keyof typeof COMMANDS;

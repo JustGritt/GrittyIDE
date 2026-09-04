@@ -26,7 +26,9 @@ domain abstraction before its upstream contract exists.
 | T080 | Search | 2 | T020, ADR-001 | not yet specified |
 | T100 | Git baseline | 2 | ADR-001 | not yet specified |
 | T110 | Diagnostics | 2 | ADR-001 | not yet specified |
-| T200–T410 | Workstreams, agents, orchestration | 3–5 | Phase 2 | not yet specified |
+| [T200](T200-workstream-model.md) | Workstream model + decisions (Gate C) | 3 | T010, T020, T060 | review |
+| T210 | Workstream UI (island, attention queue) | 3 | T200 | not yet specified |
+| T300–T410 | Agent protocol, runs, orchestration | 4–5 | T200, T210 | not yet specified |
 
 ## Dependency graph (architecture addendum §2)
 
@@ -45,7 +47,7 @@ T090 Terminal                 ├─ Phase 2 dogfood milestone
 T100 Git                      │
 T110 Diagnostics ─────────────┘
 
-T200 Workstream model
+T200 Workstream model (done: state machine, decisions, persistence)
  └─ T210 Workstream UI
      └─ T300 Agent protocol + deterministic fake agent
          ├─ T310 First real agent

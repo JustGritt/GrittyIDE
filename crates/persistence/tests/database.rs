@@ -4,7 +4,9 @@
 use std::fs;
 use std::io::{Seek, SeekFrom, Write};
 
-use gritty_persistence::store::{operations, session, snapshots, tabs, window, workspace};
+use gritty_persistence::store::{
+    decisions, operations, session, snapshots, tabs, window, workspace, workstreams,
+};
 use gritty_persistence::testing::TempDir;
 use gritty_persistence::{DB_FILE_NAME, Database, PersistenceError, SCHEMA_VERSION};
 
@@ -528,5 +530,186 @@ fn operation_repository_marks_unfinished_records_interrupted() {
             .write(|tx| operations::mark_interrupted(tx, 100))
             .unwrap(),
         0
+    );
+}
+
+#[test]
+fn workstream_repository_round_trips_and_lists_newest_first() {
+    let database = Database::open_in_memory().unwrap();
+    let row = |id: &str, root: &str, created_at: i64| workstreams::WorkstreamRow {
+        id: id.into(),
+        workspace_root: root.into(),
+        title: format!("title {id}"),
+        goal: None,
+        state: "DRAFT".into(),
+        created_at,
+        updated_at: created_at,
+    };
+    database
+        .write(|tx| {
+            workstreams::insert(tx, &row("a", "/repo", 1))?;
+            workstreams::insert(tx, &row("b", "/repo", 2))?;
+            workstreams::insert(tx, &row("elsewhere", "/other", 3))
+        })
+        .unwrap();
+
+    let listed = database.read(|c| workstreams::list(c, "/repo")).unwrap();
+    assert_eq!(
+        listed.iter().map(|w| w.id.as_str()).collect::<Vec<_>>(),
+        ["b", "a"],
+        "newest first, and never another workspace's"
+    );
+
+    assert!(
+        database
+            .write(|tx| workstreams::update(tx, "a", "renamed", Some("the goal"), 40))
+            .unwrap()
+    );
+    assert!(
+        database
+            .write(|tx| workstreams::set_state(tx, "a", "READY", 41))
+            .unwrap()
+    );
+    let updated = database
+        .read(|c| workstreams::get(c, "a"))
+        .unwrap()
+        .expect("still there");
+    assert_eq!(updated.title, "renamed");
+    assert_eq!(updated.goal.as_deref(), Some("the goal"));
+    assert_eq!(updated.state, "READY");
+    assert_eq!(updated.updated_at, 41);
+
+    // A row that is not there reports it rather than pretending to have written.
+    assert!(
+        !database
+            .write(|tx| workstreams::set_state(tx, "missing", "READY", 42))
+            .unwrap()
+    );
+    assert!(
+        database
+            .read(|c| workstreams::get(c, "missing"))
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn decisions_cascade_with_their_workstream_and_count_only_the_open_ones() {
+    let database = Database::open_in_memory().unwrap();
+    let decision =
+        |id: &str, workstream: &str, state: &str, raised_at: i64| decisions::DecisionRow {
+            id: id.into(),
+            workstream_id: workstream.into(),
+            question: format!("question {id}"),
+            options: None,
+            state: state.into(),
+            chosen: None,
+            rationale: None,
+            raised_by: r#"{"type":"USER"}"#.into(),
+            raised_at,
+            resolved_at: None,
+        };
+    database
+        .write(|tx| {
+            workstreams::insert(
+                tx,
+                &workstreams::WorkstreamRow {
+                    id: "w1".into(),
+                    workspace_root: "/repo".into(),
+                    title: "one".into(),
+                    goal: None,
+                    state: "IN_PROGRESS".into(),
+                    created_at: 1,
+                    updated_at: 1,
+                },
+            )?;
+            workstreams::insert(
+                tx,
+                &workstreams::WorkstreamRow {
+                    id: "w2".into(),
+                    workspace_root: "/repo".into(),
+                    title: "two".into(),
+                    goal: None,
+                    state: "IN_PROGRESS".into(),
+                    created_at: 2,
+                    updated_at: 2,
+                },
+            )?;
+            decisions::insert(tx, &decision("d2", "w1", "OPEN", 20))?;
+            decisions::insert(tx, &decision("d1", "w1", "OPEN", 10))?;
+            decisions::insert(tx, &decision("d3", "w2", "RESOLVED", 30))
+        })
+        .unwrap();
+
+    let all = database
+        .read(|c| decisions::list(c, "/repo", None, false))
+        .unwrap();
+    assert_eq!(
+        all.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(),
+        ["d1", "d2", "d3"],
+        "oldest first: the order the queue triages in"
+    );
+    let open = database
+        .read(|c| decisions::list(c, "/repo", None, true))
+        .unwrap();
+    assert_eq!(open.len(), 2);
+    let mine = database
+        .read(|c| decisions::list(c, "/repo", Some("w2"), false))
+        .unwrap();
+    assert_eq!(mine.len(), 1);
+
+    let counts = database
+        .read(|c| decisions::open_counts(c, "/repo"))
+        .unwrap();
+    assert_eq!(
+        counts,
+        [("w1".to_owned(), 2)],
+        "only workstreams with open ones"
+    );
+    assert_eq!(
+        database.read(|c| decisions::count_open(c, "w2")).unwrap(),
+        0
+    );
+
+    // Closing is conditional on still being open, so a double answer is visible.
+    assert!(
+        database
+            .write(|tx| decisions::close(tx, "d1", "RESOLVED", Some("core"), None, 50))
+            .unwrap()
+    );
+    assert!(
+        !database
+            .write(|tx| decisions::close(tx, "d1", "RESOLVED", Some("core"), None, 51))
+            .unwrap(),
+        "an answered decision cannot be answered again"
+    );
+    let closed = database
+        .read(|c| decisions::get(c, "d1"))
+        .unwrap()
+        .expect("still there");
+    assert_eq!(closed.state, "RESOLVED");
+    assert_eq!(closed.chosen.as_deref(), Some("core"));
+    assert_eq!(closed.resolved_at, Some(50));
+
+    // Deleting the workstream takes its decisions with it.
+    assert!(database.write(|tx| workstreams::delete(tx, "w1")).unwrap());
+    assert!(
+        database
+            .read(|c| decisions::get(c, "d1"))
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        database
+            .read(|c| decisions::get(c, "d2"))
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        database
+            .read(|c| decisions::get(c, "d3"))
+            .unwrap()
+            .is_some(),
+        "another workstream's decisions are untouched"
     );
 }

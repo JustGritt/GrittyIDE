@@ -33,6 +33,11 @@ use crate::workspace::{
     CloseWorkspaceRequest, ForgetWorkspaceRequest, ListDirectoryRequest, ListDirectoryResponse,
     OpenWorkspaceRequest, RecentWorkspace, RecentWorkspacesRequest, Workspace,
 };
+use crate::workstream::wire::{
+    CreateWorkstreamRequest, Decision, DismissDecisionRequest, ListDecisionsRequest,
+    ListWorkstreamsRequest, RaiseDecisionRequest, RemoveWorkstreamRequest, ResolveDecisionRequest,
+    TransitionWorkstreamRequest, UpdateWorkstreamRequest, Workstream,
+};
 
 /// Relative to this crate's `Cargo.toml`.
 const GENERATED_DIR: &str = "../../packages/protocol/src/generated";
@@ -90,6 +95,17 @@ fn export_bindings() {
     ResizeTerminalRequest::export_all(&cfg).expect("export ResizeTerminalRequest");
     KillTerminalRequest::export_all(&cfg).expect("export KillTerminalRequest");
     RenameTerminalRequest::export_all(&cfg).expect("export RenameTerminalRequest");
+    Workstream::export_all(&cfg).expect("export Workstream");
+    ListWorkstreamsRequest::export_all(&cfg).expect("export ListWorkstreamsRequest");
+    CreateWorkstreamRequest::export_all(&cfg).expect("export CreateWorkstreamRequest");
+    UpdateWorkstreamRequest::export_all(&cfg).expect("export UpdateWorkstreamRequest");
+    TransitionWorkstreamRequest::export_all(&cfg).expect("export TransitionWorkstreamRequest");
+    RemoveWorkstreamRequest::export_all(&cfg).expect("export RemoveWorkstreamRequest");
+    Decision::export_all(&cfg).expect("export Decision");
+    ListDecisionsRequest::export_all(&cfg).expect("export ListDecisionsRequest");
+    RaiseDecisionRequest::export_all(&cfg).expect("export RaiseDecisionRequest");
+    ResolveDecisionRequest::export_all(&cfg).expect("export ResolveDecisionRequest");
+    DismissDecisionRequest::export_all(&cfg).expect("export DismissDecisionRequest");
 
     let version = format!(
         "{HEADER}export const PROTOCOL_VERSION = \"{PROTOCOL_VERSION}\";\n\
