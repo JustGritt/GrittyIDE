@@ -185,6 +185,10 @@ and a Cmd+R with dirty tabs are recorded as pending the human pass.
   geometry width=2560 height=1600 position=Some((232, 142)) maximized=false monitors=1`, then the
   same health and restore lines; the data directory held `gritty.sqlite` (+`-wal`, `-shm`),
   `window_state` = `main|232|142|2560|1600|2.0|0`, `schema_version` = 1, `journal_mode` = `wal`.
+- Linux CI on PR #7 (2026-09-04, run 33856323276, head 59f1c15): `pnpm check` and
+  `pnpm tauri build --no-bundle` passed in 16m19s (rusqlite `bundled` compiles SQLite on the
+  Ubuntu runner; the crash simulation, the session tests and the adapter tests hold on Linux).
+  The macOS job is label-gated (`ci:macos`) and did not run.
 - Not executed (human WKWebView pass, rows in the platform matrix): `kill -9 $(pgrep -f Gritty)`
   while typing → relaunch → prompt → Restore puts the text back dirty; the same with the file
   edited or deleted meanwhile (CONFLICTED / DELETED banners); quit and relaunch with several tabs,
