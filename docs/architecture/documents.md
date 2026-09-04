@@ -111,7 +111,12 @@ while any document of that workspace is dirty, unless the request carries
 `ROOT_MISSING`), its documents are closed with `DocumentClosed { reason:
 WORKSPACE_CLOSED, dirty }`; the desktop shell keeps the text of dirty ones on
 screen as "unsaved buffers from closed documents" until dismissed. Durable
-recovery of dirty buffers is T060.
+recovery of dirty buffers is the session layer (T060, ADR-014,
+`docs/architecture/persistence.md`): every dirty buffer is snapshotted from
+the core within 2 s, and `session.recover` puts a snapshot back through
+`DocumentManager::open_recovered` (dirty and `UNCHANGED`, `CONFLICTED` with
+`savedHash` set to the snapshot's base, or `DELETED_EXTERNALLY` from the
+snapshot alone), emitting `DocumentChanged { cause: RECOVERED }`.
 
 ## Editor binding (T040)
 

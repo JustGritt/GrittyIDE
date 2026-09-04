@@ -16,7 +16,7 @@ running application. Exit: ADR-001 go/no-go.
 | A6 | Filesystem watching; rapid changes do not lock the UI | T070 (after ADR-001) or spike | |
 | A7 | Markdown preview with sanitized HTML and fenced-code highlighting | T050 | 2026-09-03, macOS 26 arm64: markdown-it + DOMPurify allowlist (ADR-013), fenced code colorized by Monaco's tokenizers; XSS fixture asserted clean and GFM fixture snapshotted under jsdom; `long.md` (134 KB) renders in 366 ms under jsdom (markdown-it alone 15–20 ms); in-app rendering, scroll sync and link navigation pending reviewer (the agent cannot see the WebView) |
 | A8 | PTY: spawn a shell, resize, stream output, terminate cleanly | T090 | |
-| A9 | Persist and restore workspace + tabs | T060 | |
+| A9 | Persist and restore workspace + tabs | T060 | 2026-09-04, macOS 26 arm64: SQLite session database (ADR-014); `session.restore` reopens the last root and returns tabs, view modes, cursors, preferences and layout; automated through the adapters (`cargo test -p gritty-desktop`) and the WebView restore flow (Vitest); `pnpm dev` twice restores the window geometry; a quit/relaunch with open tabs in the app pending reviewer |
 | A10 | Cold/warm startup, idle RAM/CPU, editor RAM growth, interaction latency recorded | below | |
 | A11 | Linux build via CI; platform-specific defects logged | T000 CI + platform matrix | |
 | A12 | ADR-001 written after measurements | end | |
@@ -25,10 +25,10 @@ running application. Exit: ADR-001 go/no-go.
 
 | # | Test | Steps | Pass condition | Result |
 |---|---|---|---|---|
-| B1 | Dirty-buffer crash | open workspace → edit without saving → `kill -9` Gritty → restart | unsaved content is recoverable; no silent loss | |
+| B1 | Dirty-buffer crash | open workspace → edit without saving → `kill -9` Gritty → restart | unsaved content is recoverable; no silent loss | 2026-09-04, macOS 26 arm64: automated in `crates/gritty-core/tests/crash_recovery.rs` (snapshot written within the debounce, process state dropped without close/flush/checkpoint, relaunch offers `SAME_AS_DISK` and recovers the text; changed and deleted files recover as `CONFLICTED` / `DELETED_EXTERNALLY`) and through the adapters; the real `kill -9` of the app while typing pending reviewer |
 | B2 | PTY failure | spawn PTY → produce output → kill the child unexpectedly | renderer stays responsive; terminal reports termination | |
 | B3 | Operation cancellation | start a long operation (search or fixture op) → receive progress → cancel | prompt cancellation; no stale successful completion | 2026-09-03, demo operation (T010): automated in `cargo test -p gritty-core` (registry) and `cargo test -p gritty-desktop` (mock runtime through the real adapters): progress observed → cancel → `CANCELLED` in < 1 s, no `OperationCompleted`, `seq` contiguous. Manual UI pass pending reviewer; re-run with search (T080) |
-| B4 | Renderer reload | reload/recreate the WebView while core/workspace exist | durable state rehydrates without corruption | |
+| B4 | Renderer reload | reload/recreate the WebView while core/workspace exist | durable state rehydrates without corruption | 2026-09-04: `documents.list` + `documents.open` rehydration kept (`useDocuments.rehydrate`, always run by the session flow); a second `session.restore` in the same process reports the open workspace without reopening (core and adapter tests); the WebView flow is unit-tested for the reload path; a Cmd+R in `pnpm dev` with dirty tabs pending reviewer |
 | B5 | Filesystem storm | generate rapid file changes in `fixtures/large-repo` | UI responsive; events batched/bounded; final state converges | |
 
 ## C. Performance baseline (plan §13 targets)

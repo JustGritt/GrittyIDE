@@ -72,7 +72,8 @@ and never a second source of truth (architecture addendum §4.1, rule 3).
   off: the worker sees one file, so every import would be an error; syntax
   diagnostics stay on.
 - **Preferences** (font size, tab size, word wrap, minimap) are in-memory
-  state of the editor pane until T060 persists them.
+  state of the editor pane until T060 persists them (done: ADR-014, as a
+  versioned JSON blob parsed with defaults).
 - **Package boundary.** `@gritty/editor` is pure and node-tested (line
   endings, minimal edit, language fallback, worker status, registry and
   binding over a structural `TextModelLike`); `@gritty/editor/monaco` is the

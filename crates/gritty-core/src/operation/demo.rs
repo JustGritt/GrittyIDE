@@ -69,6 +69,7 @@ pub fn start_demo(
         actor,
         workspace_id: None,
         correlation_id,
+        durable: false,
     };
     Ok(registry.start(spec, move |ctx| run_demo(ctx, request)))
 }

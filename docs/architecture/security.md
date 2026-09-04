@@ -1,7 +1,8 @@
 # Security model
 
 Status: baseline written at T000; refined by T020 (paths), T030 (file
-content and writes), T090 (processes), T300 (agent capabilities).
+content and writes), T060 (session database), T090 (processes), T300 (agent
+capabilities).
 
 ## Principles
 
@@ -110,6 +111,30 @@ Implemented in `crates/workspace/src/{detect,file}.rs` and
   validated by the core (scheme, length, characters, host, no credentials) and
   opened by the system handler from the Rust side; the WebView has no opener
   or shell capability. Only scheme and host are logged.
+
+## Session database (T060, ADR-014)
+
+- **What is stored.** `<app data dir>/gritty.sqlite` holds the last workspace
+  root, per-root tab paths with view state, editor preferences and layout,
+  window geometry, durable operation records, and the **full text of every
+  dirty buffer**: repository content the user edited, `.env` files included,
+  in plaintext, protected only by the user account's permissions on the data
+  directory. A snapshot is removed when the document is saved, reloaded or
+  explicitly discarded; a moved-aside copy (`gritty.sqlite.corrupt-<ms>`) may
+  keep older snapshots until the user deletes it.
+- **Never onto the disk.** Recovery only ever replaces a buffer; the
+  repository file changes through `documents.save` like any other edit, with
+  the same conflict rules.
+- **Paths.** The data directory is resolved on the Rust side (`tauri::path`
+  or `GRITTY_DATA_DIR`); the WebView receives the database path for display
+  only and holds no filesystem capability. Every persisted `path` is a
+  `WorkspacePath` and is re-validated when read back; a row that fails
+  validation is ignored with a warning.
+- **Logs and events** carry paths, sizes, versions, hashes and states, never
+  snapshot text; `session.update` blobs are bounded (64 KiB, 500 tabs).
+- **Corruption** is contained: a file that is not a database, fails its
+  integrity check or was written by a newer version never crashes or loops
+  the application; it is moved aside or the layer turns itself off and says so.
 
 ## Process boundaries
 

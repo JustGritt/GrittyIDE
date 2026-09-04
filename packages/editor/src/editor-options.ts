@@ -1,6 +1,6 @@
 import type { editor } from 'monaco-editor';
 
-/** In-memory editor preferences (T060 persists them). */
+/** Editor preferences; persisted by the session (T060) as a versioned JSON blob. */
 export interface EditorPreferences {
   readonly fontSize: number;
   readonly tabSize: number;
@@ -14,6 +14,55 @@ export const DEFAULT_EDITOR_PREFERENCES: EditorPreferences = {
   wordWrap: false,
   minimap: true,
 };
+
+export const MIN_FONT_SIZE = 8;
+export const MAX_FONT_SIZE = 32;
+export const TAB_SIZES: readonly number[] = [2, 4, 8];
+/** Producer version of the persisted blob; bump when a field changes meaning. */
+export const EDITOR_PREFERENCES_VERSION = 1;
+
+/**
+ * Rebuild preferences from whatever was persisted. Every field falls back to
+ * its default when missing or out of range, so an older, newer or damaged
+ * blob never breaks the editor.
+ */
+export function parseEditorPreferences(value: unknown): EditorPreferences {
+  if (typeof value !== 'object' || value === null) return DEFAULT_EDITOR_PREFERENCES;
+  const raw = value as Record<string, unknown>;
+  const fontSize =
+    typeof raw.fontSize === 'number' &&
+    Number.isInteger(raw.fontSize) &&
+    raw.fontSize >= MIN_FONT_SIZE &&
+    raw.fontSize <= MAX_FONT_SIZE
+      ? raw.fontSize
+      : DEFAULT_EDITOR_PREFERENCES.fontSize;
+  const tabSize =
+    typeof raw.tabSize === 'number' && TAB_SIZES.includes(raw.tabSize)
+      ? raw.tabSize
+      : DEFAULT_EDITOR_PREFERENCES.tabSize;
+  const wordWrap =
+    typeof raw.wordWrap === 'boolean' ? raw.wordWrap : DEFAULT_EDITOR_PREFERENCES.wordWrap;
+  const minimap =
+    typeof raw.minimap === 'boolean' ? raw.minimap : DEFAULT_EDITOR_PREFERENCES.minimap;
+  return { fontSize, tabSize, wordWrap, minimap };
+}
+
+/**
+ * The blob `parseEditorPreferences` reads back. A type alias, not an
+ * interface: only aliases get the implicit index signature that makes them
+ * assignable to the protocol's `JsonValue`.
+ */
+export type SerializedEditorPreferences = {
+  readonly version: number;
+  readonly fontSize: number;
+  readonly tabSize: number;
+  readonly wordWrap: boolean;
+  readonly minimap: boolean;
+};
+
+export function serializeEditorPreferences(prefs: EditorPreferences): SerializedEditorPreferences {
+  return { version: EDITOR_PREFERENCES_VERSION, ...prefs };
+}
 
 /** What the document contract says about the active document. */
 export interface DocumentFlags {

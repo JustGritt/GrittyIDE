@@ -47,8 +47,13 @@ Legend: ✔ works · ✘ defect (link an issue/note) · ~ partial · – unteste
 | Files | workspace close refused while documents are dirty | (a) | – | – | T030: core and adapter tests |
 | Terminal | interactive shell (vim, less, top) | – | – | – | T090 |
 | Terminal | resize, process-tree kill, unexpected child death | – | – | – | T090 |
-| Recovery | force-kill restart restores tabs/cursor/dirty buffers | – | – | – | T060 |
-| System | sleep/wake, multi-monitor, window restore | – | – | – | T060 |
+| Recovery | force-kill restart restores tabs/cursor/dirty buffers | (a) | – | – | T060: `crates/gritty-core/tests/crash_recovery.rs` drops the process state without close, flush or checkpoint and recovers in all three states; `cargo test -p gritty-desktop` restores tabs and recovers through the adapters after a "restart" on the same data dir (macOS 26, 2026-09-04); the real `kill -9 $(pgrep -f Gritty)` while typing, relaunch and prompt pending the human pass |
+| Recovery | snapshot vs. disk: same → prompt (default Restore), changed → CONFLICTED, missing → DELETED_EXTERNALLY | (a) | – | – | T060: reconciliation matrix in `session::tests` and `crash_recovery.rs`; banners in the app pending the human pass |
+| Recovery | corrupted database → moved aside, fresh start, notice | (a) | – | – | T060: garbage file and damaged page (`quick_check` → replaced at runtime) in `crates/persistence/tests/database.rs` and `session::tests`; the notice banner in the app pending the human pass |
+| Recovery | renderer reload rehydrates from the core (§11.4) | (a) | – | – | T060: `session.restore` idempotence (core, adapter) and `restore-flow.test.ts` reload path; a Cmd+R in `pnpm dev` with dirty tabs pending the human pass |
+| Recovery | quit / relaunch restores workspace, tabs, active tab, view modes, cursors, preferences | (a) | – | – | T060: adapter and Vitest coverage; in the app pending the human pass |
+| System | window geometry restore (size, position, maximized) | ~ | – | – | T060: `pnpm dev` twice with `GRITTY_DATA_DIR` on macOS 26 (2026-09-04): the second launch logged `restoring window geometry width=2560 height=1600 position=Some((232, 142))` from the row the first launch recorded; off-monitor positions dropped (`fit_to_monitors` tests); Linux untested by design (Wayland ignores positions, GTK maximize-before-show) |
+| System | sleep/wake, multi-monitor | – | – | – | T060: pending the human pass |
 | Build | `pnpm tauri build` produces a launchable bundle | – | – (CI: no-bundle) | – | T000 |
 
 ## Windows development notes (T020)

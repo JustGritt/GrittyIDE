@@ -11,12 +11,19 @@ export {
 export {
   DEFAULT_EDITOR_PREFERENCES,
   type DocumentFlags,
+  EDITOR_PREFERENCES_VERSION,
   type EditorOptions,
   type EditorPreferences,
   editorOptionsFor,
   LARGE_FILE_MAX_TOKENIZATION_LINE_LENGTH,
+  MAX_FONT_SIZE,
   MAX_TOKENIZATION_LINE_LENGTH,
+  MIN_FONT_SIZE,
+  parseEditorPreferences,
   readOnlyReason,
+  type SerializedEditorPreferences,
+  serializeEditorPreferences,
+  TAB_SIZES,
 } from './editor-options';
 export {
   detectEol,
@@ -37,6 +44,12 @@ export type {
   ModelRange,
   TextModelLike,
 } from './text-model';
+export {
+  type EditorViewState,
+  INITIAL_VIEW_STATE,
+  type TextPos,
+  viewStateFrom,
+} from './view-state';
 export {
   type WorkerFailure,
   type WorkerLike,

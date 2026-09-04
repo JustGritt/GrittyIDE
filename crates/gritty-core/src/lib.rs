@@ -18,12 +18,16 @@
 //! - [`document`]: open documents and their buffers (T030, Gate B): dirty
 //!   state, atomic saves, external modification detection.
 //! - [`shell`]: opening external URLs through an injected opener (T050).
+//! - [`session`]: session persistence and crash recovery over the
+//!   `gritty-persistence` database (T060): tabs and layout, dirty-buffer
+//!   snapshots, startup reconciliation, durable operation records.
 
 pub mod document;
 pub mod event;
 pub mod health;
 pub mod operation;
 pub mod protocol;
+pub mod session;
 pub mod shell;
 pub mod workspace;
 

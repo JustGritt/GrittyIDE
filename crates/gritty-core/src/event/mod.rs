@@ -28,6 +28,7 @@ use crate::operation::{Operation, OperationProgress};
 use crate::protocol::actor::Actor;
 use crate::protocol::error::CoreError;
 use crate::protocol::ids::{CorrelationId, DocumentId, OperationId, WorkspaceId};
+use crate::session::wire::PersistenceStatusPayload;
 use crate::workspace::{Workspace, WorkspaceClosedReason};
 
 /// Envelope fields that are not the event itself.
@@ -68,6 +69,9 @@ pub enum CoreEvent {
     /// `CONFLICTED` and `DELETED_EXTERNALLY` (emitted on transitions only).
     DocumentExternalChangeDetected(DocumentExternalChangePayload),
     DocumentClosed(DocumentClosedPayload),
+    /// The session database became unavailable or healthy again, or was
+    /// replaced after a failed integrity check (T060). Emitted on transitions.
+    PersistenceStatusChanged(PersistenceStatusPayload),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -174,6 +178,7 @@ impl CoreEvent {
             Self::DocumentSaved(_) => "DocumentSaved",
             Self::DocumentExternalChangeDetected(_) => "DocumentExternalChangeDetected",
             Self::DocumentClosed(_) => "DocumentClosed",
+            Self::PersistenceStatusChanged(_) => "PersistenceStatusChanged",
         }
     }
 
@@ -191,7 +196,8 @@ impl CoreEvent {
             | Self::DocumentChanged(_)
             | Self::DocumentSaved(_)
             | Self::DocumentExternalChangeDetected(_)
-            | Self::DocumentClosed(_) => None,
+            | Self::DocumentClosed(_)
+            | Self::PersistenceStatusChanged(_) => None,
         }
     }
 
@@ -230,6 +236,33 @@ pub struct EventOrigin {
 /// and by recording sinks in tests. Must be cheap: it is called under the bus lock.
 pub trait EventSink: Send + Sync {
     fn emit(&self, envelope: &EventEnvelope) -> Result<(), CoreError>;
+}
+
+/// Delivers every envelope to several sinks in order (the WebView and the
+/// session tap, T060). Each sink sees every event even when another fails;
+/// the first failure is reported to the bus.
+pub struct FanOutSink {
+    sinks: Vec<Arc<dyn EventSink>>,
+}
+
+impl FanOutSink {
+    pub fn new(sinks: Vec<Arc<dyn EventSink>>) -> Arc<Self> {
+        Arc::new(Self { sinks })
+    }
+}
+
+impl EventSink for FanOutSink {
+    fn emit(&self, envelope: &EventEnvelope) -> Result<(), CoreError> {
+        let mut first_error = None;
+        for sink in &self.sinks {
+            if let Err(error) = sink.emit(envelope)
+                && first_error.is_none()
+            {
+                first_error = Some(error);
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
 }
 
 /// Assigns sequence numbers and forwards envelopes to the sink.
@@ -383,6 +416,7 @@ mod tests {
             correlation_id: CorrelationId::from_raw("corr-1"),
             progress: None,
             error: None,
+            durable: false,
         }
     }
 

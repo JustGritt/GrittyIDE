@@ -18,6 +18,10 @@ use gritty_core::operation::demo::{StartDemoRequest, start_demo};
 use gritty_core::operation::{CancelOperationRequest, Operation};
 use gritty_core::protocol::actor::Actor;
 use gritty_core::protocol::ids::CorrelationId;
+use gritty_core::session::{
+    CandidatesRequest, DiscardSnapshotRequest, RecoverSnapshotRequest, RecoveryCandidate,
+    SessionRestoreResponse, UpdateSessionRequest,
+};
 use gritty_core::shell::OpenExternalRequest;
 use gritty_core::workspace::{
     CloseWorkspaceRequest, DEFAULT_LIST_BUDGET, ListDirectoryRequest, ListDirectoryResponse,
@@ -273,6 +277,82 @@ pub async fn shell_open_external(
     guard("shell.openExternal", move |correlation| async move {
         let request: OpenExternalRequest = parse_request(request)?;
         shell.open_external(request, Actor::User, correlation).await
+    })
+    .await
+}
+
+/// `session.restore`: the last workspace (reopened once per process), its
+/// persisted tabs, the UI blobs and the persistence status. Never fails for
+/// persistence reasons.
+#[tauri::command]
+pub async fn session_restore(core: State<'_, Core>) -> Result<SessionRestoreResponse, CoreError> {
+    let session = core.session.clone();
+    guard("session.restore", move |correlation| async move {
+        let response = session.restore(correlation).await;
+        tracing::info!(
+            workspace = ?response.workspace.as_ref().map(|w| w.id.to_string()),
+            tabs = response.tabs.len(),
+            available = response.persistence.available,
+            notices = response.notices.len(),
+            "session restored"
+        );
+        Ok(response)
+    })
+    .await
+}
+
+/// `session.candidates`
+#[tauri::command]
+pub async fn session_candidates(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Vec<RecoveryCandidate>, CoreError> {
+    let session = core.session.clone();
+    guard("session.candidates", move |correlation| async move {
+        let request: CandidatesRequest = parse_request(request)?;
+        session.candidates(request, correlation).await
+    })
+    .await
+}
+
+/// `session.recover`
+#[tauri::command]
+pub async fn session_recover(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<DocumentContent, CoreError> {
+    let session = core.session.clone();
+    guard("session.recover", move |correlation| async move {
+        let request: RecoverSnapshotRequest = parse_request(request)?;
+        session.recover(request, Actor::User, correlation).await
+    })
+    .await
+}
+
+/// `session.discard`
+#[tauri::command]
+pub async fn session_discard(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<(), CoreError> {
+    let session = core.session.clone();
+    guard("session.discard", move |correlation| async move {
+        let request: DiscardSnapshotRequest = parse_request(request)?;
+        session.discard(request, correlation).await
+    })
+    .await
+}
+
+/// `session.update`
+#[tauri::command]
+pub async fn session_update(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<(), CoreError> {
+    let session = core.session.clone();
+    guard("session.update", move |correlation| async move {
+        let request: UpdateSessionRequest = parse_request(request)?;
+        session.update(request, correlation).await
     })
     .await
 }

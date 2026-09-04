@@ -22,6 +22,7 @@ const RANK: Record<OperationStatus, number> = {
   COMPLETED: 2,
   FAILED: 2,
   CANCELLED: 2,
+  INTERRUPTED: 2,
 };
 
 export function isTerminal(status: OperationStatus): boolean {

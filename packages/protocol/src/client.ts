@@ -3,9 +3,11 @@ import { type CoreError, toCoreError } from './errors';
 import { type Diagnostic, EventHub, type Unsubscribe } from './events';
 import type { Transport } from './transport';
 import {
+  type CandidatesRequest,
   type CloseDocumentRequest,
   type CloseWorkspaceRequest,
   CORE_EVENT_CHANNEL,
+  type DiscardSnapshotRequest,
   type Document,
   type DocumentContent,
   type DocumentStatusRequest,
@@ -21,10 +23,14 @@ import {
   type Operation,
   type OperationId,
   PROTOCOL_VERSION,
+  type RecoverSnapshotRequest,
+  type RecoveryCandidate,
   type ReloadDocumentRequest,
   type SaveDocumentRequest,
+  type SessionRestoreResponse,
   type StartDemoRequest,
   type UpdateDocumentRequest,
+  type UpdateSessionRequest,
   type Workspace,
   type WorkspaceId,
 } from './types';
@@ -99,6 +105,22 @@ export interface CoreClient {
    */
   shell: {
     openExternal(url: string): Promise<void>;
+  };
+  /**
+   * Session persistence (T060). `restore` reopens the last workspace once per
+   * process and returns the persisted tabs, preferences and layout; it never
+   * rejects for persistence reasons (`persistence` and `notices` say what
+   * happened). `candidates` compares every recovery snapshot of a workspace
+   * with the disk; `recover` puts one back into the document's buffer (never
+   * onto the disk) and returns the document like `documents.open`; `discard`
+   * drops it; `update` stores what the UI owns.
+   */
+  session: {
+    restore(): Promise<SessionRestoreResponse>;
+    candidates(request: CandidatesRequest): Promise<RecoveryCandidate[]>;
+    recover(request: RecoverSnapshotRequest): Promise<DocumentContent>;
+    discard(request: DiscardSnapshotRequest): Promise<void>;
+    update(request: UpdateSessionRequest): Promise<void>;
   };
   subscribe<N extends EventName>(name: N, handler: (event: EventOf<N>) => void): Unsubscribe;
   subscribeAll(handler: (event: EventEnvelope) => void): Unsubscribe;
@@ -189,6 +211,13 @@ export function createCoreClient(
         const request: OpenExternalRequest = { url };
         return command<void>('shell.openExternal', { request });
       },
+    },
+    session: {
+      restore: () => command<SessionRestoreResponse>('session.restore'),
+      candidates: (request) => command<RecoveryCandidate[]>('session.candidates', { request }),
+      recover: (request) => command<DocumentContent>('session.recover', { request }),
+      discard: (request) => command<void>('session.discard', { request }),
+      update: (request) => command<void>('session.update', { request }),
     },
     subscribe: (name, handler) => hub.subscribe(name, handler),
     subscribeAll: (handler) => hub.subscribeAll(handler),

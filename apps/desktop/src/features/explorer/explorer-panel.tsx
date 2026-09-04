@@ -25,10 +25,15 @@ const CLOSED_REASONS: Record<WorkspaceClosedReason, string> = {
  */
 export function ExplorerPanel({
   onOpenFile,
+  showHidden,
+  onShowHiddenChange,
 }: {
   onOpenFile?: (workspaceId: WorkspaceId, path: string) => void;
+  /** Persisted layout (T060). */
+  showHidden?: boolean;
+  onShowHiddenChange?: (showHidden: boolean) => void;
 }) {
-  const explorer = useExplorer();
+  const explorer = useExplorer({ showHidden, onShowHiddenChange });
   const { state } = explorer;
   const [pathInput, setPathInput] = useState('');
 

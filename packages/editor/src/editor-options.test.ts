@@ -4,7 +4,9 @@ import {
   editorOptionsFor,
   LARGE_FILE_MAX_TOKENIZATION_LINE_LENGTH,
   MAX_TOKENIZATION_LINE_LENGTH,
+  parseEditorPreferences,
   readOnlyReason,
+  serializeEditorPreferences,
 } from './editor-options';
 
 const editable = { readOnly: false, largeFileMode: false, editableEol: true };
@@ -64,5 +66,30 @@ describe('editorOptionsFor', () => {
     expect(
       editorOptionsFor(DEFAULT_EDITOR_PREFERENCES, { ...editable, editableEol: false }),
     ).toMatchObject({ readOnly: true });
+  });
+});
+
+describe('parseEditorPreferences', () => {
+  it('round-trips a serialized blob', () => {
+    const prefs = { fontSize: 15, tabSize: 2, wordWrap: true, minimap: false };
+    const blob = serializeEditorPreferences(prefs);
+    expect(blob.version).toBe(1);
+    expect(parseEditorPreferences(blob)).toEqual(prefs);
+  });
+
+  it('falls back per field on missing, wrong-typed or out-of-range values', () => {
+    expect(parseEditorPreferences(null)).toEqual(DEFAULT_EDITOR_PREFERENCES);
+    expect(parseEditorPreferences('nope')).toEqual(DEFAULT_EDITOR_PREFERENCES);
+    expect(parseEditorPreferences({ version: 99 })).toEqual(DEFAULT_EDITOR_PREFERENCES);
+    expect(
+      parseEditorPreferences({ fontSize: 200, tabSize: 3, wordWrap: 'yes', minimap: false }),
+    ).toEqual({ ...DEFAULT_EDITOR_PREFERENCES, minimap: false });
+    expect(parseEditorPreferences({ fontSize: 12.5 }).fontSize).toBe(
+      DEFAULT_EDITOR_PREFERENCES.fontSize,
+    );
+    expect(parseEditorPreferences({ fontSize: 8, tabSize: 8 })).toMatchObject({
+      fontSize: 8,
+      tabSize: 8,
+    });
   });
 });

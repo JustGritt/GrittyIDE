@@ -11,14 +11,15 @@ use std::time::{Duration, Instant};
 
 use gritty_core::shell::ExternalOpener;
 use gritty_core::{CORE_EVENT_CHANNEL, CoreError, PROTOCOL_VERSION};
-use gritty_desktop_lib::{attach_core_with, configure};
+use gritty_desktop_lib::core::Core;
+use gritty_desktop_lib::{CoreOptions, attach_core_with, configure};
 use serde_json::{Value, json};
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{
     INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder, mock_context, noop_assets,
 };
 use tauri::webview::InvokeRequest;
-use tauri::{Listener, WebviewWindow, WebviewWindowBuilder};
+use tauri::{Listener, Manager, WebviewWindow, WebviewWindowBuilder};
 
 /// Stands in for the system browser: records what the core asked to open.
 #[derive(Default)]
@@ -38,10 +39,12 @@ impl ExternalOpener for RecordingOpener {
 }
 
 struct Harness {
-    _app: tauri::App<MockRuntime>,
+    app: tauri::App<MockRuntime>,
     webview: WebviewWindow<MockRuntime>,
     events: Arc<Mutex<Vec<Value>>>,
     opener: Arc<RecordingOpener>,
+    /// Owned when the harness created it; a shared directory outlives the harness.
+    _data_dir: Option<TempData>,
 }
 
 impl Harness {
@@ -50,12 +53,33 @@ impl Harness {
     }
 
     fn with_opener(opener: Arc<RecordingOpener>) -> Self {
+        let data = TempData::new("harness");
+        let path = data.0.clone();
+        let mut harness = Self::build(opener, path);
+        harness._data_dir = Some(data);
+        harness
+    }
+
+    /// The "next process": the same data directory, everything else fresh.
+    fn with_data_dir(data_dir: &std::path::Path) -> Self {
+        Self::build(Arc::new(RecordingOpener::default()), data_dir.to_path_buf())
+    }
+
+    fn build(opener: Arc<RecordingOpener>, data_dir: PathBuf) -> Self {
         let app = configure(mock_builder())
             .build(mock_context(noop_assets()))
             .expect("build app");
         // The mock runtime never runs `setup`; do what it would do. The
-        // recording opener means no test can ever open a real browser.
-        attach_core_with(app.handle(), opener.clone());
+        // recording opener means no test can ever open a real browser, and
+        // the temporary data directory means no test touches the real
+        // session database.
+        attach_core_with(
+            app.handle(),
+            CoreOptions {
+                opener: opener.clone(),
+                data_dir: Some(data_dir),
+            },
+        );
         let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .expect("create webview");
@@ -67,11 +91,25 @@ impl Harness {
             sink.lock().unwrap().push(envelope);
         });
         Self {
-            _app: app,
+            app,
             webview,
             events,
             opener,
+            _data_dir: None,
         }
+    }
+
+    /// Make the session writer persist everything pending (what a clean exit does).
+    fn flush(&self) {
+        let core = self.app.state::<Core>();
+        assert!(
+            tauri::async_runtime::block_on(core.session.flush(Duration::from_secs(5))),
+            "session writer flushed"
+        );
+    }
+
+    fn session(&self, cmd: &str, request: Value) -> Result<Value, Value> {
+        self.invoke(cmd, json!({ "request": request }))
     }
 
     /// Invoke a command exactly as the WebView would; `Err` is the serialized error envelope.
@@ -153,6 +191,29 @@ impl Harness {
             "workspace_list",
             json!({ "request": { "workspaceId": workspace_id, "path": path } }),
         )
+    }
+}
+
+/// A scratch application data directory removed on drop.
+struct TempData(PathBuf);
+
+impl TempData {
+    fn new(label: &str) -> Self {
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let path = std::env::temp_dir().join(format!(
+            "gritty-desktop-data-{label}-{}-{n}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).unwrap();
+        Self(path)
+    }
+}
+
+impl Drop for TempData {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
     }
 }
 
@@ -793,4 +854,254 @@ fn shell_open_external_reports_a_handler_failure_as_io() {
     assert_eq!(error["code"], "Io");
     assert_eq!(error["retryable"], true);
     assert!(error["correlationId"].is_string());
+}
+
+#[test]
+fn session_restore_reopens_the_last_workspace_with_its_tabs_after_a_restart() {
+    let data = TempData::new("session-restore");
+    let root = TempWorkspace::new("session-restore");
+    let canonical = fs::canonicalize(&root.0).unwrap();
+    let workspace_id = {
+        let h = Harness::with_data_dir(&data.0);
+        let fresh = h.invoke("session_restore", json!({})).expect("restore");
+        assert!(
+            fresh["workspace"].is_null(),
+            "nothing persisted yet: {fresh}"
+        );
+        assert_eq!(fresh["tabs"], json!([]));
+        assert_eq!(fresh["persistence"]["available"], true);
+        assert_eq!(fresh["persistence"]["healthy"], true);
+        assert!(
+            fresh["persistence"]["databasePath"]
+                .as_str()
+                .unwrap()
+                .starts_with(data.0.to_str().unwrap()),
+            "{fresh}"
+        );
+        assert_eq!(fresh["notices"], json!([]));
+
+        let workspace = h.open_workspace(&root.0);
+        h.session(
+            "session_update",
+            json!({
+                "workspaceId": workspace["id"],
+                "tabs": [
+                    { "path": "README.md", "active": true, "viewMode": "preview",
+                      "cursor": { "line": 1, "column": 3 }, "anchor": { "line": 1, "column": 1 },
+                      "scrollLine": 1 },
+                    { "path": "src/main.rs", "active": false }
+                ],
+                "preferences": { "version": 1, "fontSize": 15 },
+                "layout": { "version": 1, "explorer": { "showHidden": true } }
+            }),
+        )
+        .expect("update");
+        h.flush();
+        workspace["id"].clone()
+    };
+
+    let h = Harness::with_data_dir(&data.0);
+    let restored = h.invoke("session_restore", json!({})).expect("restore");
+    assert_eq!(
+        restored["workspace"]["root"],
+        canonical.to_string_lossy().as_ref()
+    );
+    assert_ne!(
+        restored["workspace"]["id"], workspace_id,
+        "ids are per process"
+    );
+    let tabs = restored["tabs"].as_array().unwrap();
+    assert_eq!(tabs.len(), 2);
+    assert_eq!(tabs[0]["path"], "README.md");
+    assert_eq!(tabs[0]["active"], true);
+    assert_eq!(tabs[0]["viewMode"], "preview");
+    assert_eq!(tabs[0]["cursor"], json!({ "line": 1, "column": 3 }));
+    assert_eq!(tabs[0]["scrollLine"], 1);
+    assert_eq!(tabs[1]["path"], "src/main.rs");
+    assert_eq!(tabs[1]["active"], false);
+    assert!(tabs[1].get("cursor").is_none());
+    assert_eq!(restored["preferences"]["fontSize"], 15);
+    assert_eq!(restored["layout"]["explorer"]["showHidden"], true);
+    assert_eq!(restored["notices"], json!([]));
+    assert_eq!(
+        h.last_event("WorkspaceOpened")["payload"]["workspace"],
+        restored["workspace"],
+        "the explorer learns about the reopened workspace from the event"
+    );
+    assert_eq!(
+        h.invoke("workspace_current", json!({})).expect("current"),
+        restored["workspace"]
+    );
+
+    // A renderer reload: the same answer, no second reopen.
+    let again = h
+        .invoke("session_restore", json!({}))
+        .expect("restore again");
+    assert_eq!(again["workspace"], restored["workspace"]);
+    assert_eq!(again["tabs"], restored["tabs"]);
+    assert_eq!(
+        h.event_names()
+            .iter()
+            .filter(|n| *n == "WorkspaceOpened")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn session_recovery_round_trip_through_the_adapters() {
+    let data = TempData::new("session-recover");
+    let root = TempWorkspace::new("session-recover");
+    {
+        let h = Harness::with_data_dir(&data.0);
+        let workspace = h.open_workspace(&root.0);
+        for (path, text) in [
+            ("src/main.rs", "fn main() { unsaved() }\n"),
+            ("README.md", "# unsaved\n"),
+        ] {
+            let content = h.open_document(&workspace["id"], path);
+            let id = content["document"]["id"].clone();
+            h.doc(
+                "documents_update",
+                json!({ "documentId": id, "baseVersion": 1, "text": text }),
+            )
+            .expect("update");
+        }
+        h.flush();
+        // Death without a save: the disk still has the originals.
+        assert_eq!(
+            fs::read_to_string(root.0.join("src/main.rs")).unwrap(),
+            "fn main() {}"
+        );
+    }
+    // README changed on disk meanwhile; main.rs did not.
+    fs::write(root.0.join("README.md"), "# changed by someone else\n").unwrap();
+
+    let h = Harness::with_data_dir(&data.0);
+    let restored = h.invoke("session_restore", json!({})).expect("restore");
+    let workspace_id = restored["workspace"]["id"].clone();
+    let candidates = h
+        .session("session_candidates", json!({ "workspaceId": workspace_id }))
+        .expect("candidates");
+    let candidates = candidates.as_array().unwrap();
+    assert_eq!(candidates.len(), 2, "{candidates:?}");
+    assert_eq!(candidates[0]["path"], "README.md");
+    assert_eq!(candidates[0]["state"], "DISK_CHANGED");
+    assert_eq!(candidates[1]["path"], "src/main.rs");
+    assert_eq!(candidates[1]["state"], "SAME_AS_DISK");
+    assert_eq!(candidates[1]["size"], "fn main() { unsaved() }\n".len());
+    assert!(candidates[1]["updatedAt"].as_u64().unwrap() > 0);
+
+    let recovered = h
+        .session(
+            "session_recover",
+            json!({ "workspaceId": workspace_id, "path": "src/main.rs" }),
+        )
+        .expect("recover");
+    assert_eq!(recovered["text"], "fn main() { unsaved() }\n");
+    assert_eq!(recovered["document"]["dirty"], true);
+    assert_eq!(
+        recovered["document"]["externalModificationState"],
+        "UNCHANGED"
+    );
+    assert_eq!(
+        h.last_event("DocumentChanged")["payload"]["cause"],
+        "RECOVERED"
+    );
+    assert_eq!(
+        fs::read_to_string(root.0.join("src/main.rs")).unwrap(),
+        "fn main() {}",
+        "recovery never writes the disk"
+    );
+
+    let conflicted = h
+        .session(
+            "session_recover",
+            json!({ "workspaceId": workspace_id, "path": "README.md" }),
+        )
+        .expect("recover changed");
+    assert_eq!(conflicted["text"], "# unsaved\n");
+    assert_eq!(
+        conflicted["document"]["externalModificationState"],
+        "CONFLICTED"
+    );
+    assert_eq!(
+        h.last_event("DocumentExternalChangeDetected")["payload"]["previousState"],
+        "UNCHANGED"
+    );
+
+    // Both are open and dirty now: nothing left to offer; discarding is idempotent.
+    let none = h
+        .session("session_candidates", json!({ "workspaceId": workspace_id }))
+        .expect("candidates");
+    assert_eq!(none, json!([]));
+    h.session(
+        "session_discard",
+        json!({ "workspaceId": workspace_id, "path": "README.md" }),
+    )
+    .expect("discard");
+    let gone = h
+        .session(
+            "session_recover",
+            json!({ "workspaceId": workspace_id, "path": "README.md" }),
+        )
+        .unwrap_err();
+    assert!(
+        gone["code"] == "NotFound" || gone["code"] == "Conflict",
+        "{gone}"
+    );
+}
+
+#[test]
+fn session_requests_are_validated_before_touching_anything() {
+    let h = Harness::new();
+    let root = TempWorkspace::new("session-validate");
+    let workspace = h.open_workspace(&root.0);
+
+    let malformed = h.session("session_candidates", json!({})).unwrap_err();
+    assert_eq!(malformed["code"], "InvalidInput");
+    let unknown = h
+        .session("session_candidates", json!({ "workspaceId": "nope" }))
+        .unwrap_err();
+    assert_eq!(unknown["code"], "NotFound");
+    let traversal = h
+        .session(
+            "session_recover",
+            json!({ "workspaceId": workspace["id"], "path": "../secrets" }),
+        )
+        .unwrap_err();
+    assert_eq!(traversal["code"], "InvalidInput");
+    let missing = h
+        .session(
+            "session_recover",
+            json!({ "workspaceId": workspace["id"], "path": "README.md" }),
+        )
+        .unwrap_err();
+    assert_eq!(missing["code"], "NotFound");
+    let tabs_without_workspace = h
+        .session(
+            "session_update",
+            json!({ "tabs": [{ "path": "README.md" }] }),
+        )
+        .unwrap_err();
+    assert_eq!(tabs_without_workspace["code"], "InvalidInput");
+    let bad_tab_path = h
+        .session(
+            "session_update",
+            json!({ "workspaceId": workspace["id"], "tabs": [{ "path": "/etc/passwd" }] }),
+        )
+        .unwrap_err();
+    assert_eq!(bad_tab_path["code"], "InvalidInput");
+    h.session(
+        "session_discard",
+        json!({ "workspaceId": workspace["id"], "path": "README.md" }),
+    )
+    .expect("discarding nothing is fine");
+    let restored = h.invoke("session_restore", json!({})).expect("restore");
+    assert_eq!(
+        restored["tabs"],
+        json!([]),
+        "nothing was persisted by the refused requests"
+    );
+    assert_eq!(restored["workspace"]["id"], workspace["id"]);
 }

@@ -30,19 +30,20 @@ module that imports `@tauri-apps/api`.
 
 | Convention | Shape |
 |---|---|
-| Command names | `<domain>.<verb>` in TypeScript ↔ `<domain>_<snake_verb>` in Rust; one `request` object per command (`core.health`, `operations.list`, `operations.cancel`, `operations.startDemo`, `workspace.open`, `workspace.close`, `workspace.current`, `workspace.list`, `documents.open`, `documents.close`, `documents.update`, `documents.save`, `documents.reload`, `documents.status`, `documents.list`, `shell.openExternal`) |
+| Command names | `<domain>.<verb>` in TypeScript ↔ `<domain>_<snake_verb>` in Rust; one `request` object per command (`core.health`, `operations.list`, `operations.cancel`, `operations.startDemo`, `workspace.open`, `workspace.close`, `workspace.current`, `workspace.list`, `documents.open`, `documents.close`, `documents.update`, `documents.save`, `documents.reload`, `documents.status`, `documents.list`, `shell.openExternal`, `session.restore`, `session.candidates`, `session.recover`, `session.discard`, `session.update`) |
 | Error envelope | `CoreError { code, message, details?, retryable, correlationId? }`, `code ∈ InvalidInput, NotFound, PermissionDenied, Conflict, Cancelled, Timeout, Io, Internal, ProtocolMismatch` |
 | Event envelope | one channel `gritty://core/event`, payload `{ name, seq, workspaceId?, correlationId?, actor, payload }`; `seq` strictly increasing per process |
 | Identifiers | UUID v7 strings (`WorkspaceId`, `OperationId`, `DocumentId`, `AgentRunId`, `CorrelationId`), branded in TypeScript |
 | Timestamps | milliseconds since the Unix epoch, exported as `number` |
 | Actor | `{ type: "USER" } \| { type: "SYSTEM" } \| { type: "AGENT", runId } \| { type: "EXTERNAL" }` |
-| Versioning | `PROTOCOL_VERSION` (`MAJOR.MINOR.PATCH`, currently `1.2.0`) reported by `core.health`; the client refuses a different MAJOR with `ProtocolMismatch` |
+| Versioning | `PROTOCOL_VERSION` (`MAJOR.MINOR.PATCH`, currently `1.3.0`) reported by `core.health`; the client refuses a different MAJOR with `ProtocolMismatch` |
 
 Every command adapter runs its body behind a guard that creates a correlation id,
 opens a tracing span and converts a panic into `Internal`; a promise never hangs.
 Nothing is replayed after a renderer reload: the UI subscribes, then calls the
 domain's list command (`operations.list`, `workspace.current`, `documents.list`)
-to rehydrate.
+to rehydrate; `session.restore` (T060) reports the persisted layout on every
+call without reopening anything after the first.
 
 ## Asynchronous operation model
 
@@ -53,7 +54,9 @@ UI command → fast validation → operation created → operationId returned
 
 `Operation { id, kind, actor, workspaceId?, status, createdAt, startedAt?, finishedAt?,
 cancellationRequested, correlationId, progress?, error? }` with
-`CREATED → RUNNING → COMPLETED | FAILED | CANCELLED` (and `CREATED → CANCELLED`).
+`CREATED → RUNNING → COMPLETED | FAILED | CANCELLED` (and `CREATED → CANCELLED`);
+`INTERRUPTED` (T060) is terminal too and only ever assigned by startup
+reconciliation to durable operations the previous process left unfinished.
 The registry (`gritty_core::operation`) runs bodies on Tauri's tokio runtime with a
 child `CancellationToken` per operation: cancel before start finishes immediately
 and the body never runs; cancel during execution fires the token and aborts the
@@ -126,6 +129,20 @@ and language map: `docs/architecture/documents.md`.
 changes, command execution, decisions, logs, ChangeSets and agent edits so the
 UI can explain who did what. This is attribution, not event sourcing.
 
+## Session persistence and recovery (fixed by T060, ADR-014)
+
+SQLite (`crates/persistence`, `gritty_core::session`) at the platform app-data
+directory holds the last workspace, per-root tabs with view mode and cursor,
+editor preferences and layout (UI-owned JSON), window geometry, durable
+operation records and a full-text snapshot of every dirty buffer, taken from
+the core's buffer at most 2 s after a change. `session.restore` reopens the
+last root once per process; `session.candidates` compares snapshots with the
+disk (`SAME_AS_DISK | DISK_CHANGED | FILE_MISSING`); `session.recover` puts a
+snapshot back into the buffer (dirty, `CONFLICTED` or `DELETED_EXTERNALLY`)
+and never onto the disk; `session.update` stores what the UI owns. A damaged
+database is moved aside and replaced; an unusable one leaves the editor
+working without persistence. Details: `docs/architecture/persistence.md`.
+
 ## Shell (fixed by T050, ADR-013)
 
 `shell.openExternal { url }` is the only way content leaves the application:
@@ -137,7 +154,8 @@ never navigates (`on_navigation` guard) and holds no opener capability. See
 ## Event vocabulary (Operation* fixed by T010, Workspace{Opened,Closed} by T020, Document* by T030; other families named by their tasks)
 
 Workspace{Opened,Closed,Changed}; Document{Opened,Changed,Saved,ExternalChangeDetected,Closed};
-FileSystemBatchChanged; Operation{Started,Progress,Completed,Failed,Cancelled};
+PersistenceStatusChanged; FileSystemBatchChanged;
+Operation{Started,Progress,Completed,Failed,Cancelled};
 GitStatusChanged; ChangeSetUpdated; Workstream{Created,Changed};
 AgentRun{Started,Changed,Finished}; Decision{Requested,Resolved}.
 

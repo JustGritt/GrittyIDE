@@ -6,6 +6,7 @@ export {
   type EditorHost,
   type EditorTheme,
   type ScrollState,
+  type SelectionState,
   setEditorTheme,
 } from './editor-host';
 export { type CodeHighlighter, createMonacoHighlighter } from './highlighter';

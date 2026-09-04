@@ -363,6 +363,7 @@ impl WorkspaceManager {
                     actor,
                     workspace_id: Some(workspace.id),
                     correlation_id: correlation,
+                    durable: false,
                 };
                 let path = request.path.clone();
                 let operation = self.registry.start(spec, move |ctx| async move {
