@@ -61,6 +61,9 @@ pub struct OperationSpec {
     pub actor: Actor,
     pub workspace_id: Option<WorkspaceId>,
     pub correlation_id: CorrelationId,
+    /// Persist the lifecycle so a process death is reconciled to `INTERRUPTED`
+    /// at the next start (T060). Nothing sets it yet.
+    pub durable: bool,
 }
 
 /// What a body returns: an optional JSON result, or the error that fails the operation.
@@ -195,6 +198,7 @@ impl OperationRegistry {
             correlation_id: spec.correlation_id,
             progress: None,
             error: None,
+            durable: spec.durable,
         };
         self.lock().entries.insert(
             id.clone(),
@@ -490,6 +494,7 @@ mod tests {
             actor: Actor::User,
             workspace_id: None,
             correlation_id: CorrelationId::new(),
+            durable: false,
         }
     }
 

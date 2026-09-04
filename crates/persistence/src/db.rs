@@ -15,6 +15,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -32,6 +33,9 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct Database {
     conn: Mutex<Connection>,
     path: PathBuf,
+    /// Test hook: how many upcoming `write` calls fail before touching the
+    /// connection (see [`Database::inject_write_failures`]).
+    write_faults: AtomicU32,
 }
 
 /// What `Database::open` did.
@@ -90,6 +94,7 @@ impl Database {
             database: Self {
                 conn: Mutex::new(conn),
                 path: path.to_path_buf(),
+                write_faults: AtomicU32::new(0),
             },
             moved_aside,
             migrations,
@@ -105,6 +110,7 @@ impl Database {
         Ok(Self {
             conn: Mutex::new(conn),
             path: PathBuf::from(":memory:"),
+            write_faults: AtomicU32::new(0),
         })
     }
 
@@ -121,11 +127,28 @@ impl Database {
         work(&conn)
     }
 
+    /// Make the next `count` calls to [`Self::write`] fail as if the disk
+    /// refused them (test support for retry and backoff paths; production
+    /// code never calls this).
+    pub fn inject_write_failures(&self, count: u32) {
+        self.write_faults.store(count, Ordering::SeqCst);
+    }
+
     /// Run `work` inside one transaction; an error rolls everything back.
     pub fn write<T>(
         &self,
         work: impl FnOnce(&Transaction<'_>) -> Result<T, PersistenceError>,
     ) -> Result<T, PersistenceError> {
+        if self
+            .write_faults
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .is_ok()
+        {
+            return Err(PersistenceError::io(
+                "injected write failure",
+                std::io::Error::other("disk refused the write"),
+            ));
+        }
         let mut conn = self.lock();
         let tx = conn.transaction()?;
         let value = work(&tx)?;

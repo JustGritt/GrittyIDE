@@ -51,6 +51,17 @@ impl ContentHash {
         &self.0
     }
 
+    /// A hash read back from storage; `None` unless it has the exact
+    /// `sha256:<64 hex>` shape this type produces.
+    pub fn parse(raw: &str) -> Option<Self> {
+        let hex = raw.strip_prefix("sha256:")?;
+        (hex.len() == 64
+            && hex
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()))
+        .then(|| Self(raw.to_owned()))
+    }
+
     fn from_digest(digest: impl AsRef<[u8]>) -> Self {
         let mut hex = String::with_capacity(7 + 64);
         hex.push_str("sha256:");

@@ -193,6 +193,8 @@ pub enum DocumentChangeCause {
     Edit,
     Reload,
     ReadOnlyChanged,
+    /// The buffer was replaced with a recovery snapshot (T060).
+    Recovered,
 }
 
 /// Size bounds; tests lower them.
@@ -209,6 +211,31 @@ impl Default for DocumentLimits {
             max_bytes: MAX_DOCUMENT_BYTES,
         }
     }
+}
+
+/// The core's view of a buffer for the recovery snapshot writer (T060),
+/// taken from the core's text, never from the editor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BufferSnapshot {
+    pub workspace_id: WorkspaceId,
+    pub path: WorkspacePath,
+    pub encoding: DocumentEncoding,
+    pub saved_hash: ContentHash,
+    pub current_version: u64,
+    pub dirty: bool,
+    /// The full text, present only while the document is dirty (a clean or
+    /// binary document has nothing to recover).
+    pub text: Option<String>,
+}
+
+/// A dirty buffer persisted by a previous process, offered back through
+/// `session.recover` (T060).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecoveredBuffer {
+    pub text: String,
+    pub encoding: DocumentEncoding,
+    /// Hash of the disk content the snapshot was derived from.
+    pub saved_hash: ContentHash,
 }
 
 /// What the last disk check found, independent of the buffer.
@@ -285,6 +312,49 @@ impl Record {
             large_editing_enabled,
         };
         record.synchronize(snapshot, limits);
+        record
+    }
+
+    /// A document whose file is gone, rebuilt from a recovery snapshot alone
+    /// (T060): the buffer is the snapshot, `savedHash` the base it was derived
+    /// from, and the disk is observed as deleted, so the wire state is
+    /// `DELETED_EXTERNALLY` and dirty until the user recreates the file.
+    fn recovered(
+        id: DocumentId,
+        workspace_id: WorkspaceId,
+        path: WorkspacePath,
+        buffer: RecoveredBuffer,
+        limits: &DocumentLimits,
+    ) -> Self {
+        let language = language_id(&path).to_owned();
+        let hash = ContentHash::of_text(&buffer.text, buffer.encoding);
+        let large = buffer.text.len() as u64 >= limits.large_file_threshold;
+        let mut record = Self {
+            document: Document {
+                id,
+                workspace_id,
+                path,
+                encoding: buffer.encoding,
+                language_id: language,
+                saved_revision: 1,
+                saved_hash: buffer.saved_hash,
+                current_version: 1,
+                dirty: false,
+                read_only: false,
+                binary: false,
+                large_file_mode: large,
+                external_modification_state: ExternalModificationState::Unchanged,
+                size: 0,
+            },
+            buffer: Some(Buffer {
+                text: buffer.text,
+                hash,
+            }),
+            disk: DiskState::Deleted,
+            file_read_only: false,
+            large_editing_enabled: false,
+        };
+        record.refresh();
         record
     }
 
@@ -444,6 +514,213 @@ impl DocumentManager {
             .collect();
         documents.sort_by(|a, b| a.id.cmp(&b.id));
         documents
+    }
+
+    /// The buffer of an open document for the recovery writer (T060). `None`
+    /// when the id is unknown; the text is cloned only while dirty.
+    pub fn snapshot(&self, id: &DocumentId) -> Option<BufferSnapshot> {
+        let entry = self.lock_table().by_id.get(id).cloned()?;
+        let record = entry.lock();
+        let document = &record.document;
+        let text = record
+            .buffer
+            .as_ref()
+            .filter(|_| document.dirty)
+            .map(|buffer| buffer.text.clone());
+        Some(BufferSnapshot {
+            workspace_id: document.workspace_id.clone(),
+            path: document.path.clone(),
+            encoding: document.encoding,
+            saved_hash: document.saved_hash.clone(),
+            current_version: document.current_version,
+            dirty: document.dirty,
+            text,
+        })
+    }
+
+    /// The open document at `path`, without touching the disk.
+    pub fn find_by_path(
+        &self,
+        workspace_id: &WorkspaceId,
+        path: &WorkspacePath,
+    ) -> Option<Document> {
+        self.lookup_path(workspace_id, path)
+            .map(|entry| entry.lock().document.clone())
+    }
+
+    /// Open `path` and replace its buffer with a recovery snapshot (T060,
+    /// `session.recover`). Never touches the disk:
+    ///
+    /// - the file still has the snapshot's base hash → the buffer becomes the
+    ///   snapshot text and the document is dirty (`UNCHANGED`);
+    /// - the file changed since → the buffer is the snapshot, `savedHash` the
+    ///   snapshot's base, and the disk is observed as modified, so the document
+    ///   is `CONFLICTED` with both versions reachable (reload drops the
+    ///   snapshot, `save { force }` overwrites);
+    /// - the file is gone → a document built from the snapshot alone,
+    ///   `DELETED_EXTERNALLY` until `save { force }` recreates it;
+    /// - the document is already open and dirty → `Conflict`, nothing changes.
+    pub async fn open_recovered(
+        &self,
+        workspace_id: WorkspaceId,
+        path: WorkspacePath,
+        buffer: RecoveredBuffer,
+        actor: Actor,
+        correlation: CorrelationId,
+    ) -> Result<DocumentContent, CoreError> {
+        if buffer.text.len() as u64 > self.limits.max_bytes {
+            return Err(CoreError::invalid_input(
+                "text",
+                format!(
+                    "snapshot is {} bytes, above the {}-byte document limit",
+                    buffer.text.len(),
+                    self.limits.max_bytes
+                ),
+            ));
+        }
+        let (workspace, root) = self.workspaces.require(&workspace_id, &correlation)?;
+        if path.is_root() {
+            return Err(CoreError::invalid_input("path", "must name a file"));
+        }
+        let request = OpenDocumentRequest {
+            workspace_id: workspace.id.clone(),
+            path: path.clone(),
+            large_file_editing: None,
+        };
+        let opened = self.open(request, actor.clone(), correlation.clone()).await;
+        let entry = match opened {
+            Ok(content) => self.require_entry(&content.document.id)?,
+            Err(error) if error.code == CoreErrorCode::NotFound => {
+                let present = {
+                    let root = Arc::clone(&root);
+                    let path = path.clone();
+                    let max = self.limits.max_bytes;
+                    self.blocking(move || probe_file(&root, &path, max)).await?
+                };
+                if !matches!(present, DiskProbe::Missing) {
+                    return Err(error);
+                }
+                return self.insert_recovered(&workspace.id, path, buffer, &actor, &correlation);
+            }
+            Err(error) => return Err(error),
+        };
+        let _io = entry.io.lock().await;
+        let (text, hash) = self.hash_text(buffer.text, buffer.encoding).await?;
+        let (document, previous) = {
+            let mut record = entry.lock();
+            if record.document.dirty {
+                return Err(CoreError::conflict(format!(
+                    "{} has unsaved changes; the recovery snapshot was not applied",
+                    record.document.path
+                ))
+                .with_details(serde_json::json!({
+                    "documentId": record.document.id,
+                    "dirty": true,
+                })));
+            }
+            let previous = record.document.external_modification_state;
+            let same_base = record.document.saved_hash == buffer.saved_hash;
+            record.buffer = Some(Buffer { text, hash });
+            record.document.encoding = buffer.encoding;
+            record.document.binary = false;
+            if !same_base {
+                record.document.saved_hash = buffer.saved_hash;
+                record.disk = DiskState::Modified;
+            }
+            record.document.current_version += 1;
+            record.refresh();
+            (record.document.clone(), previous)
+        };
+        tracing::info!(
+            document = %document.id,
+            path = %document.path,
+            state = document.external_modification_state.as_str(),
+            "recovery snapshot applied to the buffer"
+        );
+        self.emit(
+            &document.workspace_id,
+            &actor,
+            &correlation,
+            CoreEvent::DocumentChanged(DocumentChangedPayload {
+                document: document.clone(),
+                cause: DocumentChangeCause::Recovered,
+            }),
+        );
+        if document.external_modification_state != previous {
+            self.emit(
+                &document.workspace_id,
+                &Actor::External,
+                &correlation,
+                CoreEvent::DocumentExternalChangeDetected(DocumentExternalChangePayload {
+                    document: document.clone(),
+                    previous_state: previous,
+                }),
+            );
+        }
+        let content = entry.lock().content();
+        Ok(content)
+    }
+
+    /// Register a document for a missing file from its snapshot (see
+    /// [`Self::open_recovered`]).
+    fn insert_recovered(
+        &self,
+        workspace_id: &WorkspaceId,
+        path: WorkspacePath,
+        buffer: RecoveredBuffer,
+        actor: &Actor,
+        correlation: &CorrelationId,
+    ) -> Result<DocumentContent, CoreError> {
+        let record = Record::recovered(
+            DocumentId::new(),
+            workspace_id.clone(),
+            path.clone(),
+            buffer,
+            &self.limits,
+        );
+        let entry = Arc::new(Entry {
+            record: Mutex::new(record),
+            io: tokio::sync::Mutex::new(()),
+        });
+        let content = {
+            let mut table = self.lock_table();
+            let key = (workspace_id.clone(), path);
+            if table.by_path.contains_key(&key) {
+                return Err(CoreError::conflict(format!(
+                    "{} was opened concurrently; retry the recovery",
+                    key.1
+                )));
+            }
+            let record = entry.lock();
+            table.by_path.insert(key, record.document.id.clone());
+            table
+                .by_id
+                .insert(record.document.id.clone(), Arc::clone(&entry));
+            record.content()
+        };
+        tracing::info!(
+            document = %content.document.id,
+            path = %content.document.path,
+            "document recovered from a snapshot; the file is missing on disk"
+        );
+        self.emit(
+            workspace_id,
+            actor,
+            correlation,
+            CoreEvent::DocumentOpened(DocumentOpenedPayload {
+                document: content.document.clone(),
+            }),
+        );
+        self.emit(
+            workspace_id,
+            actor,
+            correlation,
+            CoreEvent::DocumentChanged(DocumentChangedPayload {
+                document: content.document.clone(),
+                cause: DocumentChangeCause::Recovered,
+            }),
+        );
+        Ok(content)
     }
 
     pub async fn open(

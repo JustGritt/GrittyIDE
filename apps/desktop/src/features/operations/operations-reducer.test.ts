@@ -113,6 +113,7 @@ describe('operationsReducer', () => {
     });
     expect(state.byId[ID]?.error?.code).toBe('Internal');
     expect(isTerminal('FAILED')).toBe(true);
+    expect(isTerminal('INTERRUPTED')).toBe(true);
     expect(isTerminal('RUNNING')).toBe(false);
   });
 });

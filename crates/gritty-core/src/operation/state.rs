@@ -10,6 +10,10 @@
 //! Terminal states never change again: a late or duplicate completion signal
 //! is an [`InvalidTransition`], which the registry logs and drops. This is
 //! what guarantees that a cancelled operation never later shows as completed.
+//!
+//! `INTERRUPTED` (T060) is terminal as well and is never reached by a live
+//! transition: startup reconciliation assigns it to durable operations that
+//! were still `CREATED` or `RUNNING` when the previous process died.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -22,6 +26,9 @@ pub enum OperationStatus {
     Completed,
     Failed,
     Cancelled,
+    /// The process died while the operation was running (persisted, durable
+    /// operations only); assigned at startup, never by the registry.
+    Interrupted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -33,7 +40,10 @@ pub struct InvalidTransition {
 
 impl OperationStatus {
     pub const fn is_terminal(self) -> bool {
-        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
+        matches!(
+            self,
+            Self::Completed | Self::Failed | Self::Cancelled | Self::Interrupted
+        )
     }
 
     pub const fn can_transition_to(self, to: Self) -> bool {
@@ -61,7 +71,7 @@ mod tests {
     use super::OperationStatus::*;
     use super::*;
 
-    const ALL: [OperationStatus; 5] = [Created, Running, Completed, Failed, Cancelled];
+    const ALL: [OperationStatus; 6] = [Created, Running, Completed, Failed, Cancelled, Interrupted];
 
     #[test]
     fn only_the_documented_transitions_are_valid() {
@@ -83,7 +93,7 @@ mod tests {
 
     #[test]
     fn terminal_states_never_change() {
-        for from in [Completed, Failed, Cancelled] {
+        for from in [Completed, Failed, Cancelled, Interrupted] {
             assert!(from.is_terminal());
             for to in ALL {
                 assert_eq!(from.transition(to), Err(InvalidTransition { from, to }));
@@ -96,6 +106,10 @@ mod tests {
     #[test]
     fn serializes_screaming_snake_case() {
         assert_eq!(serde_json::to_string(&Cancelled).unwrap(), "\"CANCELLED\"");
+        assert_eq!(
+            serde_json::to_string(&Interrupted).unwrap(),
+            "\"INTERRUPTED\""
+        );
         let back: OperationStatus = serde_json::from_str("\"RUNNING\"").unwrap();
         assert_eq!(back, Running);
     }

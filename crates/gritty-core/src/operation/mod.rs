@@ -86,6 +86,11 @@ pub struct Operation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub error: Option<CoreError>,
+    /// Recorded in the session database so a process death leaves it
+    /// `INTERRUPTED` (T060). Core-side only: not on the wire.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub durable: bool,
 }
 
 #[cfg(test)]
@@ -107,6 +112,7 @@ mod tests {
             correlation_id: CorrelationId::from_raw("corr-1"),
             progress: None,
             error: None,
+            durable: true,
         };
         let json = serde_json::to_value(&op).unwrap();
         assert_eq!(
@@ -122,6 +128,13 @@ mod tests {
             })
         );
         let back: Operation = serde_json::from_value(json).unwrap();
-        assert_eq!(back, op);
+        assert!(!back.durable, "durable never crosses the wire");
+        assert_eq!(
+            back,
+            Operation {
+                durable: false,
+                ..op
+            }
+        );
     }
 }

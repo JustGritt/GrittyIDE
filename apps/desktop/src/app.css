@@ -218,6 +218,10 @@ button:disabled {
   color: var(--muted);
 }
 
+.ops__row--interrupted .ops__status {
+  color: var(--muted);
+}
+
 .ops__head {
   display: flex;
   gap: 0.75rem;

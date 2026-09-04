@@ -45,6 +45,16 @@ impl DocumentEncoding {
     pub const fn has_bom(self) -> bool {
         matches!(self, Self::Utf8Bom)
     }
+
+    /// The inverse of `Display` / the wire form, for values read back from storage.
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "utf-8" => Some(Self::Utf8),
+            "utf-8-bom" => Some(Self::Utf8Bom),
+            "binary" => Some(Self::Binary),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for DocumentEncoding {
