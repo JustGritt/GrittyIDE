@@ -136,6 +136,35 @@ Implemented in `crates/workspace/src/{detect,file}.rs` and
   integrity check or was written by a newer version never crashes or loops
   the application; it is moved aside or the layer turns itself off and says so.
 
+## Terminal sessions (T090, ADR-015)
+
+A terminal is the user's own shell with the user's own privileges: it is not a
+sandbox and does not pretend to be one. What the boundary does buy:
+
+- **The WebView never gets a shell or process API.** It can only ask for
+  `terminal.spawn/write/resize/kill/list`; the PTY lives in the core.
+- **A shell starts inside the workspace.** `cwd` is a workspace-relative
+  `WorkspacePath` resolved through the root, so a request cannot start a shell
+  outside it. The user may `cd` afterwards — this bounds where Gritty starts a
+  shell, not what the user may do in one.
+- **An explicit `shell` must be an absolute path to an executable file**, and a
+  candidate that is not is an error rather than a silent fall-through to some
+  other shell.
+- **The child inherits Gritty's environment** — which is the user's own, plus
+  whatever the launcher set — with `TERM` and `COLORTERM` forced. Nothing is
+  injected that names a workspace, a document or a session.
+- **Terminal content never leaves the process.** Output is not persisted (a
+  T090 non-goal) and never logged; input is never logged. A shell session
+  routinely contains secrets: keys echoed into a command line, tokens printed
+  by a tool, a password prompt that did not disable echo. Only session ids,
+  pids, sizes and byte counts appear in logs and events.
+- **Sessions are bounded** (16 concurrent, 64 KiB per write, 1 MiB of pending
+  output each) so a stuck renderer cannot exhaust the machine.
+- **Process trees are terminated on close and on exit** (SIGHUP → SIGTERM →
+  SIGKILL over the shell's group and the terminal's foreground group). A
+  process that puts itself in a new session survives, as it does when any
+  terminal closes.
+
 ## Process boundaries
 
 Agents, language servers, terminals, indexers and external tools run outside the

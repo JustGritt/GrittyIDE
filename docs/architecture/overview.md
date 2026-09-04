@@ -143,6 +143,17 @@ and never onto the disk; `session.update` stores what the UI owns. A damaged
 database is moved aside and replaced; an unusable one leaves the editor
 working without persistence. Details: `docs/architecture/persistence.md`.
 
+## Terminal sessions (fixed by T090, ADR-015)
+
+`terminal.spawn/write/resize/kill/list` over `gritty_core::terminal`, with the
+PTY itself behind `gritty-terminal`'s `PtyHost`. A session starts the user's
+login shell in a workspace-relative directory; output is coalesced and rate
+limited to ~60 Hz with a 1 MiB cap whose overflow is reported as
+`truncatedBytes` rather than hidden; `TerminalExited` lands exactly once, after
+the session's last output. Termination escalates SIGHUP → SIGTERM → SIGKILL
+over the shell's process group and the terminal's foreground group. Terminal
+content is never persisted or logged. See `terminal.md`.
+
 ## Shell (fixed by T050, ADR-013)
 
 `shell.openExternal { url }` is the only way content leaves the application:
@@ -151,10 +162,10 @@ injected opener hands it to the system handler from the Rust side; the WebView
 never navigates (`on_navigation` guard) and holds no opener capability. See
 `docs/architecture/markdown.md`.
 
-## Event vocabulary (Operation* fixed by T010, Workspace{Opened,Closed} by T020, Document* by T030; other families named by their tasks)
+## Event vocabulary (Operation* fixed by T010, Workspace{Opened,Closed} by T020, Document* by T030, Terminal* by T090; other families named by their tasks)
 
 Workspace{Opened,Closed,Changed}; Document{Opened,Changed,Saved,ExternalChangeDetected,Closed};
-PersistenceStatusChanged; FileSystemBatchChanged;
+PersistenceStatusChanged; FileSystemBatchChanged; Terminal{Output,Exited};
 Operation{Started,Progress,Completed,Failed,Cancelled};
 GitStatusChanged; ChangeSetUpdated; Workstream{Created,Changed};
 AgentRun{Started,Changed,Finished}; Decision{Requested,Resolved}.

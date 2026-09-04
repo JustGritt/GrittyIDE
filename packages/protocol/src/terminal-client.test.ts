@@ -105,12 +105,12 @@ describe('terminal client', () => {
     });
 
     expect(onOutput).toHaveBeenCalledTimes(1);
-    const output = onOutput.mock.calls[0][0] as EventOf<'TerminalOutput'>;
-    expect(output.payload.data).toBe('hello\r\n');
-    const exit = onExit.mock.calls[0][0] as EventOf<'TerminalExited'>;
+    const output = onOutput.mock.calls[0]?.[0] as EventOf<'TerminalOutput'> | undefined;
+    expect(output?.payload.data).toBe('hello\r\n');
     expect(onExit).toHaveBeenCalledTimes(1);
-    expect(exit.payload.terminal.status).toBe('EXITED');
-    expect(exit.payload.code).toBe(0);
+    const exit = onExit.mock.calls[0]?.[0] as EventOf<'TerminalExited'> | undefined;
+    expect(exit?.payload.terminal.status).toBe('EXITED');
+    expect(exit?.payload.code).toBe(0);
   });
 
   it('reports truncated output so a gap is never presented as continuous', async () => {
@@ -127,8 +127,8 @@ describe('terminal client', () => {
       payload: { terminalId, data: 'tail of the flood', truncatedBytes: 4096 },
     });
 
-    const event = onOutput.mock.calls[0][0] as EventOf<'TerminalOutput'>;
-    expect(event.payload.truncatedBytes).toBe(4096);
+    const event = onOutput.mock.calls[0]?.[0] as EventOf<'TerminalOutput'> | undefined;
+    expect(event?.payload.truncatedBytes).toBe(4096);
   });
 
   it('surfaces a core rejection as a CoreError', async () => {

@@ -20,6 +20,7 @@ requires updating the relevant ADR.
 | [ADR-012](ADR-012-monaco-editor-binding.md) | Monaco editor binding: one model per document, lazy reads, line-ending policy, workers | Accepted |
 | [ADR-013](ADR-013-markdown-preview.md) | Markdown preview: markdown-it + DOMPurify allowlist, link resolution, `shell.openExternal` | Accepted |
 | [ADR-014](ADR-014-session-persistence.md) | Session persistence and crash recovery: SQLite schema, snapshot writer, restore protocol, failure policy | Accepted |
+| [ADR-015](ADR-015-terminal-pty.md) | Terminal sessions over a PTY: portable-pty, output batching, process-tree termination, shell and environment policy | Accepted |
 
 Template:
 
