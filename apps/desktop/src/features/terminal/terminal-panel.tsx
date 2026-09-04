@@ -1,5 +1,7 @@
+import { useEffect, useRef } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
 import type { TerminalLayout } from '../session/persisted-layout';
+import { shouldStartFirstTerminal } from './auto-start';
 import { selectedProfile, shellName, spawnShell } from './terminal-profiles';
 import { describeTerminal } from './terminal-reducer';
 import { TerminalSettings } from './terminal-settings';
@@ -20,21 +22,51 @@ function describeCwd(session: { cwd?: string }): string {
  */
 export function TerminalPanel({
   terminals,
+  open,
   settings,
   onSettingsChange,
 }: {
   terminals: TerminalsController;
+  /**
+   * Whether the dock is expanded. The panel stays mounted while collapsed so
+   * xterm keeps its scrollback, so this is the only way it can tell that the
+   * user actually asked to see a terminal.
+   */
+  open: boolean;
   /** The persisted terminal settings (T095): shell, custom shells, font. */
   settings: TerminalLayout;
   onSettingsChange: (patch: Partial<TerminalLayout>) => void;
 }) {
-  const { workspaceId, active, error, profiles } = terminals;
+  const { workspaceId, active, error, profiles, ready } = terminals;
   // A remembered shell that no longer exists falls back to the default rather
   // than leaving the picker showing something that cannot start.
   const profile = selectedProfile(profiles, settings.profilePath);
   // A broken custom entry belongs in the settings, where it can be explained
   // or removed — not in a menu of things to start.
   const startable = profiles.filter((candidate) => candidate.available);
+
+  // Opening the dock onto nothing starts a shell (T046). The latch is per
+  // opening, so closing the last tab leaves the dock empty rather than
+  // immediately growing another one, and a shell that fails to start is not
+  // retried in a loop.
+  const sessions = terminals.terminals.length;
+  const started = useRef(false);
+  // Held in a ref so the effect depends only on the conditions, not on a
+  // controller whose identity changes every render.
+  const startFirst = useRef<() => void>(() => {});
+  startFirst.current = () => void terminals.spawn(workspaceId, spawnShell(profile));
+  useEffect(() => {
+    if (!open) {
+      started.current = false;
+      return;
+    }
+    if (
+      !shouldStartFirstTerminal({ open, ready, sessions, startedForThisOpening: started.current })
+    )
+      return;
+    started.current = true;
+    startFirst.current();
+  }, [open, ready, sessions]);
 
   return (
     <section className="terminal-panel" aria-label="Terminals">

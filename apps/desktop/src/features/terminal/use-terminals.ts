@@ -29,6 +29,11 @@ export function useTerminals(customShells: readonly string[] = []) {
   const [state, dispatch] = useReducer(terminalsReducer, initialTerminalsState);
   const [error, setError] = useState<CoreError | null>(null);
   const [profiles, setProfiles] = useState<TerminalProfile[]>([]);
+  // Both first answers from the core: which sessions already exist, and which
+  // shells there are. Until both have landed the UI does not know enough to
+  // start a terminal on the user's behalf (see `auto-start.ts`).
+  const [adopted, setAdopted] = useState(false);
+  const [profiled, setProfiled] = useState(false);
   const bus = useMemo(createOutputBus, []);
   // Read inside the event handler, which is registered once.
   const busRef = useRef(bus);
@@ -61,10 +66,17 @@ export function useTerminals(customShells: readonly string[] = []) {
     // on a workspace: a session does not need one.
     core.terminal.list().then(
       (terminals) => {
-        if (active) dispatch({ type: 'rehydrate', terminals });
+        if (!active) return;
+        dispatch({ type: 'rehydrate', terminals });
+        setAdopted(true);
       },
       (cause: unknown) => {
-        if (active) setError(toCoreError(cause));
+        if (!active) return;
+        setError(toCoreError(cause));
+        // Settled, not successful. A core that cannot list its sessions will
+        // not spawn one either; leaving the UI waiting forever is worse than
+        // letting the attempt fail visibly.
+        setAdopted(true);
       },
     );
     return () => {
@@ -85,10 +97,15 @@ export function useTerminals(customShells: readonly string[] = []) {
     // must not stop terminals working: the picker just shows the default.
     core.terminal.profiles({ custom }).then(
       (found) => {
-        if (active) setProfiles(found);
+        if (!active) return;
+        setProfiles(found);
+        setProfiled(true);
       },
       (cause: unknown) => {
-        if (active) setError(toCoreError(cause));
+        if (!active) return;
+        setError(toCoreError(cause));
+        // As above: the picker falls back to the core's own default shell.
+        setProfiled(true);
       },
     );
     return () => {
@@ -166,6 +183,8 @@ export function useTerminals(customShells: readonly string[] = []) {
   return {
     terminals,
     profiles,
+    /** The core has answered both opening questions; see `auto-start.ts`. */
+    ready: adopted && profiled,
     active: selectActive(state),
     workspaceId: state.workspaceId,
     bus,

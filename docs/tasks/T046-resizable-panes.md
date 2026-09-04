@@ -1,4 +1,4 @@
-# Task T046 — Resizable panes
+# Task T046 — Resizable panes, and a terminal on opening
 
 - **Phase:** 1A
 - **Status:** review
@@ -50,6 +50,9 @@ right home for pane sizes.
    stored size outside the current bounds is clamped rather than discarded.
 5. The terminal dock's gutter only exists while the dock is open.
 6. Dragging does not re-render the application per pointer event.
+7. Opening the terminal dock onto no sessions starts one, once per opening,
+   with the user's chosen shell — never before the core has said which sessions
+   already exist and which shells there are.
 
 ## Failure behavior
 
@@ -57,10 +60,14 @@ right home for pane sizes.
   or overlapping track.
 - A blob written before this task, or carrying junk, falls back to the current
   defaults — the same rule every other field in the blob follows.
+- A shell that fails to start on opening reports its error envelope once and is
+  not retried; the user can still press "New terminal".
 
 ## Acceptance criteria
 
 - Both gutters drag smoothly, stop at their bounds, and survive a restart.
+- Opening the terminal dock shows a live shell without a second click; closing
+  the last tab leaves the dock empty rather than growing another.
 - Tab reaches each gutter; arrows move it; the announced values are right.
 - Resizing the dock reflows the terminal (its grid follows) without clearing it.
 - No visible jank while dragging with a document and a terminal open.
@@ -68,7 +75,8 @@ right home for pane sizes.
 ## Tests required
 
 - Vitest: the geometry (clamping, delta direction, keyboard steps, bounds from
-  a container) as pure functions; layout blob round-trip and sanitizing.
+  a container) as pure functions; layout blob round-trip and sanitizing; the
+  auto-start predicate, including its two "do not annoy" cases.
 - Manual: drag both gutters, keyboard-resize both, double-click to reset,
   restart and confirm the sizes came back.
 
@@ -79,6 +87,9 @@ right home for pane sizes.
 ## Completion report
 
 ### Summary
+
+Two draggable gutters plus one ergonomics fix: opening the terminal dock now
+starts a shell instead of showing an empty panel with a button.
 
 Two draggable gutters: one between the sidebar and the editor, one on the
 terminal dock's top edge. Both are real `separator` widgets — focusable, arrow
@@ -104,13 +115,19 @@ the renderer-blocking work the layout must not add.
   gutters and their bounds.
 - `apps/desktop/src/app.css`: the gutter styles, the sidebar grid track, the
   dock height.
+- `apps/desktop/src/features/terminal/auto-start.ts` (new): the predicate
+  deciding whether opening the dock should start a shell, and six tests.
+- `apps/desktop/src/features/terminal/use-terminals.ts`: a `ready` flag — both
+  opening questions to the core answered.
+- `apps/desktop/src/features/terminal/terminal-panel.tsx`: takes `open`, runs
+  the auto-start effect.
 - `biome.json`: `useSemanticElements` off for `splitter.tsx` (see below).
 
 ### Tests actually executed
 
 | Command | Result |
 |---|---|
-| `pnpm exec vitest run` | 263 pass across 42 files (15 new) |
+| `pnpm exec vitest run` | 269 pass across 43 files (21 new) |
 | `pnpm check` | fully green — every gate, including the generated-types guard |
 | `cargo test --workspace` | 279 pass (unchanged; no Rust touched) |
 
@@ -144,6 +161,13 @@ something with a pointer, which the agent cannot do.
   the file-scoped override is the honest form.
 - **The dock's gutter only exists while the dock is open.** An invisible tab
   stop resizing a collapsed panel is worse than no gutter.
+- **Auto-start is a pure predicate, not an effect full of conditions.** There
+  is no component testing set up (jsdom is present, no testing-library), so the
+  decision lives in `auto-start.ts` where it can be tested and the effect stays
+  three lines. Its three guards are all about not being annoying: wait for the
+  core's first answers so a reload does not duplicate a session or start the
+  wrong shell; never a second session; once per opening, so closing the last
+  tab actually closes it and a failed spawn does not loop.
 
 ### Known limitations
 
@@ -159,6 +183,8 @@ something with a pointer, which the agent cannot do.
 - **The stacked layout below 60rem has no vertical gutter**; the sidebar height
   there is fixed by the existing media query.
 - **Sizes are global, not per workspace.** The layout blob has always been.
+- **Auto-start is not configurable.** Someone who wants an empty dock has to
+  close the tab each time. A setting is cheap to add if anyone asks.
 - **The editor's minimums are two constants in `App.tsx` and one `22.5rem` in
   the stylesheet.** They must agree; nothing enforces that they do.
 
@@ -167,7 +193,8 @@ something with a pointer, which the agent cannot do.
 - A settings surface, or a menu item, to reset the layout — double-click on a
   gutter is undiscoverable on its own.
 - Persist and restore the dock's open/closed state; it is React state today and
-  resets on every launch.
+  resets on every launch. Note that persisting it *open* would make the app
+  start a shell on every launch, which deserves its own thought.
 - Keep the editor's minimum in one place once there is somewhere sensible to
   share a constant between the stylesheet and the shell.
 

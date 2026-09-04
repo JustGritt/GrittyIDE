@@ -198,6 +198,7 @@ export function App() {
         <div className="shell__dock-body" hidden={!terminalOpen}>
           <TerminalPanel
             terminals={terminals}
+            open={terminalOpen}
             settings={layout.terminal}
             onSettingsChange={(patch) =>
               setLayout((current) => ({ ...current, terminal: { ...current.terminal, ...patch } }))
