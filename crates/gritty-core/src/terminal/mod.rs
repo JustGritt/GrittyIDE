@@ -31,9 +31,9 @@ use crate::protocol::ids::{CorrelationId, TerminalId};
 use crate::protocol::time::Timestamp;
 use crate::workspace::WorkspaceManager;
 use wire::{
-    KillTerminalRequest, ListProfilesRequest, ResizeTerminalRequest, SpawnTerminalRequest,
-    Terminal, TerminalExitedPayload, TerminalOutputPayload, TerminalProfile, TerminalStatus,
-    WriteTerminalRequest,
+    KillTerminalRequest, ListProfilesRequest, RenameTerminalRequest, ResizeTerminalRequest,
+    SpawnTerminalRequest, Terminal, TerminalExitedPayload, TerminalOutputPayload, TerminalProfile,
+    TerminalStatus, WriteTerminalRequest,
 };
 
 /// Concurrent sessions allowed. Each one costs a shell, two threads and a
@@ -44,6 +44,11 @@ pub const MAX_SESSIONS: usize = 16;
 /// Custom shells the settings may add. A bound, like every other list the
 /// renderer can grow: the picker is a menu, not a database.
 pub const MAX_CUSTOM_SHELLS: usize = 16;
+
+/// Longest label `terminal.rename` accepts, in characters rather than bytes:
+/// the bound exists so a tab stays a tab, and a tab's width is measured in
+/// what is drawn, not in how many bytes UTF-8 spent on it.
+pub const MAX_TERMINAL_NAME_CHARS: usize = 64;
 
 /// Largest single `terminal.write`. A paste is legitimate; a megabyte from the
 /// renderer in one command is not, and the PTY would block on it anyway.
@@ -201,6 +206,7 @@ impl TerminalManager {
             shell: shell
                 .map(|path| path.display().to_string())
                 .unwrap_or_else(|| "$SHELL".into()),
+            name: None,
             pid: session.pid(),
             status: TerminalStatus::Running,
             cols: size.cols,
@@ -304,6 +310,21 @@ impl TerminalManager {
             session.kill();
         }
         Ok(terminal)
+    }
+
+    /// `terminal.rename`: give a session a label, or clear it.
+    ///
+    /// Allowed on an ended session too. Naming one after the fact — "this is
+    /// the build that failed" — is exactly when a label earns its keep, and
+    /// refusing would be a rule with no purpose behind it.
+    pub fn rename(&self, request: RenameTerminalRequest) -> Result<Terminal, CoreError> {
+        let name = normalize_name(request.name.as_deref())?;
+        let mut sessions = self.lock();
+        let entry = sessions
+            .get_mut(&request.terminal_id)
+            .ok_or_else(|| unknown(&request.terminal_id))?;
+        entry.terminal.name = name;
+        Ok(entry.terminal.clone())
     }
 
     /// `terminal.list`: every session, running and ended, newest last.
@@ -504,6 +525,31 @@ fn exited(id: &TerminalId) -> CoreError {
 /// Map the PTY layer's failures onto the error envelope. A caller mistake (a
 /// shell that does not exist, a directory that is not one) must not look like
 /// an infrastructure failure, and vice versa.
+/// Trim, then reject what a tab cannot show.
+///
+/// Blank clears the label rather than setting an empty one: a tab with no text
+/// is unclickable, and "clear it" is what a user who empties the field means.
+/// Control characters are refused because this string is drawn straight into
+/// the tab strip, and a name is user input like any other (`security.md`).
+fn normalize_name(raw: Option<&str>) -> Result<Option<String>, CoreError> {
+    let Some(trimmed) = raw.map(str::trim).filter(|name| !name.is_empty()) else {
+        return Ok(None);
+    };
+    if trimmed.chars().any(char::is_control) {
+        return Err(CoreError::invalid_input(
+            "name",
+            "must not contain control characters",
+        ));
+    }
+    if trimmed.chars().count() > MAX_TERMINAL_NAME_CHARS {
+        return Err(CoreError::invalid_input(
+            "name",
+            format!("at most {MAX_TERMINAL_NAME_CHARS} characters"),
+        ));
+    }
+    Ok(Some(trimmed.to_owned()))
+}
+
 fn to_core_error(error: &TerminalError) -> CoreError {
     match error {
         TerminalError::Cwd { .. } => CoreError::invalid_input("cwd", error.to_string()),
@@ -1263,5 +1309,107 @@ mod tests {
             listed.iter().filter(|t| t.workspace_id.is_none()).count(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn a_session_can_be_named_and_unnamed() {
+        let h = start();
+        let terminal = h.spawn();
+        assert_eq!(terminal.name, None, "a session starts with no label");
+
+        let named = h
+            .manager
+            .rename(RenameTerminalRequest {
+                terminal_id: terminal.id.clone(),
+                name: Some("  claude  ".into()),
+            })
+            .expect("rename");
+        assert_eq!(named.name.as_deref(), Some("claude"), "trimmed");
+        assert_eq!(
+            h.manager.list()[0].name.as_deref(),
+            Some("claude"),
+            "the registry keeps it, so a renderer reload does not lose it"
+        );
+
+        // Emptying the field means "clear it", not "set an empty label": a tab
+        // with no text is unclickable.
+        for blank in [Some("   ".to_owned()), Some(String::new()), None] {
+            let cleared = h
+                .manager
+                .rename(RenameTerminalRequest {
+                    terminal_id: terminal.id.clone(),
+                    name: blank,
+                })
+                .expect("rename");
+            assert_eq!(cleared.name, None);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_name_a_tab_cannot_show_is_refused() {
+        let h = start();
+        let terminal = h.spawn();
+
+        for bad in [
+            "two\nlines".to_owned(),
+            "escape\u{1b}[31m".to_owned(),
+            "x".repeat(MAX_TERMINAL_NAME_CHARS + 1),
+        ] {
+            let error = h
+                .manager
+                .rename(RenameTerminalRequest {
+                    terminal_id: terminal.id.clone(),
+                    name: Some(bad.clone()),
+                })
+                .expect_err("refused");
+            assert_eq!(error.code, CoreErrorCode::InvalidInput, "{bad:?}");
+        }
+
+        // The bound counts what is drawn, not what UTF-8 spent.
+        let wide = "é".repeat(MAX_TERMINAL_NAME_CHARS);
+        assert!(
+            h.manager
+                .rename(RenameTerminalRequest {
+                    terminal_id: terminal.id.clone(),
+                    name: Some(wide),
+                })
+                .is_ok(),
+            "64 characters is 64 characters whatever they cost in bytes"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_ended_session_can_still_be_named() {
+        // "This is the build that failed" is exactly when a label earns its
+        // keep, and that is known only after it ended.
+        let h = start();
+        let terminal = h.spawn();
+        h.host.last().finish(TerminalExit {
+            code: Some(1),
+            signal: None,
+        });
+
+        let named = h
+            .manager
+            .rename(RenameTerminalRequest {
+                terminal_id: terminal.id,
+                name: Some("failed build".into()),
+            })
+            .expect("an ended session is still a session");
+        assert_eq!(named.status, TerminalStatus::Exited);
+        assert_eq!(named.name.as_deref(), Some("failed build"));
+    }
+
+    #[tokio::test]
+    async fn renaming_an_unknown_session_is_not_found() {
+        let h = start();
+        let error = h
+            .manager
+            .rename(RenameTerminalRequest {
+                terminal_id: TerminalId::new(),
+                name: Some("nope".into()),
+            })
+            .expect_err("no such session");
+        assert_eq!(error.code, CoreErrorCode::NotFound);
     }
 }

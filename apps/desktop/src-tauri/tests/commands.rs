@@ -1181,6 +1181,37 @@ fn a_relative_cwd_without_a_workspace_is_invalid_input() {
 }
 
 #[test]
+fn a_terminal_can_be_named_and_the_name_survives_a_relist() {
+    let (harness, _dir, _workspace, terminal) = terminal_harness();
+
+    let named = harness
+        .terminal(
+            "terminal_rename",
+            json!({ "terminalId": terminal["id"], "name": "  claude  " }),
+        )
+        .expect("rename");
+    assert_eq!(named["name"], "claude");
+
+    // The name is core state, so a renderer that reloads and re-lists gets it
+    // back with the session rather than losing it.
+    let listed = harness.invoke("terminal_list", json!({})).expect("list");
+    assert_eq!(listed[0]["name"], "claude");
+
+    let cleared = harness
+        .terminal("terminal_rename", json!({ "terminalId": terminal["id"] }))
+        .expect("clear");
+    assert!(cleared.get("name").is_none(), "{cleared}");
+
+    let error = harness
+        .terminal(
+            "terminal_rename",
+            json!({ "terminalId": terminal["id"], "name": "two\nlines" }),
+        )
+        .expect_err("a tab cannot draw a newline");
+    assert_eq!(error["code"], "InvalidInput");
+}
+
+#[test]
 fn terminal_profiles_reports_what_the_host_can_start() {
     let harness = Harness::new();
 

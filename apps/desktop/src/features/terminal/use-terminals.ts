@@ -1,5 +1,6 @@
 import {
   type CoreError,
+  type RenameTerminalRequest,
   type SpawnTerminalRequest,
   type Terminal,
   type TerminalId,
@@ -162,6 +163,21 @@ export function useTerminals(customShells: readonly string[] = []) {
     }
   }, []);
 
+  /**
+   * Label a session, or clear it with `null`. The name is core state, so it
+   * survives a renderer reload with the session it belongs to.
+   */
+  const rename = useCallback(async (terminalId: TerminalId, name: string | null) => {
+    try {
+      const request: RenameTerminalRequest = { terminalId };
+      if (name !== null) request.name = name;
+      dispatch({ type: 'snapshot', terminal: await core.terminal.rename(request) });
+      setError(null);
+    } catch (cause: unknown) {
+      setError(toCoreError(cause));
+    }
+  }, []);
+
   const activate = useCallback((terminalId: TerminalId) => {
     dispatch({ type: 'activate', terminalId });
   }, []);
@@ -192,6 +208,7 @@ export function useTerminals(customShells: readonly string[] = []) {
     spawn,
     close,
     kill,
+    rename,
     activate,
     write,
     resize,

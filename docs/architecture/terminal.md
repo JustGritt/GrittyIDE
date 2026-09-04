@@ -86,6 +86,30 @@ leaves its shells running, and the panel keeps showing them: the core does not
 kill them, so a UI that hid them would leave the user with processes they could
 neither see nor terminate.
 
+## Naming a session (T047)
+
+`terminal.rename` gives a session a label, and the tab shows it instead of the
+shell's name. The shell is the fallback, not the answer: once sessions hold an
+agent, a dev server and a build, three tabs reading "zsh" identify none of
+them.
+
+The label is **core state**, not renderer state. `terminal.list` is what
+rehydrates the panel after a renderer reload, so a name kept only in the
+renderer would vanish while the session it described kept running. It returns
+the updated snapshot like `resize` and `kill` do, and emits no event — there is
+nothing another subscriber needs to react to.
+
+A blank name clears the label rather than setting an empty one; a tab with no
+text is unclickable. Control characters are refused and the length is bounded
+in characters, not bytes, because the bound exists so a tab stays a tab and a
+tab's width is measured in what is drawn. An ended session can still be
+renamed: "this is the build that failed" is exactly when a label earns its
+keep, and that is only known afterwards.
+
+Renaming is manual. Detecting what a session is *running* — so a tab could
+label itself `claude` — is shell integration (OSC 133 and the process title),
+which is a T090 non-goal and a task of its own.
+
 ## Choosing a shell (T095)
 
 `terminal.profiles` reports the shells the picker should offer. Discovery lives
@@ -146,7 +170,8 @@ shell stops wrapping at the old width, and the scrollback survives.
   session database, and nothing is logged. Terminal content is user data and
   routinely contains secrets.
 - **No shell integration or splits.** T090 is a spike; these are product
-  features with their own tasks.
+  features with their own tasks. A tab that names itself after the program it
+  is running needs OSC 133 and lives there.
 - **No named profiles.** T095 lets the user pick a shell and add a path. A
   *named* profile with its own arguments, environment and working directory
   needs a document to persist it in, not a list of paths.
@@ -166,6 +191,7 @@ shell stops wrapping at the old width, and the scrollback survives.
 | Single write | 64 KiB | a paste is legitimate; a megabyte from the renderer is not |
 | Buffered chunks before the view mounts | 256 | keeps the first prompt, bounded |
 | Custom shells | 16 | the picker is a menu, not a database |
+| Session name | 64 characters | a tab has to stay a tab; counted in what is drawn |
 
 A session started without a workspace lives in `$HOME` and is bound to no
 workspace lifetime; see ADR-015's T095 amendment.

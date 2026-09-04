@@ -34,12 +34,6 @@ export function spawnShell(profile: TerminalProfile | null): string | undefined 
   return profile.path;
 }
 
-/** A terminal tab's label: which shell is running in it. */
-export function shellName(shell: string): string {
-  const name = shell.split('/').pop();
-  return name && name !== '' ? name : 'shell';
-}
-
 /**
  * Add a shell the user typed, or explain why it cannot be added.
  *

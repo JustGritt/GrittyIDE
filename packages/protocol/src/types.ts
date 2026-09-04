@@ -61,6 +61,7 @@ export type { RecoverSnapshotRequest } from './generated/RecoverSnapshotRequest'
 export type { RecoveryCandidate } from './generated/RecoveryCandidate';
 export type { RecoveryState } from './generated/RecoveryState';
 export type { ReloadDocumentRequest } from './generated/ReloadDocumentRequest';
+export type { RenameTerminalRequest } from './generated/RenameTerminalRequest';
 export type { ResizeTerminalRequest } from './generated/ResizeTerminalRequest';
 export type { SaveDocumentRequest } from './generated/SaveDocumentRequest';
 export type { SessionNotice } from './generated/SessionNotice';

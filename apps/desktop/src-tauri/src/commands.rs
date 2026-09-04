@@ -26,8 +26,8 @@ use gritty_core::session::{
 };
 use gritty_core::shell::OpenExternalRequest;
 use gritty_core::terminal::wire::{
-    KillTerminalRequest, ListProfilesRequest, ResizeTerminalRequest, SpawnTerminalRequest,
-    Terminal, TerminalProfile, WriteTerminalRequest,
+    KillTerminalRequest, ListProfilesRequest, RenameTerminalRequest, ResizeTerminalRequest,
+    SpawnTerminalRequest, Terminal, TerminalProfile, WriteTerminalRequest,
 };
 use gritty_core::workspace::{
     CloseWorkspaceRequest, DEFAULT_LIST_BUDGET, ListDirectoryRequest, ListDirectoryResponse,
@@ -404,6 +404,20 @@ pub async fn terminal_resize(
     guard("terminal.resize", move |_| async move {
         let request: ResizeTerminalRequest = parse_request(request)?;
         terminals.resize(request)
+    })
+    .await
+}
+
+/// `terminal.rename`
+#[tauri::command]
+pub async fn terminal_rename(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Terminal, CoreError> {
+    let terminals = core.terminals.clone();
+    guard("terminal.rename", move |_| async move {
+        let request: RenameTerminalRequest = parse_request(request)?;
+        terminals.rename(request)
     })
     .await
 }

@@ -51,6 +51,13 @@ pub struct Terminal {
     pub cwd: Option<WorkspacePath>,
     /// Absolute path of the program that was started. Display only.
     pub shell: String,
+    /// A label the user gave this session, replacing the shell's name in the
+    /// tab. Absent until they set one. Sessions increasingly hold something
+    /// worth telling apart — an agent, a dev server, a build — and a strip of
+    /// tabs all reading "zsh" identifies none of them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub name: Option<String>,
     /// Process id of the shell while it runs; `None` once it has exited.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -160,6 +167,18 @@ pub struct ResizeTerminalRequest {
     pub terminal_id: TerminalId,
     pub cols: u16,
     pub rows: u16,
+}
+
+/// `terminal.rename`: label a session, or clear the label.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameTerminalRequest {
+    pub terminal_id: TerminalId,
+    /// The new label. Absent, empty or all whitespace clears it, so the tab
+    /// falls back to the shell's own name rather than showing a blank.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub name: Option<String>,
 }
 
 /// `terminal.kill`: terminate the session's process tree. Idempotent.

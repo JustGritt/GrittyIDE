@@ -1343,6 +1343,19 @@ button:disabled {
   padding: 3px 6px;
 }
 
+/* Sized to the tab it replaces so the strip does not jump when a rename
+   starts or ends. */
+.terminal-tab__rename {
+  background: var(--bg);
+  border: 1px solid var(--ok);
+  border-radius: 4px;
+  color: inherit;
+  font: inherit;
+  min-width: 0;
+  padding: 2px 5px;
+  width: 10rem;
+}
+
 .terminal-tab__status {
   color: var(--muted);
   font-size: 11px;

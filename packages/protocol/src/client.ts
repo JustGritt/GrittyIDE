@@ -28,6 +28,7 @@ import {
   type RecoverSnapshotRequest,
   type RecoveryCandidate,
   type ReloadDocumentRequest,
+  type RenameTerminalRequest,
   type ResizeTerminalRequest,
   type SaveDocumentRequest,
   type SessionRestoreResponse,
@@ -145,6 +146,12 @@ export interface CoreClient {
     spawn(request: SpawnTerminalRequest): Promise<Terminal>;
     write(request: WriteTerminalRequest): Promise<void>;
     resize(request: ResizeTerminalRequest): Promise<Terminal>;
+    /**
+     * Label a session, or clear the label with a blank name. The label is core
+     * state, not renderer state: `list` hands it back after a reload, so a
+     * name outlives the window that set it.
+     */
+    rename(request: RenameTerminalRequest): Promise<Terminal>;
     kill(request: KillTerminalRequest): Promise<Terminal>;
     /** Every session, running and ended, in creation order. */
     list(): Promise<Terminal[]>;
@@ -260,6 +267,7 @@ export function createCoreClient(
       spawn: (request) => command<Terminal>('terminal.spawn', { request }),
       write: (request) => command<void>('terminal.write', { request }),
       resize: (request) => command<Terminal>('terminal.resize', { request }),
+      rename: (request) => command<Terminal>('terminal.rename', { request }),
       kill: (request) => command<Terminal>('terminal.kill', { request }),
       list: () => command<Terminal[]>('terminal.list'),
       profiles: (request = { custom: [] }) =>

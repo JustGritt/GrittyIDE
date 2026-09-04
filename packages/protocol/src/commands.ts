@@ -28,6 +28,7 @@ export const COMMANDS = {
   'terminal.spawn': 'terminal_spawn',
   'terminal.write': 'terminal_write',
   'terminal.resize': 'terminal_resize',
+  'terminal.rename': 'terminal_rename',
   'terminal.kill': 'terminal_kill',
   'terminal.list': 'terminal_list',
   'terminal.profiles': 'terminal_profiles',

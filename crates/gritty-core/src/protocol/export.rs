@@ -26,8 +26,8 @@ use crate::session::wire::{
 };
 use crate::shell::OpenExternalRequest;
 use crate::terminal::wire::{
-    KillTerminalRequest, ListProfilesRequest, ResizeTerminalRequest, SpawnTerminalRequest,
-    Terminal, TerminalProfile, WriteTerminalRequest,
+    KillTerminalRequest, ListProfilesRequest, RenameTerminalRequest, ResizeTerminalRequest,
+    SpawnTerminalRequest, Terminal, TerminalProfile, WriteTerminalRequest,
 };
 use crate::workspace::{
     CloseWorkspaceRequest, ListDirectoryRequest, ListDirectoryResponse, OpenWorkspaceRequest,
@@ -86,6 +86,7 @@ fn export_bindings() {
     WriteTerminalRequest::export_all(&cfg).expect("export WriteTerminalRequest");
     ResizeTerminalRequest::export_all(&cfg).expect("export ResizeTerminalRequest");
     KillTerminalRequest::export_all(&cfg).expect("export KillTerminalRequest");
+    RenameTerminalRequest::export_all(&cfg).expect("export RenameTerminalRequest");
 
     let version = format!(
         "{HEADER}export const PROTOCOL_VERSION = \"{PROTOCOL_VERSION}\";\n\

@@ -1,6 +1,6 @@
 import type { TerminalProfile } from '@gritty/protocol';
 import { describe, expect, it } from 'vitest';
-import { addCustomShell, selectedProfile, shellName, spawnShell } from './terminal-profiles';
+import { addCustomShell, selectedProfile, spawnShell } from './terminal-profiles';
 
 function profile(overrides: Partial<TerminalProfile> & { path: string }): TerminalProfile {
   return {
@@ -60,17 +60,6 @@ describe('spawnShell', () => {
 
   it('sends the path for any other choice', () => {
     expect(spawnShell(bash)).toBe('/bin/bash');
-  });
-});
-
-describe('shellName', () => {
-  it('labels a tab with the shell that runs in it', () => {
-    expect(shellName('/opt/homebrew/bin/fish')).toBe('fish');
-  });
-
-  it('never produces an empty label', () => {
-    expect(shellName('')).toBe('shell');
-    expect(shellName('/')).toBe('shell');
   });
 });
 

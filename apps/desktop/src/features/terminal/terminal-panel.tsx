@@ -1,8 +1,10 @@
-import { useEffect, useRef } from 'react';
+import type { TerminalId } from '@gritty/protocol';
+import { useEffect, useRef, useState } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
 import type { TerminalLayout } from '../session/persisted-layout';
 import { shouldStartFirstTerminal } from './auto-start';
-import { selectedProfile, shellName, spawnShell } from './terminal-profiles';
+import { MAX_TERMINAL_NAME_CHARS, normalizeTerminalName, terminalLabel } from './terminal-naming';
+import { selectedProfile, spawnShell } from './terminal-profiles';
 import { describeTerminal } from './terminal-reducer';
 import { TerminalSettings } from './terminal-settings';
 import { TerminalView } from './terminal-view';
@@ -49,6 +51,18 @@ export function TerminalPanel({
   // opening, so closing the last tab leaves the dock empty rather than
   // immediately growing another one, and a shell that fails to start is not
   // retried in a loop.
+  // Which tab is being renamed, and what has been typed so far. One at a
+  // time: two open editors would be two answers to "what is this called".
+  const [renaming, setRenaming] = useState<TerminalId | null>(null);
+  const [draft, setDraft] = useState('');
+  const renameField = useRef<HTMLInputElement | null>(null);
+  // Focused here rather than with `autoFocus`, which a linter cannot tell
+  // apart from stealing focus on load. `select` so the old name can be typed
+  // straight over, which is what renaming usually means.
+  useEffect(() => {
+    if (renaming) renameField.current?.select();
+  }, [renaming]);
+
   const sessions = terminals.terminals.length;
   const started = useRef(false);
   // Held in a ref so the effect depends only on the conditions, not on a
@@ -68,15 +82,29 @@ export function TerminalPanel({
     startFirst.current();
   }, [open, ready, sessions]);
 
+  const beginRename = (id: TerminalId, current: string) => {
+    setRenaming(id);
+    setDraft(current);
+  };
+
+  const commitRename = (id: TerminalId) => {
+    setRenaming(null);
+    const result = normalizeTerminalName(draft);
+    // A name the core would refuse is dropped rather than argued about: the
+    // tab strip is not the place for a validation message, and the label the
+    // session already has is still on screen.
+    if ('name' in result) void terminals.rename(id, result.name);
+  };
+
   return (
     <section className="terminal-panel" aria-label="Terminals">
       <header className="terminal-panel__bar">
         <div className="terminal-panel__tabs" role="tablist" aria-label="Terminal sessions">
           {terminals.terminals.map((session) => {
             const isActive = session.id === active?.id;
-            // The shell is what tells two tabs apart once profiles exist;
-            // the directory is in the tooltip, where a long path belongs.
-            const name = shellName(session.shell);
+            // A name the user gave, else the shell. The directory is in the
+            // tooltip, where a long path belongs.
+            const name = terminalLabel(session);
             return (
               <div
                 key={session.id}
@@ -84,21 +112,54 @@ export function TerminalPanel({
                   session.status === 'EXITED' ? ' terminal-tab--exited' : ''
                 }`}
               >
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={isActive}
-                  className="terminal-tab__label"
-                  onClick={() => terminals.activate(session.id)}
-                  title={`${session.shell} in ${describeCwd(session)} — ${describeTerminal(
-                    session,
-                  )}${session.pid ? ` — pid ${session.pid}` : ''}`}
-                >
-                  <span className="terminal-tab__name">{name}</span>
-                  {session.status === 'EXITED' && (
-                    <span className="terminal-tab__status">{describeTerminal(session)}</span>
-                  )}
-                </button>
+                {renaming === session.id ? (
+                  <input
+                    className="terminal-tab__rename"
+                    ref={renameField}
+                    value={draft}
+                    spellCheck={false}
+                    maxLength={MAX_TERMINAL_NAME_CHARS}
+                    aria-label={`Rename terminal ${name}`}
+                    onChange={(event) => setDraft(event.target.value)}
+                    // Blur commits, so clicking away keeps what was typed
+                    // rather than silently discarding it.
+                    onBlur={() => commitRename(session.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        commitRename(session.id);
+                      } else if (event.key === 'Escape') {
+                        event.preventDefault();
+                        setRenaming(null);
+                      }
+                    }}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    className="terminal-tab__label"
+                    onClick={() => terminals.activate(session.id)}
+                    // Double-click is the discoverable way in; F2 is the one
+                    // that works without a pointer.
+                    onDoubleClick={() => beginRename(session.id, session.name ?? '')}
+                    onKeyDown={(event) => {
+                      if (event.key === 'F2') {
+                        event.preventDefault();
+                        beginRename(session.id, session.name ?? '');
+                      }
+                    }}
+                    title={`${session.shell} in ${describeCwd(session)} — ${describeTerminal(
+                      session,
+                    )}${session.pid ? ` — pid ${session.pid}` : ''} — F2 to rename`}
+                  >
+                    <span className="terminal-tab__name">{name}</span>
+                    {session.status === 'EXITED' && (
+                      <span className="terminal-tab__status">{describeTerminal(session)}</span>
+                    )}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="terminal-tab__close"

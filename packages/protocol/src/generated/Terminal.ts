@@ -25,6 +25,13 @@ cwd?: WorkspacePath,
  */
 shell: string, 
 /**
+ * A label the user gave this session, replacing the shell's name in the
+ * tab. Absent until they set one. Sessions increasingly hold something
+ * worth telling apart — an agent, a dev server, a build — and a strip of
+ * tabs all reading "zsh" identifies none of them.
+ */
+name?: string, 
+/**
  * Process id of the shell while it runs; `None` once it has exited.
  */
 pid?: number, status: TerminalStatus, cols: number, rows: number, createdAt: Timestamp, 
