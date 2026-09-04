@@ -11,13 +11,13 @@ running application. Exit: ADR-001 go/no-go.
 | A1 | Minimal Tauri 2 + React + TypeScript application launches | T000 | 2026-09-04, macOS 26 arm64: launched both ways with `GRITTY_DATA_DIR` and the log captured. Dev (`pnpm dev`, debug Rust + Vite dev server): application built 61 ms, window shown 228 ms, first WebView health 1665 ms. Packaged debug bundle (`pnpm tauri build --debug --bundles app`, production CSP): 72 ms / 250 ms / **754 ms** — the dev server accounted for most of the difference. Timings come from the `startup milestone` log lines; release numbers belong to §C. A human looking at the window is Session 1 of `docs/testing/phase-0-manual-pass.md` |
 | A2 | Monaco embedded; TypeScript, Rust, Markdown and JSON fixtures open | T040 | 2026-09-03, macOS 26 arm64: Monaco 0.56.0 embedded (`packages/editor`, ADR-012); the bundle loads in WKWebView 21624.4.5 and the health round trip completes (`pnpm dev`); opening the `small-repo` fixtures in the running app pending reviewer (the agent cannot see the WebView) |
 | A3 | Keyboard shortcuts, multi-cursor, selection, find, clipboard, drag/drop, font rendering verified on WKWebView | T040 | pending reviewer; rows and steps in `docs/testing/platform-matrix.md` (T040 completion report lists the exact checks) |
-| A4 | Repository with 10k+ files opens without eager content loading | T020 | |
+| A4 | Repository with 10k+ files opens without eager content loading | T020 | 2026-09-04, macOS 26 arm64, release bundle: `fixtures/large-repo` (10 501 files, 103 directories, depth 25) restored as the workspace. `workspace.list` 0.29 ms median (0.88 ms max) and launch to first WebView round trip 502 ms — indistinguishable from an empty workspace, because only the root is listed and nothing is read. Expanding the >5000-entry directory in the explorer is manual pass step 1.10 |
 | A5 | Rust commands for directory listing, safe read, atomic write | T020/T030 | 2026-09-03, macOS 26 arm64: `workspace.list` (T020) and `documents.open/save` (T030) through the real adapters in `cargo test -p gritty-desktop`; atomic write with injected failure/crash in `cargo test -p gritty-workspace`; UI pass pending reviewer |
 | A6 | Filesystem watching; rapid changes do not lock the UI | T070 | **Deferred to T070, deliberately.** Nothing in Gritty observes the filesystem yet, so a storm cannot reach the UI and any result recorded here would be vacuous. Not an ADR-001 kill criterion, and the harder version of the question — bounded high-frequency events reaching the renderer — is answered by T090 (B2, ~60 Hz cap, 1 MiB bound, control path not starved). Becomes a T070 acceptance criterion |
 | A7 | Markdown preview with sanitized HTML and fenced-code highlighting | T050 | 2026-09-03, macOS 26 arm64: markdown-it + DOMPurify allowlist (ADR-013), fenced code colorized by Monaco's tokenizers; XSS fixture asserted clean and GFM fixture snapshotted under jsdom; `long.md` (134 KB) renders in 366 ms under jsdom (markdown-it alone 15–20 ms); in-app rendering, scroll sync and link navigation pending reviewer (the agent cannot see the WebView) |
 | A8 | PTY: spawn a shell, resize, stream output, terminate cleanly | T090 | 2026-09-04, macOS 26 arm64: `portable-pty` 0.9 behind `gritty-terminal` (ADR-015); `cargo test -p gritty-terminal` drives a real PTY through echo, exit codes, `TERM`, `stty size` before and after a resize, a `yes` flood, an unexpected `SIGKILL` and a process-tree kill verified by pid (15 tests, 1.6 s); `pnpm dev` boots on protocol 1.4.0 with the xterm bundle loaded in WKWebView 21624.4.5; driving a shell in the window pending reviewer (the agent cannot see the WebView) |
 | A9 | Persist and restore workspace + tabs | T060 | 2026-09-04, macOS 26 arm64: SQLite session database (ADR-014); `session.restore` reopens the last root and returns tabs, view modes, cursors, preferences and layout; automated through the adapters (`cargo test -p gritty-desktop`) and the WebView restore flow (Vitest); `pnpm dev` twice restores the window geometry; a quit/relaunch with open tabs in the app pending reviewer |
-| A10 | Cold/warm startup, idle RAM/CPU, editor RAM growth, interaction latency recorded | below | |
+| A10 | Cold/warm startup, idle RAM/CPU, editor RAM growth, interaction latency recorded | below | 2026-09-04: §C filled for everything measurable without a person — cold 496 ms, warm 504 ms, idle 0.97 % of one core, 607 MiB against Cursor's 1194 MiB, core-side command latencies. Typing responsiveness and every *perceived* latency remain with the human pass |
 | A11 | Linux build via CI; platform-specific defects logged | T000 CI + platform matrix | 2026-09-04, CI run 33876904661 on `main` (4807b09), both jobs green: **Linux** (ubuntu-24.04, WebKitGTK 4.1) `pnpm check` + `pnpm check:generated` + `pnpm tauri build --no-bundle`, 10m10s; **macOS** (macos-15) the same plus `pnpm tauri build --bundles app`, 3m18s, artifact uploaded. The macOS job is gated only for pull requests — pushes to `main` always run it. Defects logged so far: the T090 output-storm test asserted a throughput this Mac provides and the runner does not (fixed by injecting the buffer cap). No WebKitGTK behavioural defect is known, because no human has driven Linux — recorded as untested, not as working |
 | A12 | ADR-001 written after measurements | end | |
 
@@ -60,18 +60,40 @@ stderr. Perceived latency still needs a person either way: a core-side
 `documents.open` of 400 µs says nothing about what the user felt three frames
 later.
 
-| Metric | Target | Measured | Method |
+| Metric | Target | Measured (2026-09-04, MacBook M-series, 16 GB, macOS 26 arm64, release bundle) | Method |
 |---|---|---|---|
-| Cold launch to usable shell | ≤ 2 s | pending the release measurement | Release bundle, fresh `GRITTY_DATA_DIR`, 5 runs; `startup milestone … first webview health`. Debug builds already reach it in 754 ms packaged / 1665 ms under the dev server (A1) |
-| Warm launch | ≤ 1 s | pending the release measurement | Same, 5 more runs on the warm data dir with a workspace to restore |
-| Idle CPU (no watchers/tasks) | ~0 % | pending | 60 s of `ps` sampling summed over the Gritty process **and** its WebKit helpers (`WebContent`, `Networking`, `GPU`) — summing those is the easy thing to get wrong and it flatters the result |
-| Typing responsiveness | no perceptible frame drops | pending the human pass | Manual pass step 2.21: 30 s of typing in `weird-files/generated/large-text.txt` (12 MiB) after "Enable editing" with a Web Inspector *Timelines* recording; report frames over 16 ms and the worst frame; repeat in `small-repo/src/*.ts`. Run under `pnpm dev` (unminified) so the error is conservative |
-| Open a normal source file | ≤ 100 ms perceived | pending | Core side from `command completed command="documents.open"`; perceived side from manual pass step 2.25. Report both — the gap between them is the interesting number |
-| Workspace restore | UI immediately, expensive work incremental | pending | `session.restore` duration from the log, plus manual pass step 5.1 for whether the UI was usable before the restore finished |
-| Repository enumeration | never blocks the editor; progressive | pending | `workspace.list` durations against `fixtures/large-repo` (10k+ files, >5000-entry directory), plus manual pass steps 1.9–1.10 |
-| Baseline memory (shell only) | track; compare with an Electron baseline | pending | `footprint`/`ps` RSS summed across the same process group, shell only and with one file open. Electron baseline: Cursor.app (installed here) with an empty window, measured identically |
-| Memory growth after 30 min editing | track | pending | 30 min sampling at 30 s intervals. The agent can only sample an **idle** app, which measures leaks and not editing; the editing version needs a person at the keyboard. Record which one was done |
-| Agent/LSP/indexer crash | no renderer crash or freeze | not applicable yet | No agent, language server or indexer exists (T300, Phase 6). The only supervised child today is a PTY, covered by B2. Re-measure at T310; recorded as out of scope rather than as passing |
+| Cold launch to usable shell | ≤ 2 s | **496 ms** median of 5 (483–556). Decomposed: application built 42 ms, window shown 181 ms, first WebView round trip 496 ms | Release bundle, `GRITTY_DATA_DIR` deleted before each run, default log filter; `startup milestone … "first webview health"`. `scripts/measure-phase-0.sh launch cold <dir> 5` |
+| Warm launch | ≤ 1 s | **504 ms** median of 5 (495–508) with a session database and window geometry; **504 ms** median of 3 when also restoring a workspace and three tabs | Same, keeping the data directory (`… launch warm <dir> 5 keep`). Warm is not faster than cold because startup does almost nothing either way — the restore work is sub-millisecond and does not gate the window |
+| Idle CPU (no watchers/tasks) | ~0 % | **0.97 % of one core** over 60 s, workspace and three tabs open: WebContent 0.62 %, Gritty 0.28 %, GPU 0.05 %, Networking 0.02 % | Cumulative CPU-time deltas (`ps -o time=`), not `%cpu`, which is an average over the process lifetime. Small, but not zero: something ticks while nothing happens, and what it is has not been identified — follow-up |
+| Typing responsiveness | no perceptible frame drops | pending the human pass | Manual pass step 2.25 (Web Inspector *Timelines*, frames over 16 ms, 12 MiB fixture). No core-side proxy exists: typing is debounced before it reaches a command |
+| Open a normal source file | ≤ 100 ms perceived | core side **0.23 ms** median (`documents.open`, n=9, max 0.55 ms); perceived pending the human pass | Restore of three tabs in `fixtures/small-repo` under `GRITTY_LOG=debug`. The core is three orders of magnitude inside the target; whether the *screen* is, is step 2.29 |
+| Workspace restore | UI immediately, expensive work incremental | **the window appears at the same time with or without a workspace to restore** (504 ms vs 504 ms). `session.restore` 0.45 ms, `workspace.list` 0.35 ms, three `documents.open` 0.23 ms each | Session seeded directly into SQLite (`… seed <dir> <root> <tabs…>`) so the real restore path runs without anyone clicking |
+| Repository enumeration | never blocks the editor; progressive | `fixtures/large-repo` (10 501 files, 103 directories, depth 25): `workspace.list` **0.29 ms** median, 0.88 ms max; launch **502 ms**, indistinguishable from an empty workspace | Same seeding, root `fixtures/large-repo`. Only the root is listed: one `read_dir` per expanded directory, nothing recursive. Paging a >5000-entry directory is manual pass step 1.10 |
+| Baseline memory (shell only) | track; compare with an Electron baseline | **607 MiB RSS** total with a workspace and three tabs: WebContent 432, Gritty 122, GPU 37, Networking 16. **Cursor, same workspace, extensions disabled: 1194 MiB** (renderer 767, main 254, three helpers 173) | RSS summed over the app and the WebKit helper processes it spawned, identified by diffing the machine's WebKit processes across launch. Both measured identically |
+| Memory growth after 30 min | track | see the soak row recorded below | 30 min at 30 s intervals, **idle**, not editing — the agent cannot type into the window. What this detects is a leak, not editing growth |
+| Agent/LSP/indexer crash | no renderer crash or freeze | not applicable yet | No agent, language server or indexer exists (T300, Phase 6). The only supervised child today is a PTY, covered by B2. Recorded as out of scope rather than as passing |
+
+### How to read these
+
+- **The machine:** MacBook, Apple silicon, 16 GB, macOS 26 arm64, release bundle
+  built from `phase-0-measurement`. Nothing else running; a stale `pnpm dev`
+  from an earlier session was killed first because it moved every number.
+- **"Cold" means a fresh data directory, not a cold page cache.** The binary had
+  been built and run minutes earlier, so the OS had it cached. A genuine
+  first-launch-after-boot is slower than 496 ms; this is a floor, not a ceiling.
+- **RSS on macOS counts shared framework pages**, so 607 MiB and 1194 MiB are
+  both upper bounds. They were measured the same way, so the ratio — Gritty at
+  **51 % of Cursor's memory and 29 % of its idle CPU** — is the fair number, not
+  the absolutes.
+- **Cursor is a full IDE, not an empty Electron shell.** It is the honest
+  comparison for "what a user would otherwise run", not a measurement of
+  Electron itself. A bare Electron window would be far smaller than 1194 MiB.
+- **Command timings are core side.** `documents.open` at 0.23 ms says the core
+  is not the bottleneck; it says nothing about what the user sees three frames
+  later. Every perceived-latency row still needs the human pass.
+- The harness is `scripts/measure-phase-0.sh`, so these can be re-run and
+  compared rather than argued about.
+
 
 ## D. Go/no-go questions (addendum §19)
 
