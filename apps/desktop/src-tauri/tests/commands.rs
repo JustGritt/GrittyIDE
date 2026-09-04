@@ -13,6 +13,7 @@ use gritty_core::shell::ExternalOpener;
 use gritty_core::{CORE_EVENT_CHANNEL, CoreError, PROTOCOL_VERSION};
 use gritty_desktop_lib::core::Core;
 use gritty_desktop_lib::{CoreOptions, attach_core_with, configure};
+use gritty_terminal::testing::FakePtyHost;
 use serde_json::{Value, json};
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{
@@ -43,6 +44,10 @@ struct Harness {
     webview: WebviewWindow<MockRuntime>,
     events: Arc<Mutex<Vec<Value>>>,
     opener: Arc<RecordingOpener>,
+    /// No test spawns a real shell: the PTY tests that do live in
+    /// `gritty-terminal`, and driving one from the mock runtime would make
+    /// these adapter tests depend on a login shell's timing.
+    pty: Arc<FakePtyHost>,
     /// Owned when the harness created it; a shared directory outlives the harness.
     _data_dir: Option<TempData>,
 }
@@ -66,6 +71,7 @@ impl Harness {
     }
 
     fn build(opener: Arc<RecordingOpener>, data_dir: PathBuf) -> Self {
+        let pty = FakePtyHost::new();
         let app = configure(mock_builder())
             .build(mock_context(noop_assets()))
             .expect("build app");
@@ -78,6 +84,7 @@ impl Harness {
             CoreOptions {
                 opener: opener.clone(),
                 data_dir: Some(data_dir),
+                pty_host: pty.clone(),
             },
         );
         let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
@@ -95,6 +102,7 @@ impl Harness {
             webview,
             events,
             opener,
+            pty,
             _data_dir: None,
         }
     }
@@ -191,6 +199,20 @@ impl Harness {
             "workspace_list",
             json!({ "request": { "workspaceId": workspace_id, "path": path } }),
         )
+    }
+
+    fn terminal(&self, cmd: &str, request: Value) -> Result<Value, Value> {
+        self.invoke(cmd, json!({ "request": request }))
+    }
+
+    fn events_named(&self, name: &str) -> Vec<Value> {
+        self.events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event["name"] == name)
+            .cloned()
+            .collect()
     }
 }
 
@@ -1104,4 +1126,188 @@ fn session_requests_are_validated_before_touching_anything() {
         "nothing was persisted by the refused requests"
     );
     assert_eq!(restored["workspace"]["id"], workspace["id"]);
+}
+
+// ---------------------------------------------------------------------------
+// T090 terminal
+// ---------------------------------------------------------------------------
+
+/// Open a workspace and start a terminal in it.
+fn terminal_harness() -> (Harness, TempData, Value, Value) {
+    let harness = Harness::new();
+    let dir = TempData::new("terminal-ws");
+    fs::create_dir_all(dir.0.join("src")).unwrap();
+    let workspace = harness.open_workspace(&dir.0);
+    let terminal = harness
+        .terminal("terminal_spawn", json!({ "workspaceId": workspace["id"] }))
+        .expect("spawn a terminal");
+    (harness, dir, workspace, terminal)
+}
+
+#[test]
+fn terminal_spawn_returns_a_running_session_and_lists_it() {
+    let (harness, _dir, workspace, terminal) = terminal_harness();
+
+    assert_eq!(terminal["status"], "RUNNING");
+    assert_eq!(terminal["workspaceId"], workspace["id"]);
+    assert_eq!(terminal["cwd"], "");
+    assert_eq!(terminal["cols"], 80);
+    assert_eq!(terminal["rows"], 24);
+    assert!(terminal["pid"].is_number());
+
+    let listed = harness.invoke("terminal_list", json!({})).expect("list");
+    let listed = listed.as_array().unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0]["id"], terminal["id"]);
+}
+
+#[test]
+fn terminal_write_and_resize_reach_the_session() {
+    let (harness, _dir, _workspace, terminal) = terminal_harness();
+
+    harness
+        .terminal(
+            "terminal_write",
+            json!({ "terminalId": terminal["id"], "data": "echo hi\n" }),
+        )
+        .expect("write");
+    // A control character travels verbatim: the shell interprets Ctrl+C, not Gritty.
+    harness
+        .terminal(
+            "terminal_write",
+            json!({ "terminalId": terminal["id"], "data": "\u{3}" }),
+        )
+        .expect("write");
+    assert_eq!(harness.pty.last().written(), "echo hi\n\u{3}");
+
+    let resized = harness
+        .terminal(
+            "terminal_resize",
+            json!({ "terminalId": terminal["id"], "cols": 120, "rows": 40 }),
+        )
+        .expect("resize");
+    assert_eq!(resized["cols"], 120);
+    assert_eq!(resized["rows"], 40);
+}
+
+#[test]
+fn terminal_output_and_exit_reach_the_webview_in_order() {
+    let (harness, _dir, _workspace, terminal) = terminal_harness();
+    let session = harness.pty.last();
+
+    session.emit("hello\r\n");
+    session.emit_batch(gritty_terminal::OutputBatch {
+        text: "after a flood".into(),
+        truncated_bytes: 2048,
+    });
+    session.finish(gritty_terminal::TerminalExit {
+        code: Some(0),
+        signal: None,
+    });
+    // Anything the host produces after the ending is dropped.
+    session.emit("too late");
+
+    let outputs = harness.events_named("TerminalOutput");
+    assert_eq!(outputs.len(), 2, "only the batches before the exit");
+    assert_eq!(outputs[0]["payload"]["data"], "hello\r\n");
+    assert_eq!(outputs[0]["payload"]["terminalId"], terminal["id"]);
+    assert_eq!(outputs[0]["payload"]["truncatedBytes"], 0);
+    assert_eq!(
+        outputs[1]["payload"]["truncatedBytes"], 2048,
+        "dropped output is reported on the wire"
+    );
+
+    let exits = harness.events_named("TerminalExited");
+    assert_eq!(exits.len(), 1, "TerminalExited lands exactly once");
+    assert_eq!(exits[0]["payload"]["code"], 0);
+    assert_eq!(exits[0]["payload"]["terminal"]["status"], "EXITED");
+
+    // Ordering: no output after the ending, in the sequence the WebView sees.
+    let names = harness.event_names();
+    let exit_at = names
+        .iter()
+        .position(|name| name == "TerminalExited")
+        .unwrap();
+    assert!(
+        !names[exit_at..].contains(&"TerminalOutput".to_owned()),
+        "output followed the exit: {names:?}"
+    );
+
+    let listed = harness.invoke("terminal_list", json!({})).expect("list");
+    assert_eq!(listed[0]["status"], "EXITED");
+    assert_eq!(listed[0]["exitCode"], 0);
+}
+
+#[test]
+fn terminal_kill_is_idempotent_and_unknown_ids_are_not_found() {
+    let (harness, _dir, _workspace, terminal) = terminal_harness();
+
+    harness
+        .terminal("terminal_kill", json!({ "terminalId": terminal["id"] }))
+        .expect("kill");
+    harness
+        .terminal("terminal_kill", json!({ "terminalId": terminal["id"] }))
+        .expect("a second kill is not an error");
+    assert_eq!(harness.pty.last().record().kills, 1);
+
+    let error = harness
+        .terminal("terminal_kill", json!({ "terminalId": "nope" }))
+        .expect_err("unknown terminal");
+    assert_eq!(error["code"], "NotFound");
+    assert!(error["correlationId"].is_string());
+
+    let error = harness
+        .terminal(
+            "terminal_write",
+            json!({ "terminalId": terminal["id"], "data": "x" }),
+        )
+        .expect_err("the session has ended");
+    assert_eq!(error["code"], "Conflict");
+}
+
+#[test]
+fn a_terminal_cannot_be_started_outside_the_workspace() {
+    let harness = Harness::new();
+    let dir = TempData::new("terminal-escape");
+    let workspace = harness.open_workspace(&dir.0);
+
+    for cwd in ["../..", "/etc"] {
+        let error = harness
+            .terminal(
+                "terminal_spawn",
+                json!({ "workspaceId": workspace["id"], "cwd": cwd }),
+            )
+            .expect_err("a path outside the workspace is refused");
+        assert!(
+            error["code"] == "InvalidInput" || error["code"] == "PermissionDenied",
+            "unexpected envelope for {cwd}: {error}"
+        );
+    }
+    assert!(harness.pty.sessions().is_empty(), "nothing was spawned");
+}
+
+#[test]
+fn a_malformed_terminal_request_is_invalid_input() {
+    let (harness, _dir, _workspace, _terminal) = terminal_harness();
+
+    let error = harness
+        .invoke("terminal_write", json!({ "request": { "terminalId": 7 } }))
+        .expect_err("malformed request");
+    assert_eq!(error["code"], "InvalidInput");
+}
+
+#[test]
+fn shutdown_terminates_every_terminal() {
+    let (harness, _dir, workspace, _terminal) = terminal_harness();
+    harness
+        .terminal("terminal_spawn", json!({ "workspaceId": workspace["id"] }))
+        .expect("a second terminal");
+    let sessions = harness.pty.sessions();
+    assert_eq!(sessions.len(), 2);
+
+    harness.app.state::<Core>().shutdown();
+
+    for session in &sessions {
+        assert!(session.is_finished(), "a shell survived shutdown");
+    }
 }
