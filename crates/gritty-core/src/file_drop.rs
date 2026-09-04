@@ -222,6 +222,11 @@ impl FileDropService {
 
     /// A drag entered (`true`) or left (`false`) the window.
     pub fn hover(&self, active: bool) {
+        // Logged because this is the seam where the platform hands over. A
+        // drag the OS never reported and a drag the UI ignored look identical
+        // from the outside; this line is what tells them apart. Bounded by
+        // construction — enter and leave only, never `Over` (rule 8).
+        tracing::debug!(active, "drag hover changed");
         self.events.emit(
             &EventOrigin {
                 workspace_id: self.workspaces.current_open().map(|(id, _)| id),

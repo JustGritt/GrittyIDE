@@ -7,8 +7,8 @@ concluded from `pnpm check`, and the agent cannot see or click the WebView on
 this machine.
 
 This is every outstanding human check in one ordered session. It replaces the
-"Not executed (human WKWebView pass)" lists spread across the T040, T050, T060
-and T090 completion reports.
+"Not executed (human WKWebView pass)" lists spread across the T040, T045, T048,
+T049, T050, T060 and T090 completion reports.
 
 - **Time:** about 90 minutes, in six sessions you can run separately.
 - **Fills:** the `–` rows in `docs/testing/platform-matrix.md`, the perceptual
@@ -79,6 +79,73 @@ Session 5, which depends on the state Session 2 left behind.
 
 Rows filled: Shell (both), Rendering (both), Files (picker, unicode/symlinks,
 case identity, 10k+ repo, >5000 entries, root removed).
+
+---
+
+## Session 1B — Startup screen, T048/T049 (~10 min)
+
+**Nothing in this session has ever been performed.** T048 and T049 were both
+built without a screen: verified by `pnpm check`, by rendering the frontend in
+Chrome against a vite dev server, and (T049) by one core-connected run whose
+log proved the launcher mounted. No pointer has touched either. Be picky here
+for the same reason Session 2's input steps are picky — this is the first
+contact.
+
+Two steps need a **fresh data directory**, which is also the only way to see a
+true first run:
+
+```
+GRITTY_DATA_DIR=$(mktemp -d) pnpm dev
+```
+
+**First run and the ways in**
+
+| # | Do | Expect |
+|---|---|---|
+| 1B.1 | Launch with a fresh `GRITTY_DATA_DIR` | Centred launcher: wordmark, one-line description, **two** tiles (Open folder…, Open path…), no recents list, the dashed drop hint. Top bar says "No workspace open"; status bar ends with `no workspace` |
+| 1B.2 | Click **Open folder…** | The native macOS picker, same as step 1.6. Pick `fixtures/small-repo`: the launcher is replaced by the sidebar and editor |
+| 1B.3 | Explorer `⋯` → **Close workspace** | Back to the launcher, now with one recent row and a **third** tile, "Reopen small-repo" |
+| 1B.4 | Read the recent row | `small-repo`, a relative time ("just now"), and on the right its **parent** directory reading left to right and starting with `~` — not `/~Desktop/…`, which was a real defect and may recur |
+| 1B.5 | Click the row | Opens that workspace. Its tabs do **not** come back — that is known and intended for now, not a bug to report |
+| 1B.6 | Close again, click the **Reopen** tile | Same workspace, same result |
+| 1B.7 | Click **Open path…** | A field appears **already focused**. Type an absolute path → opens. Try a relative one (`../secrets`) → the core's `InvalidInput` envelope, no crash. Escape closes the field |
+
+**Keyboard**
+
+| # | Do | Expect |
+|---|---|---|
+| 1B.8 | On the launcher press **⌘O**, then **⌘⇧O** | Picker; then the path field opens and takes focus |
+| 1B.9 | With a workspace open press **⌘O** | Picker again — it is global. **⌘⇧O** does nothing, which is deliberate: only the launcher has a field |
+| 1B.10 | Open the terminal dock, click into the shell, press **Ctrl+O**, then **⌘O** | Ctrl+O reaches the shell untouched (Gritty claims ⌘ on macOS, not Ctrl); ⌘O still opens the picker. Then type in Monaco and repeat — the editor must not lose a keystroke to either |
+
+**Drop, and the empty-state surfaces**
+
+| # | Do | Expect |
+|---|---|---|
+| 1B.11 | Drag a folder from Finder over the launcher, without releasing | The dashed drop target appears. **If it does not, stop and say so** — that separates "the OS event never arrived" from "the app did nothing with it", and is the first thing to know |
+| 1B.12 | Release it | Becomes the workspace. Same rules as steps 2.13–2.17, which are worth running here too now that there is a second screen to drop onto |
+| 1B.13 | On the launcher, open the terminal dock | A shell starts in your **home directory** (T095) and says so. Open a workspace afterwards: the scrollback survives |
+| 1B.14 | Hover a recent row, then Tab to it | **Forget** appears on hover *and* on keyboard focus — it must not be mouse-only |
+| 1B.15 | Click **Forget** on a row | The row goes immediately. Re-open that folder later and it comes back — Forget drops the history entry, never the folder |
+
+**The missing root, end to end**
+
+| # | Do | Expect |
+|---|---|---|
+| 1B.16 | `mkdir /tmp/gritty-doomed`, open it as the workspace, quit the app, `rm -rf /tmp/gritty-doomed`, relaunch | A session notice, "Last workspace not reopened"; the launcher lists `gritty-doomed` **struck through** with `root missing` in red, and it is not clickable |
+| 1B.17 | Click its **Forget**, quit, relaunch | The row is gone **and the notice is gone** — this is the whole point of Forget clearing the last-workspace pointer. If the notice comes back, that is a defect |
+
+**Long lists, themes and geometry**
+
+| # | Do | Expect |
+|---|---|---|
+| 1B.18 | Once six or more workspaces have been opened, look at the list | Five rows and a **View all (n)** link; clicking it shows the rest and becomes **Show fewer** |
+| 1B.19 | Switch macOS to Light with the launcher showing | The whole launcher follows: no dark-on-dark, no light-on-light. **The light ramp was derived from the dark one and never designed — this is the first time a person has seen it.** Say what looks wrong even if it is only "flat" or "washed out" |
+| 1B.20 | Shrink the window to its 800×600 minimum with the list expanded | The panel **scrolls**; the wordmark at the top stays reachable and is never clipped |
+| 1B.21 | With a workspace open, quit and relaunch | The workspace comes back by itself and **the launcher never flashes** on the way. A blink of the empty state here is a defect |
+
+Rows filled: Shell (empty state), Files (picker again, drop onto the launcher),
+Input (the two chords, and that neither steals from Monaco or the shell).
 
 ---
 
