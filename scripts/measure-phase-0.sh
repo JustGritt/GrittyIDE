@@ -103,15 +103,22 @@ sample_run() {
   echo "app=$pid helpers=[$helpers]"
   # `ps -o %cpu` is an average over the whole process lifetime, which is not
   # idle CPU. Record cumulative CPU time instead and take deltas afterwards.
-  echo "t,pid,cputime,rss_kb" > "$csv"
+  # RSS is not a growth metric for an idle app on macOS: the OS reclaims
+  # untouched pages, so resident memory *falls* while nothing is allocated.
+  # `Physical footprint` (what Activity Monitor calls Memory) counts the
+  # compressed and swapped pages too, so record both.
+  echo "t,pid,cputime,rss_kb,footprint_mb" > "$csv"
   for p in $pid ${=helpers}; do
     echo "$p,$(ps -o ucomm= -p $p 2>/dev/null)" >> "$OUT/$label-names.csv"
   done
   local elapsed=0
   while [[ $elapsed -lt $seconds ]]; do
     for p in $pid ${=helpers}; do
+      local foot
+      foot=$(vmmap --summary "$p" 2>/dev/null \
+        | awk '/Physical footprint:/ {gsub(/[MG]/,"",$3); print $3; exit}')
       ps -o pid=,time=,rss= -p "$p" 2>/dev/null \
-        | awk -v t="$elapsed" '{print t","$1","$2","$3}' >> "$csv"
+        | awk -v t="$elapsed" -v f="${foot:-}" '{print t","$1","$2","$3","f}' >> "$csv"
     done
     sleep "$interval"
     elapsed=$((elapsed + interval))

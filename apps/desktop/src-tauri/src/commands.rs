@@ -522,9 +522,9 @@ mod tests {
             tauri::async_runtime::block_on(guard("test.timed", |_| async { Ok(7u8) }))
         });
         assert_eq!(result.expect("command"), 7);
-        assert!(log.contains("command completed"), "{log}");
-        assert!(log.contains("command=\"test.timed\""), "{log}");
-        assert!(log.contains("elapsed_us="), "{log}");
+        let line = crate::log_capture::line_with(&log, "command=\"test.timed\"");
+        assert!(line.contains("command completed"), "{line}");
+        assert!(line.contains("elapsed_us="), "{line}");
     }
 
     #[test]
@@ -535,8 +535,9 @@ mod tests {
             }))
         });
         assert!(result.is_err());
-        assert!(log.contains("command failed"), "{log}");
-        assert!(log.contains("elapsed_us="), "{log}");
+        let line = crate::log_capture::line_with(&log, "command=\"test.slow-failure\"");
+        assert!(line.contains("command failed"), "{line}");
+        assert!(line.contains("elapsed_us="), "{line}");
     }
 
     #[test]

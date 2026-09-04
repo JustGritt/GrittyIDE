@@ -95,4 +95,83 @@ gesture, not a new way to open things.
 
 ## Completion report
 
-(filled at review)
+### Summary
+
+Dropping a file the workspace contains opens it as a tab; dropping a folder
+opens it as the workspace. The window receives the OS drop, the core
+canonicalizes and classifies each path against the open workspace, one event
+carries the result, and the renderer performs it with `workspace.open` and
+`documents.open` — the commands that already existed. No new command.
+
+The design turned on one existing rule: documents are keyed workspace root plus
+relative path, so a file from outside any open workspace has no identity in
+Gritty. Rather than inventing one, the UI offers to open its folder and waits.
+
+### Files changed
+
+- `crates/workspace/src/root.rs`: `WorkspaceRoot::relativize`, the inverse of
+  `WorkspacePath::to_native`, for paths arriving from the platform rather than
+  the protocol. Non-UTF-8 components yield `None` instead of a lossy path.
+- `crates/gritty-core/src/file_drop.rs` (new): `DroppedKind`, `DroppedPath`,
+  `classify`, and `FileDropService`.
+- `crates/gritty-core/src/event/mod.rs`: `PathsDropped`, `DropHoverChanged`.
+- `crates/gritty-core/src/session/tap.rs`: both events explicitly not persisted.
+- `crates/gritty-core/src/workspace/mod.rs`: `WorkspaceManager::current_open`.
+- `crates/gritty-core/src/protocol/mod.rs`: 1.4.0 → 1.5.0.
+- `apps/desktop/src-tauri/src/file_drop.rs` (new), `lib.rs` (chained window
+  event handlers), `core.rs` (`Core.file_drop`), `tauri.conf.json`
+  (`dragDropEnabled` explicit).
+- `apps/desktop/src/features/drop/` (new): `drop-policy.ts`, `use-file-drop.ts`,
+  `drop-overlay.tsx`; `App.tsx`, `app.css`.
+- `packages/protocol/src/types.ts` and the generated types.
+
+### Tests executed
+
+`pnpm check` green. New:
+
+- `gritty-workspace` (2): `relativize` round-trips `to_native`; refuses paths
+  outside the root, including a sibling sharing a string prefix.
+- `gritty-core` (7): file inside, file outside, no workspace open, directories,
+  a path that stopped resolving, order and one-item-per-path, and a symlink
+  resolved before it is judged.
+- `apps/desktop` (9): every `planDrop` rule — folder wins over files, one
+  folder at a time, the 20-file cap, an outside file never setting
+  `openWorkspace`, unresolvable paths reported not ignored.
+
+### Architectural decisions
+
+- **The drop is classified in the core, not the WebView.** Deciding whether a
+  path is inside the workspace is path identity (ADR-010), and the WebView has
+  no filesystem access to answer it. It also keeps the classification testable
+  without a window.
+- **The renderer never sees Tauri's own `tauri://drag-drop` events**, which
+  would mean importing `@tauri-apps/api` outside `transport/tauri.ts` and
+  breaking rule 1.
+- **`Over` is never forwarded.** It fires continuously during a drag; enter and
+  leave are all the overlay needs (rule 8).
+- **Classification runs on the blocking pool.** It stats every path, and the
+  window event handler is on the UI thread.
+- **Neither event is persisted.** A drop is a gesture; what it leads to is
+  persisted by the events for those things. `Intent::from_event` is exhaustive
+  on purpose, so this had to be stated rather than defaulted.
+- **A folder wins over files in the same gesture**, because the files'
+  workspace-relative identity would change under them the moment the root did.
+
+### Known limitations
+
+- **The drop gesture itself has never been performed.** Classification and the
+  plan are tested; nothing has dragged a file onto the window. Manual pass
+  steps 2.13–2.18.
+- Whether OS file drops break the tab strip's HTML5 drag is still unknown —
+  T040 raised it, step 2.18 decides it.
+- `use-file-drop` is untested, following the existing convention: the decision
+  lives in a pure tested module and the hook that calls `core` is thin, the
+  same shape as `use-explorer`.
+- No loose files, no multi-root, no drop onto a specific tab or split.
+
+### Follow-up tasks
+
+- T100 could offer the file's *repository* root rather than its immediate
+  parent, which is usually what someone dragging from a project means.
+- If step 2.18 shows the two drag mechanisms conflict, either the tab strip
+  moves off HTML5 drag or `dragDropEnabled` becomes conditional.

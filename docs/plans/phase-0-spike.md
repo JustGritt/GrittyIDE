@@ -64,13 +64,13 @@ later.
 |---|---|---|---|
 | Cold launch to usable shell | ≤ 2 s | **496 ms** median of 5 (483–556). Decomposed: application built 42 ms, window shown 181 ms, first WebView round trip 496 ms | Release bundle, `GRITTY_DATA_DIR` deleted before each run, default log filter; `startup milestone … "first webview health"`. `scripts/measure-phase-0.sh launch cold <dir> 5` |
 | Warm launch | ≤ 1 s | **504 ms** median of 5 (495–508) with a session database and window geometry; **504 ms** median of 3 when also restoring a workspace and three tabs | Same, keeping the data directory (`… launch warm <dir> 5 keep`). Warm is not faster than cold because startup does almost nothing either way — the restore work is sub-millisecond and does not gate the window |
-| Idle CPU (no watchers/tasks) | ~0 % | **0.97 % of one core** over 60 s, workspace and three tabs open: WebContent 0.62 %, Gritty 0.28 %, GPU 0.05 %, Networking 0.02 % | Cumulative CPU-time deltas (`ps -o time=`), not `%cpu`, which is an average over the process lifetime. Small, but not zero: something ticks while nothing happens, and what it is has not been identified — follow-up |
+| Idle CPU (no watchers/tasks) | ~0 % | **0.064 % of one core** — 0.86 s of CPU across all four processes over 22.5 minutes (Gritty 0.10 s, WebContent 0.66 s, GPU 0.07 s, Networking 0.03 s). Target met | Cumulative CPU-time deltas (`ps -o time=`), not `%cpu`, which is an average over the process lifetime. **Measure over tens of minutes, not one:** the same method over the 60 s *after launch* reads 0.97 %, which is the app still settling, not idle |
 | Typing responsiveness | no perceptible frame drops | pending the human pass | Manual pass step 2.25 (Web Inspector *Timelines*, frames over 16 ms, 12 MiB fixture). No core-side proxy exists: typing is debounced before it reaches a command |
 | Open a normal source file | ≤ 100 ms perceived | core side **0.23 ms** median (`documents.open`, n=9, max 0.55 ms); perceived pending the human pass | Restore of three tabs in `fixtures/small-repo` under `GRITTY_LOG=debug`. The core is three orders of magnitude inside the target; whether the *screen* is, is step 2.29 |
 | Workspace restore | UI immediately, expensive work incremental | **the window appears at the same time with or without a workspace to restore** (504 ms vs 504 ms). `session.restore` 0.45 ms, `workspace.list` 0.35 ms, three `documents.open` 0.23 ms each | Session seeded directly into SQLite (`… seed <dir> <root> <tabs…>`) so the real restore path runs without anyone clicking |
 | Repository enumeration | never blocks the editor; progressive | `fixtures/large-repo` (10 501 files, 103 directories, depth 25): `workspace.list` **0.29 ms** median, 0.88 ms max; launch **502 ms**, indistinguishable from an empty workspace | Same seeding, root `fixtures/large-repo`. Only the root is listed: one `read_dir` per expanded directory, nothing recursive. Paging a >5000-entry directory is manual pass step 1.10 |
-| Baseline memory (shell only) | track; compare with an Electron baseline | **607 MiB RSS** total with a workspace and three tabs: WebContent 432, Gritty 122, GPU 37, Networking 16. **Cursor, same workspace, extensions disabled: 1194 MiB** (renderer 767, main 254, three helpers 173) | RSS summed over the app and the WebKit helper processes it spawned, identified by diffing the machine's WebKit processes across launch. Both measured identically |
-| Memory growth after 30 min | track | see the soak row recorded below | 30 min at 30 s intervals, **idle**, not editing — the agent cannot type into the window. What this detects is a leak, not editing growth |
+| Baseline memory (shell only) | track; compare with an Electron baseline | Two minutes after opening a workspace with three tabs: **607 MiB RSS** (WebContent 432, Gritty 122, GPU 37, Networking 16). **Cursor, same workspace, extensions disabled, same moment: 1194 MiB.** After 22 minutes idle Gritty settles to **228 MB physical footprint** (WebContent 190, Gritty 37; peak footprint 461 MB) | RSS summed over the app and the WebKit helpers it spawned, found by diffing the machine's WebKit processes across launch. Gritty and Cursor were measured identically at the same point in their lifetime, which is what makes the comparison fair — the absolutes are upper bounds, since RSS counts shared framework pages |
+| Memory growth after 30 min | track | **No growth.** Over 22.5 minutes idle the app allocated nothing measurable (0.86 s CPU total) and resident memory *fell* from 607 to ~230 MiB as macOS reclaimed untouched pages | Idle, not editing — the agent cannot type into the window. **RSS is the wrong metric here:** it falls while nothing is allocated, so it cannot tell "no leak" from "reclaimed". `Physical footprint` (`vmmap --summary`, what Activity Monitor calls Memory) is the metric, and the harness now records it. A real editing-growth number needs a person at the keyboard |
 | Agent/LSP/indexer crash | no renderer crash or freeze | not applicable yet | No agent, language server or indexer exists (T300, Phase 6). The only supervised child today is a PTY, covered by B2. Recorded as out of scope rather than as passing |
 
 ### How to read these
@@ -91,6 +91,13 @@ later.
 - **Command timings are core side.** `documents.open` at 0.23 ms says the core
   is not the bottleneck; it says nothing about what the user sees three frames
   later. Every perceived-latency row still needs the human pass.
+- **Two measurement traps met here, both worth inheriting.** A 30-minute soak
+  run while the agent was compiling recorded memory *falling* by 336 MiB —
+  macOS compressing the WebView's pages under the pressure the build created.
+  Nothing else may run during a memory measurement. And once that was fixed,
+  RSS still fell, because macOS reclaims an idle app's untouched pages: the
+  metric, not the machine, was wrong. Physical footprint is the one that holds
+  still.
 - The harness is `scripts/measure-phase-0.sh`, so these can be re-run and
   compared rather than argued about.
 
