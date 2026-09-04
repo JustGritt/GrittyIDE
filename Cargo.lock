@@ -1195,6 +1195,7 @@ name = "gritty-core"
 version = "0.1.0"
 dependencies = [
  "gritty-persistence",
+ "gritty-terminal",
  "gritty-workspace",
  "serde",
  "serde_json",

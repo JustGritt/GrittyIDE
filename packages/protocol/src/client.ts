@@ -15,6 +15,7 @@ import {
   type EventName,
   type EventOf,
   type HealthReport,
+  type KillTerminalRequest,
   type ListDirectoryRequest,
   type ListDirectoryResponse,
   type OpenDocumentRequest,
@@ -26,13 +27,17 @@ import {
   type RecoverSnapshotRequest,
   type RecoveryCandidate,
   type ReloadDocumentRequest,
+  type ResizeTerminalRequest,
   type SaveDocumentRequest,
   type SessionRestoreResponse,
+  type SpawnTerminalRequest,
   type StartDemoRequest,
+  type Terminal,
   type UpdateDocumentRequest,
   type UpdateSessionRequest,
   type Workspace,
   type WorkspaceId,
+  type WriteTerminalRequest,
 } from './types';
 import { assertCompatible } from './version';
 
@@ -121,6 +126,26 @@ export interface CoreClient {
     recover(request: RecoverSnapshotRequest): Promise<DocumentContent>;
     discard(request: DiscardSnapshotRequest): Promise<void>;
     update(request: UpdateSessionRequest): Promise<void>;
+  };
+  /**
+   * Terminal sessions (T090). `spawn` starts the user's login shell in the
+   * workspace (`cwd` is workspace-relative, the root by default) and returns
+   * the session; its output arrives as `TerminalOutput` events, batched and
+   * bounded — a batch's `truncatedBytes` counts output that was dropped
+   * because the shell wrote faster than it could be delivered, and must be
+   * shown rather than hidden. `write` sends keystrokes verbatim, control
+   * characters included. `kill` terminates the whole process tree and is
+   * idempotent; `TerminalExited` follows exactly once, after the last output.
+   * A session that has ended stays listed, with its exit status, until the
+   * workspace closes.
+   */
+  terminal: {
+    spawn(request: SpawnTerminalRequest): Promise<Terminal>;
+    write(request: WriteTerminalRequest): Promise<void>;
+    resize(request: ResizeTerminalRequest): Promise<Terminal>;
+    kill(request: KillTerminalRequest): Promise<Terminal>;
+    /** Every session, running and ended, in creation order. */
+    list(): Promise<Terminal[]>;
   };
   subscribe<N extends EventName>(name: N, handler: (event: EventOf<N>) => void): Unsubscribe;
   subscribeAll(handler: (event: EventEnvelope) => void): Unsubscribe;
@@ -218,6 +243,13 @@ export function createCoreClient(
       recover: (request) => command<DocumentContent>('session.recover', { request }),
       discard: (request) => command<void>('session.discard', { request }),
       update: (request) => command<void>('session.update', { request }),
+    },
+    terminal: {
+      spawn: (request) => command<Terminal>('terminal.spawn', { request }),
+      write: (request) => command<void>('terminal.write', { request }),
+      resize: (request) => command<Terminal>('terminal.resize', { request }),
+      kill: (request) => command<Terminal>('terminal.kill', { request }),
+      list: () => command<Terminal[]>('terminal.list'),
     },
     subscribe: (name, handler) => hub.subscribe(name, handler),
     subscribeAll: (handler) => hub.subscribeAll(handler),

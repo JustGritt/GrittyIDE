@@ -81,6 +81,11 @@ string_id! {
 }
 
 string_id! {
+    /// Identifies a terminal session (T090).
+    TerminalId => "string & { readonly __brand: 'TerminalId' }"
+}
+
+string_id! {
     /// Identifies an agent run (T300); used by [`super::actor::Actor::Agent`].
     AgentRunId => "string & { readonly __brand: 'AgentRunId' }"
 }
