@@ -7,6 +7,11 @@ Windows is not a supported target before Phase 8 (ADR-002); the column exists
 because the development machine moved to Windows 11 during T020, so
 observations from there are recorded without claiming support.
 
+Every row still marked `–` or `(a)` on macOS is covered, in order, by
+`phase-0-manual-pass.md` — one ordered session that replaces the per-task
+"not executed" lists. Fill rows from that pass with the observation, the date
+and the machine.
+
 Legend: ✔ works · ✘ defect (link an issue/note) · ~ partial · – untested · (a) automated test only
 
 | Area | Check | macOS (WKWebView) | Linux (WebKitGTK) | Windows (WebView2) | Notes |
@@ -61,7 +66,7 @@ Legend: ✔ works · ✘ defect (link an issue/note) · ~ partial · – unteste
 | Recovery | quit / relaunch restores workspace, tabs, active tab, view modes, cursors, preferences | (a) | – | – | T060: adapter and Vitest coverage; in the app pending the human pass |
 | System | window geometry restore (size, position, maximized) | ~ | – | – | T060: `pnpm dev` twice with `GRITTY_DATA_DIR` on macOS 26 (2026-09-04): the second launch logged `restoring window geometry width=2560 height=1600 position=Some((232, 142))` from the row the first launch recorded; off-monitor positions dropped (`fit_to_monitors` tests); Linux untested by design (Wayland ignores positions, GTK maximize-before-show) |
 | System | sleep/wake, multi-monitor | – | – | – | T060: pending the human pass |
-| Build | `pnpm tauri build` produces a launchable bundle | – | – (CI: no-bundle) | – | T000 |
+| Build | `pnpm tauri build` produces a launchable bundle | ~ | – (CI: no-bundle) | – | T000; 2026-09-04 macOS 26 arm64: `pnpm tauri build --debug --bundles app` produced `target/debug/bundle/macos/Gritty.app`, which launches from the CLI under the production CSP and reaches `first webview health` in 754 ms. CI (run 33876904661) built and uploaded the release `Gritty.app` on macos-15. Launching it from Finder and using it is manual pass Session 6 |
 
 ## Windows development notes (T020)
 

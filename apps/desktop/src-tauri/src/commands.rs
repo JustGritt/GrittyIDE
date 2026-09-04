@@ -8,6 +8,8 @@
 
 use std::future::Future;
 use std::path::PathBuf;
+use std::sync::Once;
+use std::time::Instant;
 
 use gritty_core::document::{
     CloseDocumentRequest, Document, DocumentContent, DocumentStatusRequest, OpenDocumentRequest,
@@ -52,6 +54,7 @@ pub async fn core_health<R: tauri::Runtime>(
             webview_version: tauri::webview_version().ok(),
         };
         let report = gritty_core::health(shell);
+        FIRST_HEALTH.call_once(|| crate::log_startup_milestone("first webview health"));
         tracing::info!(?report, "health requested by webview");
         Ok(report)
     })
@@ -466,26 +469,41 @@ fn parse_request<T: DeserializeOwned>(request: serde_json::Value) -> Result<T, C
 
 /// Run a command body on the async runtime with a correlation id and a span.
 /// A panic inside the body surfaces as `Internal` carrying that correlation id.
+/// Marks the first `core.health` call, which is the WebView's first round trip
+/// through the protocol and therefore the closest proxy for "the shell is
+/// usable" (§C, cold and warm launch).
+static FIRST_HEALTH: Once = Once::new();
+
 async fn guard<T, F, Fut>(command: &'static str, body: F) -> Result<T, CoreError>
 where
     T: Send + 'static,
     F: FnOnce(CorrelationId) -> Fut + Send + 'static,
     Fut: Future<Output = Result<T, CoreError>> + Send + 'static,
 {
+    let started = Instant::now();
     let correlation = CorrelationId::new();
     let span = tracing::debug_span!("command", command, correlation_id = %correlation);
     let task_correlation = correlation.clone();
     let joined =
         tauri::async_runtime::spawn(async move { body(task_correlation).await }.instrument(span))
             .await;
+    let elapsed_us = started.elapsed().as_micros() as u64;
     match joined {
-        Ok(Ok(value)) => Ok(value),
+        Ok(Ok(value)) => {
+            tracing::debug!(
+                command,
+                correlation_id = %correlation,
+                elapsed_us,
+                "command completed"
+            );
+            Ok(value)
+        }
         Ok(Err(error)) => {
-            tracing::warn!(command, correlation_id = %correlation, code = %error.code, message = %error.message, "command failed");
+            tracing::warn!(command, correlation_id = %correlation, elapsed_us, code = %error.code, message = %error.message, "command failed");
             Err(error.or_correlation(&correlation))
         }
         Err(join) => {
-            tracing::error!(command, correlation_id = %correlation, error = %join, "command panicked");
+            tracing::error!(command, correlation_id = %correlation, elapsed_us, error = %join, "command panicked");
             Err(CoreError::internal(format!("command {command} panicked"))
                 .with_correlation(correlation))
         }
@@ -497,6 +515,29 @@ mod tests {
     use gritty_core::CoreErrorCode;
 
     use super::*;
+
+    #[test]
+    fn guard_reports_how_long_a_command_took() {
+        let (result, log) = crate::log_capture::capture(|| {
+            tauri::async_runtime::block_on(guard("test.timed", |_| async { Ok(7u8) }))
+        });
+        assert_eq!(result.expect("command"), 7);
+        assert!(log.contains("command completed"), "{log}");
+        assert!(log.contains("command=\"test.timed\""), "{log}");
+        assert!(log.contains("elapsed_us="), "{log}");
+    }
+
+    #[test]
+    fn a_failing_command_still_reports_how_long_it_took() {
+        let (result, log) = crate::log_capture::capture(|| {
+            tauri::async_runtime::block_on(guard("test.slow-failure", |_| async {
+                Err::<(), _>(CoreError::not_found("nothing"))
+            }))
+        });
+        assert!(result.is_err());
+        assert!(log.contains("command failed"), "{log}");
+        assert!(log.contains("elapsed_us="), "{log}");
+    }
 
     #[test]
     fn guard_turns_a_panic_into_an_internal_error_with_correlation() {

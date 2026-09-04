@@ -197,6 +197,8 @@ pub fn restore_main_window<R: Runtime>(app: &AppHandle<R>) {
     }
     if let Err(error) = window.show() {
         tracing::error!(%error, "could not show the main window");
+    } else {
+        crate::log_startup_milestone("window shown");
     }
     // Record where the window ended up, so a quit without any resize or move
     // still restores this geometry next time.
