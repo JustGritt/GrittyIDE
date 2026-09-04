@@ -1,9 +1,10 @@
 import type { HealthReport } from '@gritty/protocol';
+import { PROTOCOL_VERSION } from '@gritty/protocol';
 import { describe, expect, it } from 'vitest';
 import { describeHealth } from './health';
 
 const sample: HealthReport = {
-  protocolVersion: '1.0.0',
+  protocolVersion: PROTOCOL_VERSION,
   coreVersion: '0.1.0',
   os: 'macos',
   arch: 'aarch64',
@@ -19,7 +20,7 @@ const sample: HealthReport = {
 describe('describeHealth', () => {
   it('summarises core version, build type, platform, runtime and protocol', () => {
     expect(describeHealth(sample)).toBe(
-      'core 0.1.0 (debug) on macos/aarch64 via tauri 2.11.5, protocol 1.0.0',
+      `core 0.1.0 (debug) on macos/aarch64 via tauri 2.11.5, protocol ${PROTOCOL_VERSION}`,
     );
   });
 

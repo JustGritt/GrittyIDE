@@ -35,7 +35,9 @@ use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_s
 use crate::batch::{FLUSH_INTERVAL, MAX_PENDING_BYTES, PendingOutput, READ_BUFFER_BYTES};
 use crate::error::TerminalError;
 use crate::host::{PtyGrid, PtyHost, PtySession, SpawnRequest, TerminalExit, TerminalSink};
-use crate::shell::{COLORTERM_VALUE, TERM_VALUE, check_cwd, resolve_shell};
+use crate::shell::{
+    COLORTERM_VALUE, ShellProfile, TERM_VALUE, check_cwd, resolve_shell, system_shells,
+};
 
 /// How long each termination signal is given before escalating.
 const ESCALATION_STEP: Duration = Duration::from_millis(250);
@@ -204,6 +206,10 @@ impl PtyHost for SystemPtyHost {
             channel,
             kill_started: AtomicBool::new(false),
         }))
+    }
+
+    fn shells(&self) -> Vec<ShellProfile> {
+        system_shells()
     }
 }
 

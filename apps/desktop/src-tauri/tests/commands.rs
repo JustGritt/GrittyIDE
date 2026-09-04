@@ -1145,6 +1145,77 @@ fn terminal_harness() -> (Harness, TempData, Value, Value) {
 }
 
 #[test]
+fn a_terminal_starts_without_a_workspace() {
+    // The whole point: no workspace has been opened on this harness.
+    let harness = Harness::new();
+
+    let terminal = harness
+        .terminal("terminal_spawn", json!({}))
+        .expect("a terminal needs no workspace");
+
+    assert_eq!(terminal["status"], "RUNNING");
+    assert!(
+        terminal.get("workspaceId").is_none(),
+        "a home session belongs to no workspace: {terminal}"
+    );
+    assert!(
+        terminal.get("cwd").is_none(),
+        "a home directory has no workspace-relative path: {terminal}"
+    );
+
+    let listed = harness.invoke("terminal_list", json!({})).expect("list");
+    assert_eq!(listed.as_array().expect("an array").len(), 1);
+}
+
+#[test]
+fn a_relative_cwd_without_a_workspace_is_invalid_input() {
+    // The renderer may say which workspace, or say nothing. It may never name
+    // a directory to root a shell in (ADR-010).
+    let harness = Harness::new();
+
+    let error = harness
+        .terminal("terminal_spawn", json!({ "cwd": "src" }))
+        .expect_err("a cwd needs a workspace");
+
+    assert_eq!(error["code"], "InvalidInput");
+}
+
+#[test]
+fn terminal_profiles_reports_what_the_host_can_start() {
+    let harness = Harness::new();
+
+    // The fake host reports no shells, which must be an empty list rather than
+    // an error: a machine Gritty cannot inspect still has a working default.
+    let profiles = harness
+        .invoke("terminal_profiles", json!({ "request": {} }))
+        .expect("profiles");
+    assert!(profiles.as_array().expect("an array").is_empty());
+
+    // A configured shell that does not exist is reported with the reason, not
+    // dropped: the user typed it and is owed an explanation.
+    let profiles = harness
+        .invoke(
+            "terminal_profiles",
+            json!({ "request": { "custom": ["/nope/fish"] } }),
+        )
+        .expect("profiles");
+    let profiles = profiles.as_array().expect("an array");
+    assert_eq!(profiles.len(), 1, "{profiles:?}");
+    assert_eq!(profiles[0]["path"], "/nope/fish");
+    assert_eq!(profiles[0]["isCustom"], true);
+    assert_eq!(profiles[0]["available"], false);
+    assert!(profiles[0]["unavailableReason"].is_string());
+
+    let error = harness
+        .invoke(
+            "terminal_profiles",
+            json!({ "request": { "custom": ["relative/fish"] } }),
+        )
+        .expect("a relative path is reported, not refused");
+    assert_eq!(error.as_array().expect("an array")[0]["available"], false);
+}
+
+#[test]
 fn terminal_spawn_returns_a_running_session_and_lists_it() {
     let (harness, _dir, workspace, terminal) = terminal_harness();
 

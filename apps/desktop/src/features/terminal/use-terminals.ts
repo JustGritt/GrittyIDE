@@ -1,7 +1,9 @@
 import {
   type CoreError,
+  type SpawnTerminalRequest,
   type Terminal,
   type TerminalId,
+  type TerminalProfile,
   toCoreError,
   type WorkspaceId,
 } from '@gritty/protocol';
@@ -23,9 +25,10 @@ import {
  * (which sessions exist, which ended) is React state, so a shell printing at
  * full speed re-renders nothing.
  */
-export function useTerminals() {
+export function useTerminals(customShells: readonly string[] = []) {
   const [state, dispatch] = useReducer(terminalsReducer, initialTerminalsState);
   const [error, setError] = useState<CoreError | null>(null);
+  const [profiles, setProfiles] = useState<TerminalProfile[]>([]);
   const bus = useMemo(createOutputBus, []);
   // Read inside the event handler, which is registered once.
   const busRef = useRef(bus);
@@ -47,20 +50,18 @@ export function useTerminals() {
     let active = true;
     core.workspace.current().then(
       (workspace) => {
-        if (!active) return;
-        dispatch({ type: 'workspace', workspaceId: workspace?.id ?? null });
-        // After a renderer reload the core still holds the sessions; adopt
-        // them rather than leaving orphaned shells running invisibly.
-        if (workspace) {
-          core.terminal.list().then(
-            (terminals) => {
-              if (active) dispatch({ type: 'rehydrate', terminals });
-            },
-            (cause: unknown) => {
-              if (active) setError(toCoreError(cause));
-            },
-          );
-        }
+        if (active) dispatch({ type: 'workspace', workspaceId: workspace?.id ?? null });
+      },
+      (cause: unknown) => {
+        if (active) setError(toCoreError(cause));
+      },
+    );
+    // After a renderer reload the core still holds the sessions; adopt them
+    // rather than leaving orphaned shells running invisibly. Not conditional
+    // on a workspace: a session does not need one.
+    core.terminal.list().then(
+      (terminals) => {
+        if (active) dispatch({ type: 'rehydrate', terminals });
       },
       (cause: unknown) => {
         if (active) setError(toCoreError(cause));
@@ -72,9 +73,41 @@ export function useTerminals() {
     };
   }, []);
 
-  const spawn = useCallback(async (workspaceId: WorkspaceId) => {
+  // Refetched whenever the configured shells change, so adding one in the
+  // settings puts it in the picker without a restart. Keyed on the serialized
+  // list rather than the array, which is a fresh object on every render;
+  // JSON round-trips a path exactly, including one containing a newline.
+  const customKey = JSON.stringify(customShells);
+  useEffect(() => {
+    let active = true;
+    const custom = JSON.parse(customKey) as string[];
+    // Which shells exist does not depend on a workspace, and a failure here
+    // must not stop terminals working: the picker just shows the default.
+    core.terminal.profiles({ custom }).then(
+      (found) => {
+        if (active) setProfiles(found);
+      },
+      (cause: unknown) => {
+        if (active) setError(toCoreError(cause));
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [customKey]);
+
+  /**
+   * Start a shell. `shell` is an absolute path from the profile picker;
+   * omitting it lets the core resolve the user's login shell (T090). Without a
+   * `workspaceId` the core starts it in the home directory (T095) — the
+   * renderer never names a directory outside a workspace.
+   */
+  const spawn = useCallback(async (workspaceId: WorkspaceId | null, shell?: string) => {
     try {
-      const terminal = await core.terminal.spawn({ workspaceId });
+      const request: SpawnTerminalRequest = {};
+      if (workspaceId !== null) request.workspaceId = workspaceId;
+      if (shell !== undefined) request.shell = shell;
+      const terminal = await core.terminal.spawn(request);
       dispatch({ type: 'opened', terminal });
       setError(null);
       return terminal;
@@ -132,6 +165,7 @@ export function useTerminals() {
   const terminals: Terminal[] = selectTerminals(state);
   return {
     terminals,
+    profiles,
     active: selectActive(state),
     workspaceId: state.workspaceId,
     bus,

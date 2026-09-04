@@ -9,10 +9,15 @@ import type {
   OperationId,
   OperationProgressPayload,
 } from './types';
+import { PROTOCOL_VERSION } from './types';
 
 const OP_ID = 'op-1' as OperationId;
 
-function health(protocolVersion = '1.0.0'): HealthReport {
+// Tracks the real version: a MAJOR bump must not make every unrelated
+// client test fail the compatibility probe.
+const [MAJOR = 0, MINOR = 0] = PROTOCOL_VERSION.split('.').map(Number);
+
+function health(protocolVersion = PROTOCOL_VERSION): HealthReport {
   return {
     protocolVersion,
     coreVersion: '0.1.0',
@@ -119,7 +124,7 @@ describe('commands', () => {
 
 describe('protocol version guard', () => {
   it('refuses a core with a different major and keeps refusing', async () => {
-    const { client, transport } = setup({ protocolVersion: '2.0.0' });
+    const { client, transport } = setup({ protocolVersion: `${MAJOR + 1}.0.0` });
     const first = await client.health().catch((e: unknown) => e);
     expect((first as CoreError).code).toBe('ProtocolMismatch');
     const second = await client.operations.list().catch((e: unknown) => e);
@@ -128,7 +133,7 @@ describe('protocol version guard', () => {
   });
 
   it('accepts a newer minor version', async () => {
-    const { client } = setup({ protocolVersion: '1.9.0' });
+    const { client } = setup({ protocolVersion: `${MAJOR}.${MINOR + 5}.0` });
     await expect(client.operations.list()).resolves.toHaveLength(1);
   });
 

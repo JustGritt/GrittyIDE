@@ -22,12 +22,17 @@ export function TerminalView({
   session,
   active,
   bus,
+  fontFamily,
+  fontSize,
   onData,
   onResize,
 }: {
   session: TerminalSession;
   active: boolean;
   bus: OutputBus;
+  /** From the terminal settings; `null` keeps the default. */
+  fontFamily: string | null;
+  fontSize: number | null;
   onData: (data: string) => void;
   onResize: (cols: number, rows: number) => void;
 }) {
@@ -42,13 +47,18 @@ export function TerminalView({
   const exitedRef = useRef(exited);
   exitedRef.current = exited;
 
+  // Read once at construction; the effect below applies later changes without
+  // tearing the terminal down and losing the scrollback.
+  const font = useRef({ fontFamily, fontSize });
+  font.current = { fontFamily, fontSize };
+
   useEffect(() => {
     const container = host.current;
     if (!container) return;
 
     const terminal = new Terminal({
-      fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
-      fontSize: 13,
+      fontFamily: font.current.fontFamily ?? TERMINAL_FONT_STACK,
+      fontSize: font.current.fontSize ?? DEFAULT_TERMINAL_FONT_SIZE,
       cursorBlink: true,
       // Gritty's own scrollback; the shell's is unaffected.
       scrollback: 5000,
@@ -98,6 +108,18 @@ export function TerminalView({
     // (status, size) must not tear the terminal down.
   }, [session.id, bus]);
 
+  // A font change resizes every cell, so the grid has to be recomputed and
+  // the PTY told about it — otherwise the shell keeps wrapping at the old
+  // width. Applied in place: recreating the terminal would lose the scrollback.
+  useEffect(() => {
+    const terminal = term.current;
+    const container = host.current;
+    if (!terminal) return;
+    terminal.options.fontFamily = fontFamily ?? TERMINAL_FONT_STACK;
+    terminal.options.fontSize = fontSize ?? DEFAULT_TERMINAL_FONT_SIZE;
+    if (container && fit.current) fitIfVisible(container, fit.current);
+  }, [fontFamily, fontSize]);
+
   // A hidden view cannot be measured, so it is fitted when it becomes visible.
   useEffect(() => {
     if (!active) return;
@@ -124,6 +146,40 @@ export function TerminalView({
     />
   );
 }
+
+/** Matches the editor's default; the settings override it. */
+export const DEFAULT_TERMINAL_FONT_SIZE = 13;
+
+/**
+ * Nerd Font families first, then the ordinary monospace stack.
+ *
+ * A configured prompt (powerlevel10k, starship, oh-my-posh) draws its
+ * separators and icons from the Private Use Area, and a font without those
+ * code points renders every one of them as an empty box — which reads as "the
+ * terminal is broken" rather than "a font is missing". The browser skips a
+ * family that is not installed, so naming the widely-installed patched fonts
+ * costs nothing on a machine that has none and fixes the prompt on a machine
+ * that has one.
+ *
+ * These are defaults, not a setting: the terminal has no preferences surface
+ * yet. When it gets one (alongside the editor's), this becomes its initial
+ * value.
+ */
+const TERMINAL_FONT_STACK = [
+  '"MesloLGS NF"',
+  '"Hack Nerd Font Mono"',
+  '"JetBrainsMono Nerd Font Mono"',
+  '"FiraCode Nerd Font Mono"',
+  '"CaskaydiaCove Nerd Font Mono"',
+  '"SauceCodePro Nerd Font Mono"',
+  '"Symbols Nerd Font Mono"',
+  'ui-monospace',
+  'SFMono-Regular',
+  '"SF Mono"',
+  'Menlo',
+  'Consolas',
+  'monospace',
+].join(', ');
 
 /** Fitting a zero-sized element makes xterm compute a nonsense grid. */
 function fitIfVisible(container: HTMLElement, addon: FitAddon) {

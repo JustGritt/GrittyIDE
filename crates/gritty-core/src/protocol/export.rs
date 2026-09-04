@@ -26,8 +26,8 @@ use crate::session::wire::{
 };
 use crate::shell::OpenExternalRequest;
 use crate::terminal::wire::{
-    KillTerminalRequest, ResizeTerminalRequest, SpawnTerminalRequest, Terminal,
-    WriteTerminalRequest,
+    KillTerminalRequest, ListProfilesRequest, ResizeTerminalRequest, SpawnTerminalRequest,
+    Terminal, TerminalProfile, WriteTerminalRequest,
 };
 use crate::workspace::{
     CloseWorkspaceRequest, ListDirectoryRequest, ListDirectoryResponse, OpenWorkspaceRequest,
@@ -80,6 +80,8 @@ fn export_bindings() {
     DiscardSnapshotRequest::export_all(&cfg).expect("export DiscardSnapshotRequest");
     UpdateSessionRequest::export_all(&cfg).expect("export UpdateSessionRequest");
     Terminal::export_all(&cfg).expect("export Terminal");
+    TerminalProfile::export_all(&cfg).expect("export TerminalProfile");
+    ListProfilesRequest::export_all(&cfg).expect("export ListProfilesRequest");
     SpawnTerminalRequest::export_all(&cfg).expect("export SpawnTerminalRequest");
     WriteTerminalRequest::export_all(&cfg).expect("export WriteTerminalRequest");
     ResizeTerminalRequest::export_all(&cfg).expect("export ResizeTerminalRequest");

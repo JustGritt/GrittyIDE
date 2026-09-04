@@ -41,7 +41,7 @@ export function App() {
   const [layout, setLayout] = useState<Layout>(DEFAULT_LAYOUT);
   // Terminal sessions live beside the editor, not inside it: output never
   // passes through editor state (T090).
-  const terminals = useTerminals();
+  const terminals = useTerminals(layout.terminal.customShells);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const session = useSession({
     documents,
@@ -94,7 +94,9 @@ export function App() {
           <ExplorerPanel
             onOpenFile={(workspaceId, path) => void documents.openFile(workspaceId, path)}
             showHidden={layout.explorer.showHidden}
-            onShowHiddenChange={(showHidden) => setLayout({ explorer: { showHidden } })}
+            onShowHiddenChange={(showHidden) =>
+              setLayout((current) => ({ ...current, explorer: { showHidden } }))
+            }
           />
           {import.meta.env.DEV && <OperationsPanel />}
         </aside>
@@ -123,7 +125,13 @@ export function App() {
         {/* Kept mounted while collapsed: unmounting would dispose every xterm
             and lose the scrollback of running shells. */}
         <div className="shell__dock-body" hidden={!terminalOpen}>
-          <TerminalPanel terminals={terminals} />
+          <TerminalPanel
+            terminals={terminals}
+            settings={layout.terminal}
+            onSettingsChange={(patch) =>
+              setLayout((current) => ({ ...current, terminal: { ...current.terminal, ...patch } }))
+            }
+          />
         </div>
       </footer>
     </main>

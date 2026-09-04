@@ -8,11 +8,18 @@ import type { WorkspacePath } from "./WorkspacePath";
 /**
  * A terminal session as the UI sees it.
  */
-export type Terminal = { id: TerminalId, workspaceId: WorkspaceId, 
+export type Terminal = { id: TerminalId, 
 /**
- * Where the shell was started, relative to the workspace root.
+ * The workspace the shell was rooted in; absent for a session started
+ * without one, which lives in the user's home directory.
  */
-cwd: WorkspacePath, 
+workspaceId?: WorkspaceId, 
+/**
+ * Where the shell was started, relative to the workspace root. Absent
+ * exactly when `workspace_id` is: a home directory has no workspace to be
+ * relative to, and the protocol does not put absolute paths on the wire.
+ */
+cwd?: WorkspacePath, 
 /**
  * Absolute path of the program that was started. Display only.
  */

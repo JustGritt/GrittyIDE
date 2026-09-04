@@ -30,6 +30,7 @@ export const COMMANDS = {
   'terminal.resize': 'terminal_resize',
   'terminal.kill': 'terminal_kill',
   'terminal.list': 'terminal_list',
+  'terminal.profiles': 'terminal_profiles',
 } as const;
 
 export type CommandName = keyof typeof COMMANDS;

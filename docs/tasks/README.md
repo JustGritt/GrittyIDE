@@ -15,6 +15,7 @@ domain abstraction before its upstream contract exists.
 | [T050](T050-markdown.md) | Markdown | 0/1B | T030, T040 | done |
 | [T060](T060-session-persistence.md) | Session persistence + recovery | 0/1B | T030, T040 | done |
 | [T090](T090-terminal-pty.md) | Terminal (PTY) spike | 0/2 | T010 | done |
+| [T095](T095-terminal-profiles.md) | Terminal shell profiles and rooting | 0/2 | T090, T060 | review |
 | Phase 0 tests | `docs/plans/phase-0-spike.md` sections B–D | 0 | T060, T090 | in-progress |
 | ADR-001 | Confirm or reject Tauri | 0 | Phase 0 tests | todo |
 | T070 | File watcher | 1A/2 | T020, ADR-001 | not yet specified |

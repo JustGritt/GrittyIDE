@@ -1156,9 +1156,90 @@ button:disabled {
 }
 
 .terminal-panel__actions {
+  align-items: center;
   display: flex;
   flex: 0 0 auto;
   gap: 6px;
+}
+
+/* Opening the settings grows the bar and shrinks the surface below it, which
+   is what a reader expects of a disclosure; the terminal refits itself. */
+.terminal-panel__bar:has(.prefs[open]) {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+/* Sits with the actions, so it reads as part of "start a new terminal"
+   rather than as a property of the session on screen. */
+.terminal-panel__profile {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: inherit;
+  font: inherit;
+  max-width: 14rem;
+  padding: 2px 4px;
+}
+
+/* The settings popover reuses the editor's `.prefs` shell; only what is
+   specific to the shell list is styled here. */
+.terminal-settings__shells {
+  /* `.prefs__form` is a wrapping row; the shell list wants a row of its own. */
+  flex-basis: 100%;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px 8px;
+}
+
+.terminal-settings__hint {
+  color: var(--muted);
+  margin: 0;
+  max-width: 32rem;
+}
+
+.terminal-settings__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.terminal-settings__list li {
+  align-items: baseline;
+  display: flex;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+/* A shell that no longer runs stays listed, struck through, with the reason:
+   the user typed it, so silence would be worse than an ugly row. */
+.terminal-settings__broken {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.terminal-settings__reason,
+.terminal-settings__error {
+  color: var(--error);
+  flex: 1 1 auto;
+  font-family: inherit;
+  margin: 0;
+}
+
+.terminal-settings__add {
+  display: flex;
+  gap: 6px;
+}
+
+.terminal-settings__add input {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .terminal-tab {

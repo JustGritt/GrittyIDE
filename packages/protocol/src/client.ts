@@ -18,6 +18,7 @@ import {
   type KillTerminalRequest,
   type ListDirectoryRequest,
   type ListDirectoryResponse,
+  type ListProfilesRequest,
   type OpenDocumentRequest,
   type OpenExternalRequest,
   type OpenWorkspaceRequest,
@@ -33,6 +34,7 @@ import {
   type SpawnTerminalRequest,
   type StartDemoRequest,
   type Terminal,
+  type TerminalProfile,
   type UpdateDocumentRequest,
   type UpdateSessionRequest,
   type Workspace,
@@ -146,6 +148,16 @@ export interface CoreClient {
     kill(request: KillTerminalRequest): Promise<Terminal>;
     /** Every session, running and ended, in creation order. */
     list(): Promise<Terminal[]>;
+    /**
+     * Shells the user can pick (T095), the default first, followed by any
+     * `custom` paths the settings added. A snapshot, not a subscription: a
+     * shell installed afterwards appears on the next call.
+     *
+     * Discovery reports only what `$SHELL` and `/etc/shells` name. A custom
+     * path that cannot be started comes back with `available: false` and a
+     * reason rather than being dropped.
+     */
+    profiles(request?: ListProfilesRequest): Promise<TerminalProfile[]>;
   };
   subscribe<N extends EventName>(name: N, handler: (event: EventOf<N>) => void): Unsubscribe;
   subscribeAll(handler: (event: EventEnvelope) => void): Unsubscribe;
@@ -250,6 +262,8 @@ export function createCoreClient(
       resize: (request) => command<Terminal>('terminal.resize', { request }),
       kill: (request) => command<Terminal>('terminal.kill', { request }),
       list: () => command<Terminal[]>('terminal.list'),
+      profiles: (request = { custom: [] }) =>
+        command<TerminalProfile[]>('terminal.profiles', { request }),
     },
     subscribe: (name, handler) => hub.subscribe(name, handler),
     subscribeAll: (handler) => hub.subscribeAll(handler),

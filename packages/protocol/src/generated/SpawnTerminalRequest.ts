@@ -5,9 +5,18 @@ import type { WorkspacePath } from "./WorkspacePath";
 /**
  * `terminal.spawn`.
  */
-export type SpawnTerminalRequest = { workspaceId: WorkspaceId, 
+export type SpawnTerminalRequest = { 
 /**
- * Workspace-relative directory to start in; the root when omitted.
+ * Workspace to root the shell in. Omit it to start a shell that belongs
+ * to no workspace, in the user's home directory — the renderer never
+ * names that path, the core resolves it.
+ */
+workspaceId?: WorkspaceId, 
+/**
+ * Workspace-relative directory to start in; the workspace root when
+ * omitted. Rejected without a `workspaceId`: there would be nothing to
+ * resolve it against, and resolving it against anything else is exactly
+ * what ADR-010 forbids.
  */
 cwd?: WorkspacePath, 
 /**
