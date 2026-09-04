@@ -217,21 +217,40 @@ body {
 
 /* Development operations panel */
 
+/* Collapsed, it is one 32px row at the foot of the sidebar; open, it scrolls
+   inside its own share of the column rather than pushing the tree out. */
 .panel {
   border-top: 1px solid var(--border);
-  padding: var(--gap) var(--gap-md) var(--gap-md);
   flex: none;
   max-height: 45%;
   overflow: auto;
 }
 
-.panel h2 {
-  margin: 0 0 var(--gap);
+.panel > summary {
+  height: var(--section-h);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--gap-md);
+  cursor: pointer;
+  list-style: none;
   font-size: var(--text-label);
   letter-spacing: var(--tracking-label);
   text-transform: uppercase;
   font-weight: 600;
   color: var(--fg-muted);
+}
+
+.panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.panel > summary:hover {
+  background: var(--ghost);
+  color: var(--fg);
+}
+
+.panel__body {
+  padding: 0 var(--gap-md) var(--gap-md);
 }
 
 .panel__form {
