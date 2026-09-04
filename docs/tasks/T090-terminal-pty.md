@@ -1,7 +1,7 @@
 # Task T090 — Terminal (PTY) spike
 
 - **Phase:** 0 / 2
-- **Status:** todo
+- **Status:** in-progress
 - **Depends on:** T010
 
 ## Objective
