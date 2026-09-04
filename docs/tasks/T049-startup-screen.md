@@ -195,10 +195,20 @@ launcher with an error envelope on exactly the run where persistence is broken.
 
 **Known limitations.**
 
-- **Not exercised by hand.** The native picker, clicking a recents row, Forget,
-  the drop gesture onto the launcher and the ⌘O/⌘⇧O chords have never been
-  performed — this session has no screen. The browser pass covers rendering and
-  the Tauri run covers the core round trip; neither covers a pointer.
+- **Barely exercised by hand.** The native picker, clicking a recents row,
+  Forget and the ⌘O/⌘⇧O chords have never been performed — this session has no
+  screen. The browser pass covers rendering and the Tauri run covers the core
+  round trip; neither covers a pointer.
+- **The one exception, performed on 2026-09-04:** dropping a folder onto the
+  launcher, twice, on a logged build — once on a first run with no history, and
+  once after closing a workspace, which is the path the launcher is normally
+  reached by. Both opened the dropped folder as the workspace (`workspace.open`
+  in 251 µs and 399 µs). This is also the first time T045's drop gesture has
+  been performed by anyone; the rest of its cases (a file inside the workspace,
+  a file outside it, several folders at once, and whether the tab strip's own
+  drag still works) remain unperformed, so T045 stays `in-progress`. Whether
+  the dashed drop target is actually *visible* is still unconfirmed — only that
+  `DropHoverChanged` is emitted for enter and leave.
 - Reopening a recent workspace does not bring its tabs back (non-goal above),
   which is the current behaviour of `workspace.open`, not a regression.
 - Under React StrictMode in development the history is read twice. Idempotent
