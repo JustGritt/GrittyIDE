@@ -31,14 +31,24 @@ use crate::protocol::ids::{CorrelationId, TerminalId};
 use crate::protocol::time::Timestamp;
 use crate::workspace::WorkspaceManager;
 use wire::{
-    KillTerminalRequest, ResizeTerminalRequest, SpawnTerminalRequest, Terminal,
-    TerminalExitedPayload, TerminalOutputPayload, TerminalStatus, WriteTerminalRequest,
+    KillTerminalRequest, ListProfilesRequest, RenameTerminalRequest, ResizeTerminalRequest,
+    SpawnTerminalRequest, Terminal, TerminalExitedPayload, TerminalOutputPayload, TerminalProfile,
+    TerminalStatus, WriteTerminalRequest,
 };
 
 /// Concurrent sessions allowed. Each one costs a shell, two threads and a
 /// megabyte of buffer; an unbounded number is a resource leak waiting for a
 /// stuck loop in the UI to find it.
 pub const MAX_SESSIONS: usize = 16;
+
+/// Custom shells the settings may add. A bound, like every other list the
+/// renderer can grow: the picker is a menu, not a database.
+pub const MAX_CUSTOM_SHELLS: usize = 16;
+
+/// Longest label `terminal.rename` accepts, in characters rather than bytes:
+/// the bound exists so a tab stays a tab, and a tab's width is measured in
+/// what is drawn, not in how many bytes UTF-8 spent on it.
+pub const MAX_TERMINAL_NAME_CHARS: usize = 64;
 
 /// Largest single `terminal.write`. A paste is legitimate; a megabyte from the
 /// renderer in one command is not, and the PTY would block on it anyway.
@@ -94,23 +104,45 @@ impl TerminalManager {
         self.sessions.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// `terminal.spawn`: start a shell in the workspace.
+    /// `terminal.spawn`: start a shell, in a workspace or in the home
+    /// directory when the caller names none.
     pub fn spawn(
         &self,
         request: SpawnTerminalRequest,
         actor: Actor,
         correlation: CorrelationId,
     ) -> Result<Terminal, CoreError> {
-        let (workspace, root) = self
-            .workspaces
-            .require(&request.workspace_id, &correlation)?;
-
-        let cwd = request.cwd.unwrap_or_else(WorkspacePath::root);
-        // Resolving through the root is what keeps a terminal from starting
-        // outside the workspace, symlinks included.
-        let resolved = root
-            .resolve(&cwd)
-            .map_err(|error| CoreError::from(error).or_correlation(&correlation))?;
+        // Two rootings, one rule: the renderer may say *which workspace*, or
+        // say nothing, and the core turns that into a directory. It never
+        // gets to name one (ADR-010).
+        let (workspace_id, cwd, resolved) = match &request.workspace_id {
+            Some(id) => {
+                let (workspace, root) = self.workspaces.require(id, &correlation)?;
+                let cwd = request.cwd.clone().unwrap_or_else(WorkspacePath::root);
+                // Resolving through the root is what keeps a terminal from
+                // starting outside the workspace, symlinks included.
+                let resolved = root
+                    .resolve(&cwd)
+                    .map_err(|error| CoreError::from(error).or_correlation(&correlation))?;
+                (
+                    Some(workspace.id),
+                    Some(cwd),
+                    resolved.native().to_path_buf(),
+                )
+            }
+            None => {
+                if request.cwd.is_some() {
+                    return Err(CoreError::invalid_input(
+                        "cwd",
+                        "a workspace-relative directory needs a workspaceId",
+                    )
+                    .or_correlation(&correlation));
+                }
+                let home = gritty_terminal::shell::home_directory(|key| std::env::var(key).ok())
+                    .map_err(|error| to_core_error(&error).or_correlation(&correlation))?;
+                (None, None, home)
+            }
+        };
 
         let shell = match request.shell.as_deref() {
             Some(raw) if raw.trim().is_empty() => {
@@ -139,7 +171,7 @@ impl TerminalManager {
 
         let id = TerminalId::new();
         let origin = EventOrigin {
-            workspace_id: Some(workspace.id.clone()),
+            workspace_id: workspace_id.clone(),
             correlation_id: Some(correlation.clone()),
             actor: actor.clone(),
         };
@@ -157,7 +189,7 @@ impl TerminalManager {
             .host
             .spawn(
                 SpawnRequest {
-                    cwd: resolved.native().to_path_buf(),
+                    cwd: resolved,
                     shell: shell.clone(),
                     env: Vec::new(),
                     size,
@@ -169,11 +201,12 @@ impl TerminalManager {
 
         let terminal = Terminal {
             id: id.clone(),
-            workspace_id: workspace.id,
+            workspace_id,
             cwd,
             shell: shell
                 .map(|path| path.display().to_string())
                 .unwrap_or_else(|| "$SHELL".into()),
+            name: None,
             pid: session.pid(),
             status: TerminalStatus::Running,
             cols: size.cols,
@@ -185,7 +218,12 @@ impl TerminalManager {
         tracing::info!(
             terminal_id = %id,
             pid = ?terminal.pid,
-            cwd = %terminal.cwd,
+            // The home directory is a path outside any workspace, so it is
+            // reported as "home" rather than written into the log.
+            cwd = %terminal
+                .cwd
+                .as_ref()
+                .map_or_else(|| "<home>".to_owned(), |cwd| cwd.to_string()),
             "terminal session opened"
         );
         // The limit is re-checked now that the registry is locked again: two
@@ -274,6 +312,21 @@ impl TerminalManager {
         Ok(terminal)
     }
 
+    /// `terminal.rename`: give a session a label, or clear it.
+    ///
+    /// Allowed on an ended session too. Naming one after the fact — "this is
+    /// the build that failed" — is exactly when a label earns its keep, and
+    /// refusing would be a rule with no purpose behind it.
+    pub fn rename(&self, request: RenameTerminalRequest) -> Result<Terminal, CoreError> {
+        let name = normalize_name(request.name.as_deref())?;
+        let mut sessions = self.lock();
+        let entry = sessions
+            .get_mut(&request.terminal_id)
+            .ok_or_else(|| unknown(&request.terminal_id))?;
+        entry.terminal.name = name;
+        Ok(entry.terminal.clone())
+    }
+
     /// `terminal.list`: every session, running and ended, newest last.
     pub fn list(&self) -> Vec<Terminal> {
         let mut terminals: Vec<_> = self
@@ -284,6 +337,86 @@ impl TerminalManager {
         // Ids are UUID v7, so sorting by id is creation order.
         terminals.sort_by(|a, b| a.id.cmp(&b.id));
         terminals
+    }
+
+    /// `terminal.profiles`: the shells the user can pick (T095).
+    ///
+    /// Discovered shells come from the host, which reports only what `$SHELL`
+    /// and `/etc/shells` name — see `gritty_terminal::shell::discover_shells`
+    /// for why guessing by file name was removed. Anything the system does not
+    /// register reaches the picker through `custom`.
+    ///
+    /// Asked of the host every time rather than cached: a user who installs a
+    /// shell expects to find it without restarting Gritty, and the cost is a
+    /// handful of `stat` calls.
+    pub fn profiles(
+        &self,
+        request: ListProfilesRequest,
+    ) -> Result<Vec<TerminalProfile>, CoreError> {
+        if request.custom.len() > MAX_CUSTOM_SHELLS {
+            return Err(CoreError::invalid_input(
+                "custom",
+                format!("at most {MAX_CUSTOM_SHELLS} custom shells"),
+            ));
+        }
+
+        let discovered = self.host.shells();
+        let mut entries: Vec<(std::path::PathBuf, bool, bool, Option<String>)> = discovered
+            .iter()
+            .map(|shell| (shell.path.clone(), shell.is_default, false, None))
+            .collect();
+
+        for raw in &request.custom {
+            let path = std::path::PathBuf::from(raw);
+            // A custom path that discovery already found is not a second
+            // entry: the user added something the system registers anyway.
+            if entries.iter().any(|(known, ..)| known == &path) {
+                continue;
+            }
+            // Reported, not dropped. The user typed this; if it no longer
+            // works they are owed the reason rather than a silent absence.
+            let reason = gritty_terminal::shell::check_shell(&path)
+                .err()
+                .map(|error| error.to_string());
+            entries.push((path, false, true, reason));
+        }
+
+        // Two shells can share a file name — `/bin/bash` and Homebrew's are
+        // different programs — and a menu of two entries both reading "bash"
+        // is useless. Only the ambiguous ones pay for the longer label.
+        let mut counts: HashMap<&std::ffi::OsStr, usize> = HashMap::new();
+        for (path, ..) in &entries {
+            if let Some(name) = path.file_name() {
+                *counts.entry(name).or_default() += 1;
+            }
+        }
+
+        Ok(entries
+            .iter()
+            .map(|(path, is_default, is_custom, reason)| {
+                let name = match path.file_name() {
+                    Some(name) if counts.get(name).copied().unwrap_or(0) > 1 => {
+                        let directory = path
+                            .parent()
+                            .map(|parent| parent.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        format!("{} ({directory})", name.to_string_lossy())
+                    }
+                    Some(name) => name.to_string_lossy().into_owned(),
+                    // A path ending in `..` cannot be a shell, but a label is
+                    // still owed rather than an empty menu entry.
+                    None => path.to_string_lossy().into_owned(),
+                };
+                TerminalProfile {
+                    path: path.to_string_lossy().into_owned(),
+                    name,
+                    is_default: *is_default,
+                    is_custom: *is_custom,
+                    available: reason.is_none(),
+                    unavailable_reason: reason.clone(),
+                }
+            })
+            .collect())
     }
 
     /// Terminate every session and wait for them to be reaped. Called from the
@@ -392,6 +525,31 @@ fn exited(id: &TerminalId) -> CoreError {
 /// Map the PTY layer's failures onto the error envelope. A caller mistake (a
 /// shell that does not exist, a directory that is not one) must not look like
 /// an infrastructure failure, and vice versa.
+/// Trim, then reject what a tab cannot show.
+///
+/// Blank clears the label rather than setting an empty one: a tab with no text
+/// is unclickable, and "clear it" is what a user who empties the field means.
+/// Control characters are refused because this string is drawn straight into
+/// the tab strip, and a name is user input like any other (`security.md`).
+fn normalize_name(raw: Option<&str>) -> Result<Option<String>, CoreError> {
+    let Some(trimmed) = raw.map(str::trim).filter(|name| !name.is_empty()) else {
+        return Ok(None);
+    };
+    if trimmed.chars().any(char::is_control) {
+        return Err(CoreError::invalid_input(
+            "name",
+            "must not contain control characters",
+        ));
+    }
+    if trimmed.chars().count() > MAX_TERMINAL_NAME_CHARS {
+        return Err(CoreError::invalid_input(
+            "name",
+            format!("at most {MAX_TERMINAL_NAME_CHARS} characters"),
+        ));
+    }
+    Ok(Some(trimmed.to_owned()))
+}
+
 fn to_core_error(error: &TerminalError) -> CoreError {
     match error {
         TerminalError::Cwd { .. } => CoreError::invalid_input("cwd", error.to_string()),
@@ -399,6 +557,9 @@ fn to_core_error(error: &TerminalError) -> CoreError {
             std::io::ErrorKind::NotFound => CoreError::not_found(error.to_string()),
             std::io::ErrorKind::PermissionDenied => {
                 CoreError::new(CoreErrorCode::PermissionDenied, error.to_string())
+            }
+            std::io::ErrorKind::InvalidInput => {
+                CoreError::invalid_input("shell", error.to_string())
             }
             _ => CoreError::new(CoreErrorCode::Io, error.to_string()),
         },
@@ -482,7 +643,7 @@ mod tests {
     impl Harness {
         fn spawn(&self) -> Terminal {
             self.spawn_request(SpawnTerminalRequest {
-                workspace_id: self.workspace.id.clone(),
+                workspace_id: Some(self.workspace.id.clone()),
                 cwd: None,
                 shell: None,
                 cols: None,
@@ -498,7 +659,7 @@ mod tests {
 
         fn request(&self) -> SpawnTerminalRequest {
             SpawnTerminalRequest {
-                workspace_id: self.workspace.id.clone(),
+                workspace_id: Some(self.workspace.id.clone()),
                 cwd: None,
                 shell: None,
                 cols: None,
@@ -517,8 +678,13 @@ mod tests {
         let terminal = h.spawn();
 
         assert_eq!(terminal.status, TerminalStatus::Running);
-        assert_eq!(terminal.workspace_id, h.workspace.id);
-        assert!(terminal.cwd.is_root());
+        assert_eq!(terminal.workspace_id, Some(h.workspace.id.clone()));
+        assert!(
+            terminal
+                .cwd
+                .expect("a workspace session reports its cwd")
+                .is_root()
+        );
         assert_eq!(terminal.pid, Some(4242));
         assert_eq!((terminal.cols, terminal.rows), (80, 24));
 
@@ -541,7 +707,7 @@ mod tests {
         request.cwd = Some(WorkspacePath::parse("src").unwrap());
         let terminal = h.spawn_request(request);
 
-        assert_eq!(terminal.cwd.as_str(), "src");
+        assert_eq!(terminal.cwd.expect("a cwd").as_str(), "src");
         assert_eq!(
             h.host.requests()[0].cwd,
             std::fs::canonicalize(h._dir.join("src")).unwrap()
@@ -578,7 +744,7 @@ mod tests {
     async fn an_unknown_workspace_is_not_found() {
         let h = start();
         let mut request = h.request();
-        request.workspace_id = WorkspaceId::from_raw("nope");
+        request.workspace_id = Some(WorkspaceId::from_raw("nope"));
         let error = h
             .manager
             .spawn(request, Actor::User, CorrelationId::new())
@@ -915,11 +1081,335 @@ mod tests {
             .into_iter()
             .find(|envelope| matches!(envelope.event, CoreEvent::TerminalOutput(_)))
             .expect("an output event");
-        assert_eq!(envelope.meta.workspace_id, Some(terminal.workspace_id));
+        assert_eq!(envelope.meta.workspace_id, terminal.workspace_id);
         assert_eq!(envelope.meta.actor, Actor::User);
         assert!(
             envelope.meta.correlation_id.is_some(),
             "output stays tied to the command that opened the session"
         );
+    }
+
+    fn shell(path: &str, is_default: bool) -> gritty_terminal::ShellProfile {
+        gritty_terminal::ShellProfile {
+            path: PathBuf::from(path),
+            is_default,
+        }
+    }
+
+    #[tokio::test]
+    async fn profiles_label_shells_and_mark_the_default() {
+        let harness = start();
+        harness
+            .host
+            .set_shells(vec![shell("/bin/zsh", true), shell("/bin/bash", false)]);
+
+        let profiles = harness
+            .manager
+            .profiles(ListProfilesRequest::default())
+            .expect("profiles");
+
+        assert_eq!(
+            profiles
+                .iter()
+                .map(|p| (p.name.as_str(), p.is_default, p.is_custom, p.available))
+                .collect::<Vec<_>>(),
+            vec![("zsh", true, false, true), ("bash", false, false, true)]
+        );
+        assert_eq!(profiles[0].path, "/bin/zsh");
+    }
+
+    #[tokio::test]
+    async fn two_shells_with_the_same_file_name_are_told_apart() {
+        let harness = start();
+        harness.host.set_shells(vec![
+            shell("/bin/bash", true),
+            shell("/opt/homebrew/bin/bash", false),
+            shell("/bin/zsh", false),
+        ]);
+
+        let profiles = harness
+            .manager
+            .profiles(ListProfilesRequest::default())
+            .expect("profiles");
+        let names: Vec<&str> = profiles.iter().map(|p| p.name.as_str()).collect();
+
+        assert_eq!(
+            names,
+            vec!["bash (/bin)", "bash (/opt/homebrew/bin)", "zsh"],
+            "only the ambiguous entries carry a directory"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_machine_that_reports_no_shell_produces_an_empty_list_not_an_error() {
+        let harness = start();
+        assert!(
+            harness
+                .manager
+                .profiles(ListProfilesRequest::default())
+                .expect("profiles")
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_custom_shell_that_runs_joins_the_list() {
+        let harness = start();
+        harness.host.set_shells(vec![shell("/bin/zsh", true)]);
+        // A real executable, because availability is a filesystem fact and
+        // faking it would test nothing.
+        let dir = TempDir::new("custom-shell");
+        let custom = dir.join("fish");
+        std::fs::write(&custom, b"#!/bin/sh\n").expect("write");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&custom, std::fs::Permissions::from_mode(0o755))
+                .expect("chmod");
+        }
+
+        let profiles = harness
+            .manager
+            .profiles(ListProfilesRequest {
+                custom: vec![custom.display().to_string()],
+            })
+            .expect("profiles");
+
+        let added = profiles.last().expect("the custom entry");
+        assert_eq!(added.name, "fish");
+        assert!(added.is_custom);
+        assert!(added.available);
+        assert!(!added.is_default);
+    }
+
+    #[tokio::test]
+    async fn a_custom_shell_that_is_gone_is_reported_not_hidden() {
+        let harness = start();
+        harness.host.set_shells(vec![shell("/bin/zsh", true)]);
+
+        let profiles = harness
+            .manager
+            .profiles(ListProfilesRequest {
+                custom: vec!["/nope/fish".into(), "relative/fish".into()],
+            })
+            .expect("profiles");
+
+        let broken: Vec<_> = profiles.iter().filter(|p| !p.available).collect();
+        assert_eq!(broken.len(), 2, "the user typed these; say why they fail");
+        for profile in broken {
+            assert!(profile.is_custom);
+            assert!(
+                profile
+                    .unavailable_reason
+                    .as_ref()
+                    .is_some_and(|reason| !reason.is_empty()),
+                "an unavailable profile without a reason is a dead menu entry"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_custom_shell_the_system_already_registers_is_not_listed_twice() {
+        let harness = start();
+        harness.host.set_shells(vec![shell("/bin/zsh", true)]);
+
+        let profiles = harness
+            .manager
+            .profiles(ListProfilesRequest {
+                custom: vec!["/bin/zsh".into()],
+            })
+            .expect("profiles");
+
+        assert_eq!(profiles.len(), 1);
+        assert!(!profiles[0].is_custom, "the discovered entry wins");
+    }
+
+    #[tokio::test]
+    async fn the_number_of_custom_shells_is_bounded() {
+        let harness = start();
+        let error = harness
+            .manager
+            .profiles(ListProfilesRequest {
+                custom: (0..MAX_CUSTOM_SHELLS + 1)
+                    .map(|i| format!("/bin/shell-{i}"))
+                    .collect(),
+            })
+            .expect_err("bounded");
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+    }
+
+    #[tokio::test]
+    async fn a_terminal_without_a_workspace_starts_at_home() {
+        let h = start();
+        let terminal = h.spawn_request(SpawnTerminalRequest {
+            workspace_id: None,
+            cwd: None,
+            shell: None,
+            cols: None,
+            rows: None,
+        });
+
+        assert_eq!(terminal.status, TerminalStatus::Running);
+        assert_eq!(terminal.workspace_id, None);
+        assert_eq!(
+            terminal.cwd, None,
+            "a home directory has no workspace to be relative to"
+        );
+
+        let started = &h.host.requests()[0].cwd;
+        assert!(started.is_absolute(), "{started:?}");
+        assert!(started.is_dir(), "{started:?}");
+        assert!(
+            !started.starts_with(h._dir.path()),
+            "it must not silently fall back to the open workspace"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_relative_cwd_without_a_workspace_is_refused() {
+        // There is nothing to resolve it against, and resolving it against
+        // anything else is exactly what ADR-010 forbids.
+        let h = start();
+        let error = h
+            .manager
+            .spawn(
+                SpawnTerminalRequest {
+                    workspace_id: None,
+                    cwd: Some(WorkspacePath::parse("src").unwrap()),
+                    shell: None,
+                    cols: None,
+                    rows: None,
+                },
+                Actor::User,
+                CorrelationId::new(),
+            )
+            .expect_err("a cwd needs a workspace");
+
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+        assert!(h.host.sessions().is_empty(), "nothing was spawned");
+    }
+
+    #[tokio::test]
+    async fn a_workspaceless_session_is_listed_like_any_other() {
+        let h = start();
+        h.spawn();
+        h.spawn_request(SpawnTerminalRequest {
+            workspace_id: None,
+            cwd: None,
+            shell: None,
+            cols: None,
+            rows: None,
+        });
+
+        // The registry is not partitioned by workspace: a shell is a shell,
+        // and one the user can no longer see is one they cannot kill.
+        let listed = h.manager.list();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(
+            listed.iter().filter(|t| t.workspace_id.is_none()).count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn a_session_can_be_named_and_unnamed() {
+        let h = start();
+        let terminal = h.spawn();
+        assert_eq!(terminal.name, None, "a session starts with no label");
+
+        let named = h
+            .manager
+            .rename(RenameTerminalRequest {
+                terminal_id: terminal.id.clone(),
+                name: Some("  claude  ".into()),
+            })
+            .expect("rename");
+        assert_eq!(named.name.as_deref(), Some("claude"), "trimmed");
+        assert_eq!(
+            h.manager.list()[0].name.as_deref(),
+            Some("claude"),
+            "the registry keeps it, so a renderer reload does not lose it"
+        );
+
+        // Emptying the field means "clear it", not "set an empty label": a tab
+        // with no text is unclickable.
+        for blank in [Some("   ".to_owned()), Some(String::new()), None] {
+            let cleared = h
+                .manager
+                .rename(RenameTerminalRequest {
+                    terminal_id: terminal.id.clone(),
+                    name: blank,
+                })
+                .expect("rename");
+            assert_eq!(cleared.name, None);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_name_a_tab_cannot_show_is_refused() {
+        let h = start();
+        let terminal = h.spawn();
+
+        for bad in [
+            "two\nlines".to_owned(),
+            "escape\u{1b}[31m".to_owned(),
+            "x".repeat(MAX_TERMINAL_NAME_CHARS + 1),
+        ] {
+            let error = h
+                .manager
+                .rename(RenameTerminalRequest {
+                    terminal_id: terminal.id.clone(),
+                    name: Some(bad.clone()),
+                })
+                .expect_err("refused");
+            assert_eq!(error.code, CoreErrorCode::InvalidInput, "{bad:?}");
+        }
+
+        // The bound counts what is drawn, not what UTF-8 spent.
+        let wide = "é".repeat(MAX_TERMINAL_NAME_CHARS);
+        assert!(
+            h.manager
+                .rename(RenameTerminalRequest {
+                    terminal_id: terminal.id.clone(),
+                    name: Some(wide),
+                })
+                .is_ok(),
+            "64 characters is 64 characters whatever they cost in bytes"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_ended_session_can_still_be_named() {
+        // "This is the build that failed" is exactly when a label earns its
+        // keep, and that is known only after it ended.
+        let h = start();
+        let terminal = h.spawn();
+        h.host.last().finish(TerminalExit {
+            code: Some(1),
+            signal: None,
+        });
+
+        let named = h
+            .manager
+            .rename(RenameTerminalRequest {
+                terminal_id: terminal.id,
+                name: Some("failed build".into()),
+            })
+            .expect("an ended session is still a session");
+        assert_eq!(named.status, TerminalStatus::Exited);
+        assert_eq!(named.name.as_deref(), Some("failed build"));
+    }
+
+    #[tokio::test]
+    async fn renaming_an_unknown_session_is_not_found() {
+        let h = start();
+        let error = h
+            .manager
+            .rename(RenameTerminalRequest {
+                terminal_id: TerminalId::new(),
+                name: Some("nope".into()),
+            })
+            .expect_err("no such session");
+        assert_eq!(error.code, CoreErrorCode::NotFound);
     }
 }

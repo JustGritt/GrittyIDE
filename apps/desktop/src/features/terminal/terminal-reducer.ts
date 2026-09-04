@@ -9,7 +9,11 @@ export interface TerminalsState {
   readonly byId: Readonly<Record<string, Terminal>>;
   readonly order: readonly TerminalId[];
   readonly activeId: TerminalId | null;
-  /** Workspace the sessions belong to; sessions are dropped when it changes. */
+  /**
+   * The open workspace, which is where a new terminal is rooted. Sessions are
+   * *not* dropped when it changes: a shell the core is still running is one
+   * the user must be able to see and kill (see the `workspace` case).
+   */
   readonly workspaceId: WorkspaceId | null;
 }
 
@@ -51,8 +55,11 @@ export function terminalsReducer(state: TerminalsState, action: TerminalsAction)
   switch (action.type) {
     case 'workspace': {
       if (action.workspaceId === state.workspaceId) return state;
-      // Sessions belong to a workspace; opening another one starts over.
-      return { ...initialTerminalsState, workspaceId: action.workspaceId };
+      // Only the rooting for *new* terminals changes. Forgetting the running
+      // ones would not stop them: the core keeps every session until it is
+      // killed or the application exits, so a UI that hides them leaves the
+      // user with shells they can neither see nor terminate.
+      return { ...state, workspaceId: action.workspaceId };
     }
     case 'rehydrate': {
       const next = action.terminals.reduce(put, {
@@ -87,11 +94,9 @@ export function terminalsReducer(state: TerminalsState, action: TerminalsAction)
             ? state
             : put(state, event.payload.terminal);
         case 'WorkspaceOpened':
-          return event.payload.workspace.id === state.workspaceId
-            ? state
-            : { ...initialTerminalsState, workspaceId: event.payload.workspace.id };
+          return { ...state, workspaceId: event.payload.workspace.id };
         case 'WorkspaceClosed':
-          return { ...initialTerminalsState, workspaceId: null };
+          return { ...state, workspaceId: null };
       }
       return state;
     }

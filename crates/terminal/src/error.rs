@@ -45,9 +45,13 @@ impl TerminalError {
     pub fn is_caller_fault(&self) -> bool {
         match self {
             Self::Cwd { .. } => true,
+            // `InvalidInput` is a path the caller malformed (a relative
+            // shell), not a machine that failed: it belongs on this side.
             Self::Spawn { source, .. } => matches!(
                 source.kind(),
-                io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+                io::ErrorKind::NotFound
+                    | io::ErrorKind::PermissionDenied
+                    | io::ErrorKind::InvalidInput
             ),
             Self::OpenPty(_) | Self::Exited | Self::Io { .. } => false,
         }

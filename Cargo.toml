@@ -52,7 +52,7 @@ portable-pty = "0.9.0"
 # T090 terminal: safe wrappers for the POSIX signal calls that terminate a
 # whole process group (`killpg`). Avoids an `unsafe_code` allow for two calls;
 # unix-only, not compiled on Windows.
-nix = { version = "0.31.3", features = ["signal", "process"] }
+nix = { version = "0.31.3", features = ["signal", "process", "user"] }
 
 [workspace.lints.rust]
 # Unsafe code needs a justified, reviewed `#![allow(unsafe_code)]` in the crate.

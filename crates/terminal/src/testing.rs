@@ -14,6 +14,7 @@ use std::time::Duration;
 use crate::batch::OutputBatch;
 use crate::error::TerminalError;
 use crate::host::{PtyGrid, PtyHost, PtySession, SpawnRequest, TerminalExit, TerminalSink};
+use crate::shell::ShellProfile;
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -63,6 +64,8 @@ pub struct FakePtyHost {
     /// When set, the next spawn fails with this error instead of succeeding.
     next_error: Mutex<Option<TerminalError>>,
     pub spawn_requests: Mutex<Vec<SpawnRequest>>,
+    /// What `shells()` reports. Empty by default, so a test that cares says so.
+    shells: Mutex<Vec<ShellProfile>>,
 }
 
 impl FakePtyHost {
@@ -89,6 +92,12 @@ impl FakePtyHost {
     /// The most recently opened session.
     pub fn last(&self) -> Arc<FakeSession> {
         self.sessions().pop().expect("a session was spawned")
+    }
+
+    /// Fix what `shells()` reports, so `terminal.profiles` is testable
+    /// without depending on the machine running the test.
+    pub fn set_shells(&self, shells: Vec<ShellProfile>) {
+        *self.shells.lock().unwrap_or_else(PoisonError::into_inner) = shells;
     }
 
     pub fn requests(&self) -> Vec<SpawnRequest> {
@@ -128,6 +137,13 @@ impl PtyHost for FakePtyHost {
             .unwrap_or_else(PoisonError::into_inner)
             .push(session.clone());
         Ok(Box::new(FakeHandle(session)))
+    }
+
+    fn shells(&self) -> Vec<ShellProfile> {
+        self.shells
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 }
 

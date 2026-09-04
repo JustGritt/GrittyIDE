@@ -99,3 +99,37 @@ Terminal buffer persistence, split terminals, shell integration (OSC 133) or
 profiles are wanted; when agent process supervision (T300) needs the same
 mechanics, which should reuse this crate rather than copy it; or when Windows
 becomes a target.
+
+## Amendment (T095): a terminal does not need a workspace
+
+- **Status:** Accepted
+- **Date:** 2026-09-04
+
+T090 required a `workspaceId` on every `terminal.spawn`, because ADR-010 makes
+every path on the wire workspace-relative. That made a terminal unreachable
+until a folder was open, which is not how a terminal behaves anywhere else.
+
+`workspaceId` and `cwd` are now both optional on `SpawnTerminalRequest` and on
+`Terminal`. Omitting the workspace starts the shell in the user's home
+directory; supplying a `cwd` without a workspace is `InvalidInput`.
+
+**This does not weaken ADR-010.** The property that matters is that the WebView
+cannot root a shell at a directory of its choosing, and it still cannot: the
+renderer says *which workspace*, or says nothing, and the **core** turns that
+into a directory (`gritty_terminal::shell::home_directory`, `$HOME` then the
+password database). No absolute path is accepted from, or sent to, the
+renderer.
+
+Making two required wire fields optional is a breaking shape change, so
+`PROTOCOL_VERSION` goes 1.6.0 → **2.0.0**. Phase 0's freeze has not happened
+(ADR-001 is still open), which is the moment to make this kind of change rather
+than after.
+
+**Consequence for session lifetime.** Sessions are no longer partitioned by
+workspace in the UI either. Closing or replacing a workspace previously made
+the terminal panel forget its sessions while the core kept the shells running —
+they became invisible and unkillable until the application exited. The UI now
+keeps every session the core has. Killing a workspace's shells when it closes
+was considered and rejected for now: a long-running build is user work, and
+destroying it because someone opened another folder is the wrong default. See
+the T095 follow-ups.

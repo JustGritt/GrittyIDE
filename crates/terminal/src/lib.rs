@@ -29,4 +29,5 @@ pub mod testing;
 pub use batch::{FLUSH_INTERVAL, MAX_PENDING_BYTES, OutputBatch};
 pub use error::TerminalError;
 pub use host::{PtyGrid, PtyHost, PtySession, SpawnRequest, TerminalExit, TerminalSink};
+pub use shell::{ShellProfile, discover_shells, system_shells};
 pub use system::SystemPtyHost;

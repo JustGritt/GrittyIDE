@@ -6,12 +6,14 @@ import type {
   HealthReport,
   Terminal,
   TerminalId,
+  TerminalProfile,
   WorkspaceId,
   WorkspacePath,
 } from './types';
+import { PROTOCOL_VERSION } from './types';
 
 const health: HealthReport = {
-  protocolVersion: '1.4.0',
+  protocolVersion: PROTOCOL_VERSION,
   coreVersion: '0.1.0',
   os: 'macos',
   arch: 'aarch64',
@@ -21,6 +23,14 @@ const health: HealthReport = {
 
 const terminalId = 'term-1' as TerminalId;
 const workspaceId = 'ws-1' as WorkspaceId;
+
+const profile: TerminalProfile = {
+  path: '/bin/zsh',
+  name: 'zsh',
+  isDefault: true,
+  isCustom: false,
+  available: true,
+};
 
 const terminal: Terminal = {
   id: terminalId,
@@ -46,8 +56,10 @@ describe('terminal client', () => {
     transport.handlers.set('terminal_spawn', () => terminal);
     transport.handlers.set('terminal_write', () => null);
     transport.handlers.set('terminal_resize', () => ({ ...terminal, cols: 100, rows: 30 }));
+    transport.handlers.set('terminal_rename', () => ({ ...terminal, name: 'claude' }));
     transport.handlers.set('terminal_kill', () => terminal);
     transport.handlers.set('terminal_list', () => [terminal]);
+    transport.handlers.set('terminal_profiles', () => [profile]);
     const client = createCoreClient(transport);
 
     await expect(client.terminal.spawn({ workspaceId })).resolves.toEqual(terminal);
@@ -55,16 +67,23 @@ describe('terminal client', () => {
     await expect(
       client.terminal.resize({ terminalId, cols: 100, rows: 30 }),
     ).resolves.toMatchObject({ cols: 100, rows: 30 });
+    await expect(client.terminal.rename({ terminalId, name: 'claude' })).resolves.toHaveProperty(
+      'name',
+      'claude',
+    );
     await expect(client.terminal.kill({ terminalId })).resolves.toEqual(terminal);
     await expect(client.terminal.list()).resolves.toEqual([terminal]);
+    await expect(client.terminal.profiles({ custom: ['/bin/fish'] })).resolves.toEqual([profile]);
 
     expect(transport.calls.filter((call) => call.command.startsWith('terminal_'))).toEqual([
       { command: 'terminal_spawn', args: { request: { workspaceId } } },
       { command: 'terminal_write', args: { request: { terminalId, data: 'ls\n' } } },
       { command: 'terminal_resize', args: { request: { terminalId, cols: 100, rows: 30 } } },
+      { command: 'terminal_rename', args: { request: { terminalId, name: 'claude' } } },
       { command: 'terminal_kill', args: { request: { terminalId } } },
       // `list` takes no arguments.
       { command: 'terminal_list', args: undefined },
+      { command: 'terminal_profiles', args: { request: { custom: ['/bin/fish'] } } },
     ]);
   });
 

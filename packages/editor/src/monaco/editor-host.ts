@@ -7,7 +7,12 @@ import {
 } from '../editor-options';
 import type { EditorViewState } from '../view-state';
 
-export type EditorTheme = 'vs' | 'vs-dark';
+/**
+ * Gritty's own themes (T048, ADR-016). They inherit Monaco's `vs` / `vs-dark`
+ * token colors — the syntax palette the design was drawn against — and replace
+ * only the chrome colors, which come from the app's CSS custom properties.
+ */
+export type EditorTheme = 'gritty-light' | 'gritty-dark';
 
 export interface CursorPosition {
   readonly lineNumber: number;
@@ -149,4 +154,16 @@ export function createEditorHost(container: HTMLElement): EditorHost {
 
 export function setEditorTheme(theme: EditorTheme): void {
   monaco.editor.setTheme(theme);
+}
+
+/**
+ * Register a theme. `inherit` keeps the base theme's token rules, so only the
+ * editor's own surfaces are overridden and syntax highlighting is untouched.
+ */
+export function defineEditorTheme(
+  name: EditorTheme,
+  base: 'vs' | 'vs-dark',
+  colors: Record<string, string>,
+): void {
+  monaco.editor.defineTheme(name, { base, inherit: true, rules: [], colors });
 }

@@ -3,11 +3,12 @@ import { createCoreClient } from './client';
 import { CoreError } from './errors';
 import { createFakeTransport } from './testing/fake-transport';
 import type { HealthReport, ListDirectoryResponse, Workspace, WorkspaceId } from './types';
+import { PROTOCOL_VERSION } from './types';
 
 const WS_ID = 'ws-1' as WorkspaceId;
 
 const health: HealthReport = {
-  protocolVersion: '1.0.0',
+  protocolVersion: PROTOCOL_VERSION,
   coreVersion: '0.1.0',
   os: 'linux',
   arch: 'x86_64',

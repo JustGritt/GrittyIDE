@@ -26,8 +26,8 @@ use gritty_core::session::{
 };
 use gritty_core::shell::OpenExternalRequest;
 use gritty_core::terminal::wire::{
-    KillTerminalRequest, ResizeTerminalRequest, SpawnTerminalRequest, Terminal,
-    WriteTerminalRequest,
+    KillTerminalRequest, ListProfilesRequest, RenameTerminalRequest, ResizeTerminalRequest,
+    SpawnTerminalRequest, Terminal, TerminalProfile, WriteTerminalRequest,
 };
 use gritty_core::workspace::{
     CloseWorkspaceRequest, DEFAULT_LIST_BUDGET, ListDirectoryRequest, ListDirectoryResponse,
@@ -408,6 +408,20 @@ pub async fn terminal_resize(
     .await
 }
 
+/// `terminal.rename`
+#[tauri::command]
+pub async fn terminal_rename(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Terminal, CoreError> {
+    let terminals = core.terminals.clone();
+    guard("terminal.rename", move |_| async move {
+        let request: RenameTerminalRequest = parse_request(request)?;
+        terminals.rename(request)
+    })
+    .await
+}
+
 /// `terminal.kill`
 #[tauri::command]
 pub async fn terminal_kill(
@@ -418,6 +432,24 @@ pub async fn terminal_kill(
     guard("terminal.kill", move |_| async move {
         let request: KillTerminalRequest = parse_request(request)?;
         terminals.kill(request)
+    })
+    .await
+}
+
+/// `terminal.profiles`
+///
+/// Filesystem inspection only, but still driven on the command runtime like
+/// every other command: it stats a few dozen paths and the renderer must not
+/// wait on a slow or unresponsive filesystem.
+#[tauri::command]
+pub async fn terminal_profiles(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Vec<TerminalProfile>, CoreError> {
+    let terminals = core.terminals.clone();
+    guard("terminal.profiles", move |_| async move {
+        let request: ListProfilesRequest = parse_request(request)?;
+        terminals.profiles(request)
     })
     .await
 }

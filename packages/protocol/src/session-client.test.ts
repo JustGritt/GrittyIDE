@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { createCoreClient } from './client';
 import { createFakeTransport } from './testing/fake-transport';
 import type { HealthReport, SessionRestoreResponse, WorkspaceId } from './types';
+import { PROTOCOL_VERSION } from './types';
 
 const health: HealthReport = {
-  protocolVersion: '1.3.0',
+  protocolVersion: PROTOCOL_VERSION,
   coreVersion: '0.1.0',
   os: 'macos',
   arch: 'aarch64',

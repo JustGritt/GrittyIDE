@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use crate::batch::OutputBatch;
 use crate::error::TerminalError;
+use crate::shell::ShellProfile;
 
 /// Visible size of a terminal, in character cells.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,6 +78,17 @@ pub trait PtyHost: Send + Sync {
         request: SpawnRequest,
         sink: Arc<dyn TerminalSink>,
     ) -> Result<Box<dyn PtySession>, TerminalError>;
+
+    /// Shells this machine can start, the default first (T095).
+    ///
+    /// On the host rather than beside it because "which shells exist" is the
+    /// same operating-system knowledge as "how a PTY opens", and putting it
+    /// here is what lets the core test the `terminal.profiles` command against
+    /// a fake instead of the developer's own `/etc/shells`.
+    ///
+    /// Reads the filesystem only. It must not spawn anything: it is called
+    /// from a command handler.
+    fn shells(&self) -> Vec<ShellProfile>;
 }
 
 /// A live PTY session. Dropping it must terminate the child: the core keeps

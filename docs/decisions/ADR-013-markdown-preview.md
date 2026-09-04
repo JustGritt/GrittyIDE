@@ -25,7 +25,11 @@ editor and to the outside world.
   3.4.13 and 3.4.14 fixes concern allow-listed tags and hooks, which this
   uses; the second copy is accepted. Fenced code is colorized by Monaco's own
   tokenizers (`editor.colorize`), so the preview has the same grammars and
-  theme as the source view and no highlighter dependency. Rejected:
+  theme as the source view and no highlighter dependency. Monaco emits inline
+  `color:` styles from the active theme, so `.md-content pre` has to paint the
+  background those colors were designed against; since T048 that is
+  `var(--surface-editor)`, the same token Monaco itself is given (ADR-016),
+  rather than the literal `#1e1e1e` it used to hardcode. Rejected:
   unified/remark/rehype (many packages, more moving parts in the sanitization
   story), `marked` (no source-line maps), highlight.js or shiki (a second set
   of grammars), `markdown-it-task-lists` (unmaintained; ten lines in-house),

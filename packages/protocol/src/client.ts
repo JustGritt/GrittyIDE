@@ -18,6 +18,7 @@ import {
   type KillTerminalRequest,
   type ListDirectoryRequest,
   type ListDirectoryResponse,
+  type ListProfilesRequest,
   type OpenDocumentRequest,
   type OpenExternalRequest,
   type OpenWorkspaceRequest,
@@ -27,12 +28,14 @@ import {
   type RecoverSnapshotRequest,
   type RecoveryCandidate,
   type ReloadDocumentRequest,
+  type RenameTerminalRequest,
   type ResizeTerminalRequest,
   type SaveDocumentRequest,
   type SessionRestoreResponse,
   type SpawnTerminalRequest,
   type StartDemoRequest,
   type Terminal,
+  type TerminalProfile,
   type UpdateDocumentRequest,
   type UpdateSessionRequest,
   type Workspace,
@@ -143,9 +146,25 @@ export interface CoreClient {
     spawn(request: SpawnTerminalRequest): Promise<Terminal>;
     write(request: WriteTerminalRequest): Promise<void>;
     resize(request: ResizeTerminalRequest): Promise<Terminal>;
+    /**
+     * Label a session, or clear the label with a blank name. The label is core
+     * state, not renderer state: `list` hands it back after a reload, so a
+     * name outlives the window that set it.
+     */
+    rename(request: RenameTerminalRequest): Promise<Terminal>;
     kill(request: KillTerminalRequest): Promise<Terminal>;
     /** Every session, running and ended, in creation order. */
     list(): Promise<Terminal[]>;
+    /**
+     * Shells the user can pick (T095), the default first, followed by any
+     * `custom` paths the settings added. A snapshot, not a subscription: a
+     * shell installed afterwards appears on the next call.
+     *
+     * Discovery reports only what `$SHELL` and `/etc/shells` name. A custom
+     * path that cannot be started comes back with `available: false` and a
+     * reason rather than being dropped.
+     */
+    profiles(request?: ListProfilesRequest): Promise<TerminalProfile[]>;
   };
   subscribe<N extends EventName>(name: N, handler: (event: EventOf<N>) => void): Unsubscribe;
   subscribeAll(handler: (event: EventEnvelope) => void): Unsubscribe;
@@ -248,8 +267,11 @@ export function createCoreClient(
       spawn: (request) => command<Terminal>('terminal.spawn', { request }),
       write: (request) => command<void>('terminal.write', { request }),
       resize: (request) => command<Terminal>('terminal.resize', { request }),
+      rename: (request) => command<Terminal>('terminal.rename', { request }),
       kill: (request) => command<Terminal>('terminal.kill', { request }),
       list: () => command<Terminal[]>('terminal.list'),
+      profiles: (request = { custom: [] }) =>
+        command<TerminalProfile[]>('terminal.profiles', { request }),
     },
     subscribe: (name, handler) => hub.subscribe(name, handler),
     subscribeAll: (handler) => hub.subscribeAll(handler),

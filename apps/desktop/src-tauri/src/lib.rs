@@ -194,8 +194,10 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::terminal_spawn,
             commands::terminal_write,
             commands::terminal_resize,
+            commands::terminal_rename,
             commands::terminal_kill,
             commands::terminal_list,
+            commands::terminal_profiles,
         ])
 }
 

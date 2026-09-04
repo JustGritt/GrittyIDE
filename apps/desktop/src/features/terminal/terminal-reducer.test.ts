@@ -127,7 +127,10 @@ describe('terminals reducer', () => {
     expect(withoutActive.activeId).toBe('z');
   });
 
-  it('drops every session when the workspace changes or closes', () => {
+  it('keeps running sessions when the workspace changes or closes', () => {
+    // The core does not kill a session because a workspace closed. Dropping
+    // them here would leave the user with shells they can neither see nor
+    // terminate until the application exits.
     const state = opened('a', 'b');
 
     const switched = terminalsReducer(state, {
@@ -139,7 +142,7 @@ describe('terminals reducer', () => {
         payload: { workspace: { id: other, root: '/tmp/other', name: 'other', openedAt: 2 } },
       } as EventEnvelope,
     });
-    expect(selectTerminals(switched)).toEqual([]);
+    expect(selectTerminals(switched).map((session) => session.id)).toEqual(['a', 'b']);
     expect(switched.workspaceId).toBe(other);
 
     const closed = terminalsReducer(
@@ -149,8 +152,20 @@ describe('terminals reducer', () => {
         payload: { workspaceId, root: '/tmp/ws', reason: 'REPLACED' },
       }),
     );
-    expect(selectTerminals(closed)).toEqual([]);
+    expect(selectTerminals(closed).map((session) => session.id)).toEqual(['a', 'b']);
     expect(closed.workspaceId).toBeNull();
+  });
+
+  it('tracks a session that belongs to no workspace', () => {
+    const homeless = terminal('h', { workspaceId: undefined, cwd: undefined });
+    const state = terminalsReducer(initialTerminalsState, {
+      type: 'opened',
+      terminal: homeless,
+    });
+    expect(selectTerminals(state)).toEqual([homeless]);
+    // Opening a workspace afterwards must not disturb it.
+    const withWorkspace = terminalsReducer(state, { type: 'workspace', workspaceId });
+    expect(selectTerminals(withWorkspace)).toEqual([homeless]);
   });
 
   it('reopening the same workspace keeps the sessions', () => {

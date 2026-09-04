@@ -8,15 +8,29 @@ import type { WorkspacePath } from "./WorkspacePath";
 /**
  * A terminal session as the UI sees it.
  */
-export type Terminal = { id: TerminalId, workspaceId: WorkspaceId, 
+export type Terminal = { id: TerminalId, 
 /**
- * Where the shell was started, relative to the workspace root.
+ * The workspace the shell was rooted in; absent for a session started
+ * without one, which lives in the user's home directory.
  */
-cwd: WorkspacePath, 
+workspaceId?: WorkspaceId, 
+/**
+ * Where the shell was started, relative to the workspace root. Absent
+ * exactly when `workspace_id` is: a home directory has no workspace to be
+ * relative to, and the protocol does not put absolute paths on the wire.
+ */
+cwd?: WorkspacePath, 
 /**
  * Absolute path of the program that was started. Display only.
  */
 shell: string, 
+/**
+ * A label the user gave this session, replacing the shell's name in the
+ * tab. Absent until they set one. Sessions increasingly hold something
+ * worth telling apart — an agent, a dev server, a build — and a strip of
+ * tabs all reading "zsh" identifies none of them.
+ */
+name?: string, 
 /**
  * Process id of the shell while it runs; `None` once it has exited.
  */

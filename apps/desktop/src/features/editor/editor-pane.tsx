@@ -24,11 +24,9 @@ import type { PreviewLinkAction } from '../markdown/preview-links';
 import { type ViewModes, type ViewModesAction, viewModeFor } from '../markdown/view-modes';
 import { RecoveryPrompt } from '../session/recovery-prompt';
 import type { SessionController } from '../session/use-session';
-import { CloseDialog } from './close-dialog';
 import { workerStatus } from './monaco-setup';
 import { OrphansPanel } from './orphans-panel';
 import { PreferencesPopover } from './preferences-popover';
-import { StatusBar } from './status-bar';
 import { TabStrip } from './tab-strip';
 import type { EditorBinding } from './use-editor-binding';
 
@@ -54,6 +52,7 @@ export function EditorPane({
   modes,
   dispatchMode,
   session,
+  onRequestClose,
 }: {
   documents: DocumentsController;
   editor: EditorBinding;
@@ -62,16 +61,14 @@ export function EditorPane({
   modes: ViewModes;
   dispatchMode: Dispatch<ViewModesAction>;
   session: SessionController;
+  onRequestClose: (documentId: DocumentId) => void;
 }) {
   const { state } = documents;
-  const [closing, setClosing] = useState<DocumentId | null>(null);
-  const [closingBusy, setClosingBusy] = useState(false);
   const [workers, setWorkers] = useState(workerStatus.snapshot());
   useEffect(() => workerStatus.subscribe(setWorkers), []);
 
   const active = activeTab(state);
   const activeEol = active ? (editor.eols[active.document.id] ?? null) : null;
-  const closingTab = closing === null ? null : (state.tabs[closing] ?? null);
 
   // Markdown: link outcomes and notices; the view modes come from `App`.
   const [brokenTargets, setBrokenTargets] = useState<ReadonlySet<string>>(() => new Set());
@@ -131,16 +128,6 @@ export function EditorPane({
     [documents.openFile, editor.revealPosition, modes, dispatchMode],
   );
 
-  const requestClose = useCallback(
-    (documentId: DocumentId) => {
-      const tab = state.tabs[documentId];
-      if (!tab) return;
-      if (isUnsaved(tab)) setClosing(documentId);
-      else void documents.close(documentId);
-    },
-    [state.tabs, documents.close],
-  );
-
   // Cmd/Ctrl+S with the focus outside Monaco (tab strip, buttons); inside,
   // the editor's own command handles it.
   useEffect(() => {
@@ -157,17 +144,25 @@ export function EditorPane({
   }, [state.activeId, documents.save, editor.containerRef]);
 
   return (
-    <section className="editor" aria-labelledby="editor-title">
+    <section className="editor" aria-label="Editor">
       <div className="editor__bar">
-        <h2 id="editor-title" className="editor__title">
-          Editor
-        </h2>
         <TabStrip
           state={state}
           onActivate={documents.activate}
-          onClose={requestClose}
+          onClose={onRequestClose}
           onReorder={documents.reorder}
         />
+        {isMarkdown && active && (
+          <MarkdownToolbar
+            mode={mode}
+            onMode={(next) =>
+              dispatchMode({ type: 'set', documentId: active.document.id, mode: next })
+            }
+            instructionFile={isInstructionFile(active.document.path)}
+            notice={previewNotice}
+            onDismissNotice={() => setPreviewNotice(null)}
+          />
+        )}
         <PreferencesPopover prefs={prefs} onChange={onPrefsChange} />
       </div>
 
@@ -193,18 +188,6 @@ export function EditorPane({
       <RecoveryPrompt session={session} />
 
       {active && <Banners tab={active} eol={activeEol} documents={documents} />}
-
-      {isMarkdown && active && (
-        <MarkdownToolbar
-          mode={mode}
-          onMode={(next) =>
-            dispatchMode({ type: 'set', documentId: active.document.id, mode: next })
-          }
-          instructionFile={isInstructionFile(active.document.path)}
-          notice={previewNotice}
-          onDismissNotice={() => setPreviewNotice(null)}
-        />
-      )}
 
       <div className="editor__surfaces">
         <section
@@ -241,41 +224,7 @@ export function EditorPane({
         </p>
       )}
 
-      {active && (
-        <StatusBar
-          tab={active}
-          eol={activeEol}
-          subscribeCursor={editor.subscribeCursor}
-          documents={documents}
-          onClose={requestClose}
-        />
-      )}
-
       <OrphansPanel orphans={state.orphans} onDismiss={documents.dismissOrphan} />
-
-      {closingTab && (
-        <CloseDialog
-          tab={closingTab}
-          busy={closingBusy}
-          onCancel={() => setClosing(null)}
-          onDiscard={() => {
-            setClosing(null);
-            void documents.close(closingTab.document.id, true);
-          }}
-          onSave={() => {
-            setClosingBusy(true);
-            void documents
-              .save(closingTab.document.id)
-              .then(async (saved) => {
-                if (saved) await documents.close(closingTab.document.id);
-              })
-              .finally(() => {
-                setClosingBusy(false);
-                setClosing(null);
-              });
-          }}
-        />
-      )}
     </section>
   );
 }
