@@ -177,21 +177,28 @@ export function useSession(deps: SessionDeps): SessionController {
         toCoreError,
       });
     }
-    restoreInFlight.then((outcome) => {
-      if (!mounted) return;
-      if (!first) {
-        // A later mount joins the finished restore.
-        if (outcome.response) dispatch({ type: 'restoreFinished', response: outcome.response });
-        dispatch({ type: 'restoreSettled', skipped: outcome.skipped });
-      }
-      const workspace = outcome.response?.workspace;
-      if (workspace) {
-        workspaceRef.current = workspace.id;
-        void loadCandidates(workspace.id);
-      }
-      writer.enable();
-      writer.schedule('tabs', TABS_DELAY_MS);
-    });
+    restoreInFlight
+      .then((outcome) => {
+        if (!mounted) return;
+        if (!first) {
+          // A later mount joins the finished restore.
+          if (outcome.response) dispatch({ type: 'restoreFinished', response: outcome.response });
+          dispatch({ type: 'restoreSettled', skipped: outcome.skipped });
+        }
+        const workspace = outcome.response?.workspace;
+        if (workspace) {
+          workspaceRef.current = workspace.id;
+          void loadCandidates(workspace.id);
+        }
+        writer.enable();
+        writer.schedule('tabs', TABS_DELAY_MS);
+      })
+      .catch((cause: unknown) => {
+        // `runRestore` reports its own failures; anything else is a bug worth seeing.
+        console.error('[gritty session] restore flow failed', cause);
+        dispatch({ type: 'restoreSettled', skipped: [] });
+        writer.enable();
+      });
     return () => {
       mounted = false;
       unsubscribe();
