@@ -30,8 +30,9 @@ use gritty_core::terminal::wire::{
     SpawnTerminalRequest, Terminal, TerminalProfile, WriteTerminalRequest,
 };
 use gritty_core::workspace::{
-    CloseWorkspaceRequest, DEFAULT_LIST_BUDGET, ListDirectoryRequest, ListDirectoryResponse,
-    OpenWorkspaceRequest, UnsavedPolicy, Workspace,
+    CloseWorkspaceRequest, DEFAULT_LIST_BUDGET, ForgetWorkspaceRequest, ListDirectoryRequest,
+    ListDirectoryResponse, OpenWorkspaceRequest, RecentWorkspace, RecentWorkspacesRequest,
+    UnsavedPolicy, Workspace,
 };
 use gritty_core::{CoreError, HealthReport};
 use serde::de::DeserializeOwned;
@@ -174,6 +175,35 @@ pub async fn workspace_list(
         workspaces
             .list(request, Actor::User, correlation, DEFAULT_LIST_BUDGET)
             .await
+    })
+    .await
+}
+
+/// `workspace.recents`: the workspace history behind the startup screen
+/// (T049). Served by the session service, which owns the database handle.
+#[tauri::command]
+pub async fn workspace_recents(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Vec<RecentWorkspace>, CoreError> {
+    let session = core.session.clone();
+    guard("workspace.recents", move |correlation| async move {
+        let request: RecentWorkspacesRequest = parse_request(request)?;
+        session.recents(request, correlation).await
+    })
+    .await
+}
+
+/// `workspace.forget`: drop one root from the history. Idempotent.
+#[tauri::command]
+pub async fn workspace_forget(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<(), CoreError> {
+    let session = core.session.clone();
+    guard("workspace.forget", move |correlation| async move {
+        let request: ForgetWorkspaceRequest = parse_request(request)?;
+        session.forget(request, correlation).await
     })
     .await
 }

@@ -161,7 +161,10 @@ fn two_handles_can_share_one_file() {
         .database
         .write(|tx| workspace::touch(tx, "/a", 1))
         .unwrap();
-    let seen = second.database.read(workspace::list).unwrap();
+    let seen = second
+        .database
+        .read(|conn| workspace::list(conn, 10))
+        .unwrap();
     assert_eq!(seen.len(), 1);
     assert_eq!(seen[0].root, "/a");
 }
@@ -201,13 +204,100 @@ fn session_and_workspace_repositories_round_trip() {
         "other columns untouched"
     );
 
-    let recent = database.read(workspace::list).unwrap();
+    let recent = database.read(|conn| workspace::list(conn, 10)).unwrap();
     assert_eq!(
         recent
             .iter()
             .map(|w| (w.root.as_str(), w.last_opened_at))
             .collect::<Vec<_>>(),
         vec![("/repo", 20), ("/other", 5)]
+    );
+}
+
+#[test]
+fn the_workspace_history_is_ordered_and_bounded_by_the_limit() {
+    let database = Database::open_in_memory().unwrap();
+    database
+        .write(|tx| {
+            workspace::touch(tx, "/oldest", 1)?;
+            workspace::touch(tx, "/middle", 2)?;
+            workspace::touch(tx, "/newest", 3)?;
+            // Same timestamp: the root breaks the tie, so the order is total.
+            workspace::touch(tx, "/b-tie", 2)?;
+            workspace::touch(tx, "/a-tie", 2)
+        })
+        .unwrap();
+
+    let roots = |limit| {
+        database
+            .read(move |conn| workspace::list(conn, limit))
+            .unwrap()
+            .into_iter()
+            .map(|row| row.root)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        roots(10),
+        vec!["/newest", "/a-tie", "/b-tie", "/middle", "/oldest"]
+    );
+    assert_eq!(roots(2), vec!["/newest", "/a-tie"]);
+    assert!(roots(0).is_empty());
+}
+
+#[test]
+fn forgetting_a_root_leaves_its_tabs_and_snapshots_alone() {
+    let database = Database::open_in_memory().unwrap();
+    database
+        .write(|tx| {
+            workspace::touch(tx, "/gone", 1)?;
+            workspace::touch(tx, "/kept", 2)?;
+            tabs::replace(
+                tx,
+                "/gone",
+                &[tabs::TabRow {
+                    path: "notes.md".into(),
+                    ..Default::default()
+                }],
+                1,
+            )?;
+            snapshots::upsert(
+                tx,
+                "/gone",
+                &snapshots::SnapshotRow {
+                    path: "notes.md".into(),
+                    text: "unsaved".into(),
+                    encoding: "UTF8".into(),
+                    saved_hash: "hash".into(),
+                    current_version: 3,
+                    updated_at: 1,
+                },
+            )
+        })
+        .unwrap();
+
+    assert!(database.write(|tx| workspace::forget(tx, "/gone")).unwrap());
+    // Idempotent: forgetting what is already forgotten is not an error.
+    assert!(!database.write(|tx| workspace::forget(tx, "/gone")).unwrap());
+
+    let remaining = database.read(|conn| workspace::list(conn, 10)).unwrap();
+    assert_eq!(
+        remaining.iter().map(|row| &row.root).collect::<Vec<_>>(),
+        vec!["/kept"]
+    );
+    // ADR-014: unsaved work under a root the user dismissed is never discarded
+    // as a side effect.
+    assert_eq!(
+        database
+            .read(|conn| tabs::list(conn, "/gone"))
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(
+        database
+            .read(|conn| snapshots::get(conn, "/gone", "notes.md"))
+            .unwrap()
+            .is_some()
     );
 }
 

@@ -14,6 +14,7 @@ import {
   type EventEnvelope,
   type EventName,
   type EventOf,
+  type ForgetWorkspaceRequest,
   type HealthReport,
   type KillTerminalRequest,
   type ListDirectoryRequest,
@@ -25,6 +26,8 @@ import {
   type Operation,
   type OperationId,
   PROTOCOL_VERSION,
+  type RecentWorkspace,
+  type RecentWorkspacesRequest,
   type RecoverSnapshotRequest,
   type RecoveryCandidate,
   type ReloadDocumentRequest,
@@ -80,6 +83,21 @@ export interface CoreClient {
      * operation whose `OperationCompleted.result` will carry it.
      */
     list(request: ListDirectoryRequest): Promise<ListDirectoryResponse>;
+    /**
+     * The roots opened before, newest first, for the startup screen (T049).
+     * Each entry says whether its root is still a directory and carries a
+     * home-shortened `displayRoot`; `root` is what `open` and `forget` take.
+     *
+     * Never rejects because persistence is unavailable — the history is empty
+     * instead, and `session.restore`'s notices say why. `limit` is capped by
+     * the core; a snapshot, not a subscription.
+     */
+    recents(limit?: number): Promise<RecentWorkspace[]>;
+    /**
+     * Drop one root from the history. Idempotent, and narrow: the tabs and
+     * unsaved-buffer snapshots stored under that root are left alone.
+     */
+    forget(root: string): Promise<void>;
   };
   /**
    * Documents (T030, Gate B). The core owns every buffer: `open` returns the
@@ -240,6 +258,15 @@ export function createCoreClient(
       },
       current: () => command<Workspace | null>('workspace.current'),
       list: (request) => command<ListDirectoryResponse>('workspace.list', { request }),
+      recents: (limit) => {
+        const request: RecentWorkspacesRequest = {};
+        if (limit !== undefined) request.limit = limit;
+        return command<RecentWorkspace[]>('workspace.recents', { request });
+      },
+      forget: (root) => {
+        const request: ForgetWorkspaceRequest = { root };
+        return command<void>('workspace.forget', { request });
+      },
     },
     documents: {
       open: (request) => command<DocumentContent>('documents.open', { request }),
