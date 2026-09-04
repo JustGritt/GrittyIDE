@@ -69,9 +69,11 @@ export function Launcher({
     <section className="launcher" aria-labelledby="launcher-title">
       <div className="launcher__panel">
         <div className="launcher__intro">
-          <h1 className="launcher__title" id="launcher-title">
+          {/* h2, not h1: the app bar's wordmark is the document's heading and
+              this repeats it. Size comes from the class, not the level. */}
+          <h2 className="launcher__title" id="launcher-title">
             Gritty
-          </h1>
+          </h2>
           <p className="launcher__tagline">
             Agent-native development environment. Open a workspace to edit files, run shells and
             supervise agents.

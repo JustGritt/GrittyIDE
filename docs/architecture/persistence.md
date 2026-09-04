@@ -24,12 +24,21 @@ build knows is refused.
 
 | Table | Key | Columns | Written by |
 |---|---|---|---|
-| `workspace` | `root` | `last_opened_at` | writer, on `WorkspaceOpened` |
+| `workspace` | `root` | `last_opened_at` | writer, on `WorkspaceOpened`; read by `workspace.recents`, one row deleted by `workspace.forget` (T049) |
 | `session` | single row | `workspace_root` (NULL after a user close), `editor_preferences` (JSON), `layout` (JSON), `updated_at` | writer (root), `session.update` (blobs) |
 | `window_state` | `label` | `x`, `y`, `width`, `height` (physical px), `scale_factor`, `maximized`, `updated_at` | writer, from the desktop's window events |
 | `workspace_tab` | `(workspace_root, path)` | `position`, `active`, `view_mode`, `cursor_line/column`, `anchor_line/column`, `scroll_line`, `updated_at` | `session.update` (the whole set of a root, one transaction) |
 | `buffer_snapshot` | `(workspace_root, path)` | `text`, `encoding`, `saved_hash`, `current_version`, `updated_at` | writer (debounced), removed per the rules below |
 | `operation_record` | `id` | `kind`, `workspace_root`, `status`, `correlation_id`, `created_at`, `started_at`, `finished_at`, `updated_at` | writer, for `durable` operations; `INTERRUPTED` at startup |
+
+The `workspace` table is the startup screen's history (T049).
+`workspace.recents` reads it newest-first under a caller-supplied limit and
+`stat`s each root, so an entry whose directory is gone is shown as unavailable
+rather than dropped. `workspace.forget` removes one row, and clears
+`session.workspace_root` when it names the same root — otherwise the next
+launch would keep retrying a workspace the user just dismissed. It removes
+nothing else: the `workspace_tab` and `buffer_snapshot` rows under that root
+stay, because unsaved work is never discarded as a side effect (ADR-014).
 
 `workspace_root` is `Workspace.root` (canonical, native form, ADR-010);
 `path` is the wire `WorkspacePath`. Ids are never stored. The JSON blobs carry

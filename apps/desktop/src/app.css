@@ -2033,6 +2033,11 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
+/* Truncated at the end, plainly. `direction: rtl` would move the ellipsis to
+   the front — which is the more useful end of a path to lose — but it also
+   reorders the neutral characters, and `~/Desktop/Projects` comes out as
+   `/~Desktop/Projects`. A path that reads wrong is worse than one that reads
+   short, and the row's `title` carries the whole root either way. */
 .launcher__recent-parent {
   font-family: var(--font-mono);
   font-size: var(--text-micro);
@@ -2040,7 +2045,6 @@ textarea:focus-visible {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  direction: rtl;
   text-align: right;
   min-width: 0;
 }
