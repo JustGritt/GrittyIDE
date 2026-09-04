@@ -4,6 +4,8 @@ import { ErrorEnvelope } from './components/error-envelope';
 import { core } from './core/client';
 import { describeHealth } from './core/health';
 import { useDocuments } from './features/documents/use-documents';
+import { DropOverlay } from './features/drop/drop-overlay';
+import { useFileDrop } from './features/drop/use-file-drop';
 import { EditorPane } from './features/editor/editor-pane';
 import { useEditorPreferences } from './features/editor/editor-preferences';
 import { useEditorBinding } from './features/editor/use-editor-binding';
@@ -33,6 +35,9 @@ export function App() {
     [documents.state.order],
   );
   const editor = useEditorBinding(documents, prefs);
+  // Files and folders dropped onto the window (classified by the core, opened
+  // through the ordinary commands).
+  const drop = useFileDrop(documents);
   const [layout, setLayout] = useState<Layout>(DEFAULT_LAYOUT);
   // Terminal sessions live beside the editor, not inside it: output never
   // passes through editor state (T090).
@@ -83,6 +88,7 @@ export function App() {
         </section>
       </header>
       <SessionNotices session={session} />
+      <DropOverlay drop={drop} />
       <div className="shell__body">
         <aside className="shell__sidebar">
           <ExplorerPanel

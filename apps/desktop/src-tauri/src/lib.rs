@@ -15,10 +15,12 @@
 
 mod commands;
 pub mod core;
+mod file_drop;
 mod shell;
 pub mod window_state;
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use std::time::Instant;
 
 use tauri::{Manager, Url};
 
@@ -28,8 +30,108 @@ use tracing_subscriber::EnvFilter;
 /// Environment variable controlling log filtering, e.g. `GRITTY_LOG=debug`.
 const LOG_ENV: &str = "GRITTY_LOG";
 
+/// Instant [`run`] began. Startup milestones are logged relative to it so the
+/// Phase 0 performance baseline (`docs/plans/phase-0-spike.md` §C) reads launch
+/// timings out of the log instead of inferring them from line timestamps.
+static STARTED: OnceLock<Instant> = OnceLock::new();
+
+/// Log one startup milestone with the time since [`run`] began.
+///
+/// Silent when the process did not go through [`run`] — the mock runtime in
+/// tests has no start instant, and a milestone measured from nothing would be
+/// a fabricated number.
+pub(crate) fn log_startup_milestone(milestone: &'static str) {
+    if let Some(started) = STARTED.get() {
+        emit_startup_milestone(milestone, started.elapsed());
+    }
+}
+
+fn emit_startup_milestone(milestone: &'static str, elapsed: std::time::Duration) {
+    tracing::info!(
+        milestone,
+        elapsed_ms = elapsed.as_millis() as u64,
+        "startup milestone"
+    );
+}
+
+/// Captures rendered log output so a test can assert on the lines the Phase 0
+/// measurements parse, rather than on the call that produced them.
+///
+/// The subscriber is installed **globally, once per test binary**, not with
+/// `with_default`. A thread-local subscriber captures nothing when the event
+/// is emitted on another thread, and `guard` drives its body on the async
+/// runtime — which thread polls the result differs by platform, so a
+/// thread-local capture passed on macOS and failed on the Linux runner.
+///
+/// Because the buffer is shared, tests read only the slice their own body
+/// appended and assert on a string unique to themselves. Never assert that the
+/// window is *empty*: tests run in parallel and another one's line may land in
+/// it.
+#[cfg(test)]
+pub(crate) mod log_capture {
+    use std::sync::{Arc, Mutex, Once, OnceLock};
+
+    #[derive(Clone, Default)]
+    pub(crate) struct Captured(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().expect("captured log").extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Captured {
+        type Writer = Self;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    static BUFFER: OnceLock<Captured> = OnceLock::new();
+    static INSTALLED: Once = Once::new();
+
+    fn buffer() -> &'static Captured {
+        BUFFER.get_or_init(Captured::default)
+    }
+
+    /// The captured line mentioning `marker`. Assertions go through this
+    /// rather than over the whole window, so a line from a parallel test can
+    /// never satisfy them.
+    pub(crate) fn line_with<'a>(log: &'a str, marker: &str) -> &'a str {
+        log.lines()
+            .find(|line| line.contains(marker))
+            .unwrap_or_else(|| panic!("no line mentioning {marker} in:\n{log}"))
+    }
+
+    /// Runs `body` and returns everything logged at DEBUG or above while it
+    /// ran — plus, possibly, lines from tests running in parallel.
+    pub(crate) fn capture<T>(body: impl FnOnce() -> T) -> (T, String) {
+        INSTALLED.call_once(|| {
+            tracing_subscriber::fmt()
+                .with_writer(buffer().clone())
+                .with_max_level(tracing::Level::DEBUG)
+                .with_ansi(false)
+                .init();
+        });
+        let start = buffer().0.lock().expect("captured log").len();
+        let value = body();
+        let text = {
+            let captured = buffer().0.lock().expect("captured log");
+            String::from_utf8_lossy(&captured[start..]).into_owned()
+        };
+        (value, text)
+    }
+}
+
 /// Start the desktop application. Blocks until the app exits.
 pub fn run() {
+    let _ = STARTED.set(Instant::now());
     init_tracing();
     tracing::info!(
         app_version = env!("CARGO_PKG_VERSION"),
@@ -41,6 +143,7 @@ pub fn run() {
     let app = configure(tauri::Builder::default())
         .build(tauri::generate_context!())
         .expect("error while building Gritty");
+    log_startup_milestone("application built");
 
     app.run(|app, event| {
         if let tauri::RunEvent::Exit = event {
@@ -57,7 +160,10 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(navigation_guard())
-        .on_window_event(window_state::on_window_event)
+        .on_window_event(|window, event| {
+            window_state::on_window_event(window, event);
+            file_drop::on_window_event(window, event);
+        })
         .setup(|app| {
             attach_core(app.handle());
             window_state::restore_main_window(app.handle());
@@ -166,6 +272,27 @@ mod tests {
 
     fn url(raw: &str) -> Url {
         Url::parse(raw).expect("test url")
+    }
+
+    #[test]
+    fn a_startup_milestone_reports_the_elapsed_time_in_milliseconds() {
+        let (_, log) = log_capture::capture(|| {
+            emit_startup_milestone("window shown", std::time::Duration::from_millis(1234));
+        });
+        let line = log_capture::line_with(&log, "milestone=\"window shown\"");
+        assert!(line.contains("startup milestone"), "{line}");
+        assert!(line.contains("elapsed_ms=1234"), "{line}");
+    }
+
+    #[test]
+    fn no_milestone_is_logged_when_the_process_never_went_through_run() {
+        // `run` is the only place that sets `STARTED`; tests and the mock
+        // runtime must not produce a milestone measured from nothing.
+        assert!(STARTED.get().is_none());
+        // A name no other test emits: the capture buffer is shared, so the
+        // absence of *this* line is the property, not an empty window.
+        let (_, log) = log_capture::capture(|| log_startup_milestone("first webview health"));
+        assert!(!log.contains("first webview health"), "{log}");
     }
 
     #[test]

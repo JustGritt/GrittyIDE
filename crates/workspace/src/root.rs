@@ -9,7 +9,7 @@
 
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::error::WorkspaceError;
 use crate::path::WorkspacePath;
@@ -128,6 +128,29 @@ impl WorkspaceRoot {
     pub fn contains(&self, canonical: &Path) -> bool {
         canonical.starts_with(&self.path)
     }
+
+    /// The wire path for an already canonical native path inside this root, or
+    /// `None` when it lies outside. The inverse of [`WorkspacePath::to_native`],
+    /// for the cases where a path arrives from the platform rather than from
+    /// the protocol — a file dropped onto the window, for one.
+    ///
+    /// The root itself maps to [`WorkspacePath::root`]. A component that is not
+    /// valid UTF-8 yields `None` rather than a lossy path: the protocol carries
+    /// strings, and a lossy name would not round-trip back to this file.
+    pub fn relativize(&self, canonical: &Path) -> Option<WorkspacePath> {
+        let relative = canonical.strip_prefix(&self.path).ok()?;
+        let mut path = WorkspacePath::root();
+        for component in relative.components() {
+            let name = match component {
+                Component::Normal(name) => name.to_str()?,
+                // `strip_prefix` on two canonical absolute paths leaves only
+                // normal components; anything else means the assumption broke.
+                _ => return None,
+            };
+            path = path.join(name).ok()?;
+        }
+        Some(path)
+    }
 }
 
 /// `fs::canonicalize` with the Windows verbatim prefix (`\\?\`) removed so
@@ -172,6 +195,30 @@ fn strip_verbatim(path: PathBuf) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relativize_is_the_inverse_of_to_native() {
+        let dir = std::env::temp_dir();
+        let root = WorkspaceRoot::open(&dir).expect("temp dir is a root");
+        for wire in ["", "src", "src/lib.rs", "a/b/c.txt"] {
+            let path = WorkspacePath::parse(wire).expect("wire path");
+            let native = path.to_native(root.path());
+            assert_eq!(root.relativize(&native), Some(path), "{wire}");
+        }
+    }
+
+    #[test]
+    fn relativize_refuses_paths_outside_the_root() {
+        let dir = std::env::temp_dir().join("gritty-relativize");
+        std::fs::create_dir_all(dir.join("inside")).expect("fixture");
+        let root = WorkspaceRoot::open(&dir).expect("root");
+        // A sibling that merely shares a prefix as a string is not inside.
+        let sibling = dir.with_file_name("gritty-relativize-other");
+        assert_eq!(root.relativize(&sibling), None);
+        assert_eq!(root.relativize(Path::new("/")), None);
+        // The root itself is the root wire path, not `None`.
+        assert_eq!(root.relativize(root.path()), Some(WorkspacePath::root()));
+    }
 
     #[test]
     fn open_rejects_relative_and_empty_paths() {

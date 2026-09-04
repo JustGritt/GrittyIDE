@@ -7,6 +7,11 @@ Windows is not a supported target before Phase 8 (ADR-002); the column exists
 because the development machine moved to Windows 11 during T020, so
 observations from there are recorded without claiming support.
 
+Every row still marked `–` or `(a)` on macOS is covered, in order, by
+`phase-0-manual-pass.md` — one ordered session that replaces the per-task
+"not executed" lists. Fill rows from that pass with the observation, the date
+and the machine.
+
 Legend: ✔ works · ✘ defect (link an issue/note) · ~ partial · – untested · (a) automated test only
 
 | Area | Check | macOS (WKWebView) | Linux (WebKitGTK) | Windows (WebView2) | Notes |
@@ -18,6 +23,8 @@ Legend: ✔ works · ✘ defect (link an issue/note) · ~ partial · – unteste
 | Input | clipboard copy/cut/paste in editor and inputs | – | – | – | T040: pending the human pass |
 | Input | IME composition, dead keys, international layouts | – | – | – | T040: pending the human pass |
 | Input | drag and drop of text and files | – | – | – | T040: tab reorder uses HTML5 drag and drop (Tauri `dragDropEnabled` may interfere); pending the human pass |
+| Input | drop a file from the OS opens it; a folder opens as the workspace | – | – | – | T045: classification is core-tested (`file_drop.rs`) and the plan is unit-tested (`drop-policy.test.ts`); the platform drop itself and the overlay pending the human pass (steps 2.13–2.18) |
+| Input | OS file drop and the tab strip's HTML5 drag coexist | – | – | – | T045: `dragDropEnabled: true` set explicitly. T040 flagged that Tauri's OS drop may block HTML5 drag; step 2.18 decides it |
 | Rendering | font rendering, high-DPI, zoom/scaling | – | – | – | T040: codicon font emitted as an asset (`font-src 'self'`); pending the human pass |
 | Rendering | light/dark theme switch | – | – | – | T000+; T040 follows `prefers-color-scheme` (`vs` / `vs-dark`), pending the human pass |
 | Files | native directory picker opens a workspace | – | – | – | T020; picker runs on the Rust side |
@@ -61,7 +68,7 @@ Legend: ✔ works · ✘ defect (link an issue/note) · ~ partial · – unteste
 | Recovery | quit / relaunch restores workspace, tabs, active tab, view modes, cursors, preferences | (a) | – | – | T060: adapter and Vitest coverage; in the app pending the human pass |
 | System | window geometry restore (size, position, maximized) | ~ | – | – | T060: `pnpm dev` twice with `GRITTY_DATA_DIR` on macOS 26 (2026-09-04): the second launch logged `restoring window geometry width=2560 height=1600 position=Some((232, 142))` from the row the first launch recorded; off-monitor positions dropped (`fit_to_monitors` tests); Linux untested by design (Wayland ignores positions, GTK maximize-before-show) |
 | System | sleep/wake, multi-monitor | – | – | – | T060: pending the human pass |
-| Build | `pnpm tauri build` produces a launchable bundle | – | – (CI: no-bundle) | – | T000 |
+| Build | `pnpm tauri build` produces a launchable bundle | ~ | – (CI: no-bundle) | – | T000; 2026-09-04 macOS 26 arm64: `pnpm tauri build --debug --bundles app` produced `target/debug/bundle/macos/Gritty.app`, which launches from the CLI under the production CSP and reaches `first webview health` in 754 ms. CI (run 33876904661) built and uploaded the release `Gritty.app` on macos-15. Launching it from Finder and using it is manual pass Session 6 |
 
 ## Windows development notes (T020)
 

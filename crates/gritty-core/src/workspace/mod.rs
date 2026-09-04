@@ -293,6 +293,15 @@ impl WorkspaceManager {
 
     /// The open workspace, or `None`. A root that disappeared closes the
     /// workspace (`ROOT_MISSING`) and yields `None`.
+    /// The open workspace's id and root, for the callers that need the root
+    /// itself rather than the display string on [`Workspace`] — classifying a
+    /// dropped path against it, for one.
+    pub fn current_open(&self) -> Option<(WorkspaceId, Arc<WorkspaceRoot>)> {
+        self.lock()
+            .as_ref()
+            .map(|open| (open.workspace.id.clone(), open.root.clone()))
+    }
+
     pub fn current(&self, correlation: &CorrelationId) -> Option<Workspace> {
         let mut current = self.lock();
         let present = current.as_ref().is_some_and(|open| open.root.is_present());

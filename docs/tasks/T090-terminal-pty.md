@@ -1,7 +1,7 @@
 # Task T090 — Terminal (PTY) spike
 
 - **Phase:** 0 / 2
-- **Status:** review
+- **Status:** done
 - **Depends on:** T010
 
 ## Objective

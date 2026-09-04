@@ -12,6 +12,7 @@ use gritty_core::CORE_EVENT_CHANNEL;
 use gritty_core::CoreError;
 use gritty_core::document::{DocumentLimits, DocumentManager};
 use gritty_core::event::{EventBus, EventEnvelope, EventSink, FanOutSink};
+use gritty_core::file_drop::FileDropService;
 use gritty_core::operation::OperationRegistry;
 use gritty_core::session::{SessionService, SessionStore, SessionTap, TAP_CAPACITY, WriterConfig};
 use gritty_core::shell::{ExternalOpener, ShellService};
@@ -43,6 +44,7 @@ pub struct CoreOptions {
 pub struct Core {
     pub registry: Arc<OperationRegistry>,
     pub workspaces: Arc<WorkspaceManager>,
+    pub file_drop: Arc<FileDropService>,
     pub documents: Arc<DocumentManager>,
     pub shell: Arc<ShellService>,
     pub session: Arc<SessionService>,
@@ -95,6 +97,7 @@ impl Core {
         );
         let shell = ShellService::new(handle.clone(), options.opener);
         let terminals = TerminalManager::new(events.clone(), workspaces.clone(), options.pty_host);
+        let file_drop = FileDropService::new(events.clone(), workspaces.clone());
         // Synchronous: a small database opens in milliseconds and the window
         // geometry must be known before the window shows.
         let store = match options.data_dir {
@@ -113,6 +116,7 @@ impl Core {
         Self {
             registry,
             workspaces,
+            file_drop,
             documents,
             shell,
             session,
