@@ -1,6 +1,6 @@
 import { isInstructionFile } from '@gritty/markdown';
-import type { DirEntry, WorkspaceClosedReason, WorkspaceId } from '@gritty/protocol';
-import { type FormEvent, useState } from 'react';
+import type { DirEntry, Workspace, WorkspaceClosedReason, WorkspaceId } from '@gritty/protocol';
+import { type FormEvent, useEffect, useState } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
 import {
   countHidden,
@@ -27,15 +27,24 @@ export function ExplorerPanel({
   onOpenFile,
   showHidden,
   onShowHiddenChange,
+  onWorkspaceChange,
 }: {
   onOpenFile?: (workspaceId: WorkspaceId, path: string) => void;
   /** Persisted layout (T060). */
   showHidden?: boolean;
   onShowHiddenChange?: (showHidden: boolean) => void;
+  /**
+   * The top bar names the open workspace (T048). The explorer owns the
+   * subscription, so it reports the workspace up rather than the shell opening
+   * a second one.
+   */
+  onWorkspaceChange?: (workspace: Workspace | null) => void;
 }) {
   const explorer = useExplorer({ showHidden, onShowHiddenChange });
   const { state } = explorer;
   const [pathInput, setPathInput] = useState('');
+  const workspace = state.workspace;
+  useEffect(() => onWorkspaceChange?.(workspace), [workspace, onWorkspaceChange]);
 
   function onOpenPath(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -51,34 +60,45 @@ export function ExplorerPanel({
 
   return (
     <section className="explorer" aria-labelledby="explorer-title">
+      {/* A 32px header (T048): the label, the one action you reach for, and the
+          rest behind the same disclosure the editor and terminal settings use. */}
       <div className="explorer__toolbar">
         <h2 id="explorer-title">Explorer</h2>
-        <button type="button" onClick={() => void explorer.openFolder()}>
-          Open folder…
-        </button>
-        <form className="explorer__path" onSubmit={onOpenPath}>
-          <input
-            value={pathInput}
-            onChange={(e) => setPathInput(e.target.value)}
-            placeholder="absolute path"
-            aria-label="Workspace path"
-            spellCheck={false}
-          />
-          <button type="submit">Open path</button>
-        </form>
-        {state.workspace && (
-          <button type="button" onClick={() => void explorer.closeWorkspace()}>
-            Close
-          </button>
+        <span className="explorer__spacer" />
+        {hiddenCount > 0 && !state.showHidden && (
+          <span className="badge">{hiddenCount} hidden</span>
         )}
-        <label className="explorer__hidden">
-          <input
-            type="checkbox"
-            checked={state.showHidden}
-            onChange={(e) => explorer.setShowHidden(e.target.checked)}
-          />
-          Show hidden{hiddenCount > 0 && !state.showHidden ? ` (${hiddenCount})` : ''}
-        </label>
+        <button type="button" onClick={() => void explorer.openFolder()}>
+          Open…
+        </button>
+        <details className="explorer__more">
+          <summary aria-label="Workspace options">⋯</summary>
+          <div className="explorer__menu">
+            <form className="explorer__path" onSubmit={onOpenPath}>
+              <input
+                value={pathInput}
+                onChange={(e) => setPathInput(e.target.value)}
+                placeholder="absolute path"
+                aria-label="Workspace path"
+                spellCheck={false}
+              />
+              <button type="submit">Open path</button>
+            </form>
+            <label className="explorer__hidden">
+              <input
+                type="checkbox"
+                checked={state.showHidden}
+                onChange={(e) => explorer.setShowHidden(e.target.checked)}
+              />
+              Show hidden{hiddenCount > 0 && !state.showHidden ? ` (${hiddenCount})` : ''}
+            </label>
+            {state.workspace && (
+              <button type="button" onClick={() => void explorer.closeWorkspace()}>
+                Close workspace
+              </button>
+            )}
+          </div>
+        </details>
       </div>
 
       {state.notice && (
@@ -105,10 +125,6 @@ export function ExplorerPanel({
 
       {state.workspace ? (
         <>
-          <p className="explorer__workspace">
-            <strong>{state.workspace.name}</strong>
-            <code>{state.workspace.root}</code>
-          </p>
           <ul className="tree" aria-label="Workspace files">
             {rows.map((row) => (
               <TreeRow

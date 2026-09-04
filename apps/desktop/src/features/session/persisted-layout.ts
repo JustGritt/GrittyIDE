@@ -27,7 +27,7 @@ export interface Layout {
  * stored size and a dragged one obey the same rules.
  */
 export const PANE_LIMITS = {
-  sidebar: { min: 180, max: 640, default: 320 },
+  sidebar: { min: 180, max: 640, default: 244 },
   terminal: { min: 120, max: 900, default: 280 },
 } as const;
 
