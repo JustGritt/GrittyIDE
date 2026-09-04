@@ -1222,7 +1222,7 @@ button:disabled {
 .drop-overlay {
   align-items: center;
   background: color-mix(in srgb, var(--bg) 70%, transparent);
-  border: 2px dashed var(--accent, currentColor);
+  border: 2px dashed var(--ok);
   border-radius: 8px;
   display: flex;
   inset: 8px;
