@@ -1,6 +1,6 @@
 import type { Terminal as TerminalSession } from '@gritty/protocol';
 import { FitAddon } from '@xterm/addon-fit';
-import { Terminal } from '@xterm/xterm';
+import { type ITheme, Terminal } from '@xterm/xterm';
 import { useEffect, useRef } from 'react';
 import '@xterm/xterm/css/xterm.css';
 import type { OutputBus } from './output-bus';
@@ -120,6 +120,19 @@ export function TerminalView({
     if (container && fit.current) fitIfVisible(container, fit.current);
   }, [fontFamily, fontSize]);
 
+  // The palette changes when the OS does. Applied in place, like the font:
+  // recreating the terminal would lose the scrollback of a running shell.
+  // Without this a live terminal kept the theme it was born with.
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-color-scheme: dark)');
+    const update = () => {
+      const terminal = term.current;
+      if (terminal) terminal.options.theme = readTheme();
+    };
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+
   // A hidden view cannot be measured, so it is fitted when it becomes visible.
   useEffect(() => {
     if (!active) return;
@@ -190,12 +203,35 @@ function fitIfVisible(container: HTMLElement, addon: FitAddon) {
  * xterm paints its own surface, so it cannot inherit the app's CSS variables;
  * they are read once and handed over as a theme.
  */
-function readTheme() {
+/**
+ * The whole palette, read from the app's design tokens (ADR-016) so the
+ * terminal cannot drift from the window around it — including the sixteen ANSI
+ * colors, which used to fall through to xterm's own defaults.
+ */
+function readTheme(): ITheme {
   const styles = getComputedStyle(document.documentElement);
   const read = (name: string, fallback: string) => styles.getPropertyValue(name).trim() || fallback;
   return {
-    background: read('--bg', '#111418'),
-    foreground: read('--fg', '#e6e9ef'),
-    cursor: read('--fg', '#e6e9ef'),
+    background: read('--surface-base', '#0f1216'),
+    foreground: read('--fg-dim', '#c3cad4'),
+    cursor: read('--accent', '#4c8dff'),
+    cursorAccent: read('--term-cursor-accent', '#0f1216'),
+    selectionBackground: read('--term-selection', 'rgba(76, 141, 255, 0.28)'),
+    black: read('--ansi-black', '#0f1216'),
+    red: read('--ansi-red', '#ff7b72'),
+    green: read('--ansi-green', '#7bd88f'),
+    yellow: read('--ansi-yellow', '#e8b54a'),
+    blue: read('--ansi-blue', '#4c8dff'),
+    magenta: read('--ansi-magenta', '#d2a8ff'),
+    cyan: read('--ansi-cyan', '#76e3ea'),
+    white: read('--ansi-white', '#c3cad4'),
+    brightBlack: read('--ansi-bright-black', '#68727f'),
+    brightRed: read('--ansi-bright-red', '#ffa198'),
+    brightGreen: read('--ansi-bright-green', '#9ce6ae'),
+    brightYellow: read('--ansi-bright-yellow', '#f0c674'),
+    brightBlue: read('--ansi-bright-blue', '#7ea9f5'),
+    brightMagenta: read('--ansi-bright-magenta', '#e2c5ff'),
+    brightCyan: read('--ansi-bright-cyan', '#a5f3f7'),
+    brightWhite: read('--ansi-bright-white', '#e6e9ef'),
   };
 }
