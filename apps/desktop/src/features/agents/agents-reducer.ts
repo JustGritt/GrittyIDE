@@ -1,4 +1,4 @@
-import type { AgentActivity, AgentRoster, AgentSession, EventEnvelope } from '@gritty/protocol';
+import type { AgentRoster, AgentSession, EventEnvelope } from '@gritty/protocol';
 
 /**
  * The agent roster as the renderer holds it (T220).
@@ -38,14 +38,19 @@ export function agentsReducer(state: AgentsState, action: AgentsAction): AgentsS
   }
 }
 
-/** Sessions running in the workspace that is open now. */
-export function sessionsHere(roster: AgentRoster): AgentSession[] {
-  return roster.sessions.filter((session) => session.inWorkspace);
-}
-
-/** Sessions running anywhere else on the machine. */
-export function sessionsElsewhere(roster: AgentRoster): AgentSession[] {
-  return roster.sessions.filter((session) => !session.inWorkspace);
+/**
+ * The one session the island shows in full (T231 §7).
+ *
+ * The island is no longer the primary surface for agents — the rail is — so it
+ * keeps a count and the row worth interrupting for. That is the first session
+ * whose turn is over and whose move is yours; failing that, the first session
+ * of the core's ranking, which already puts this workspace and live work at
+ * the top. `null` only when the roster is empty.
+ */
+export function mostUrgent(roster: AgentRoster): AgentSession | null {
+  return (
+    roster.sessions.find((session) => session.activity === 'WAITING') ?? roster.sessions[0] ?? null
+  );
 }
 
 /** How many are still alive — what the collapsed pill counts. */
@@ -63,38 +68,6 @@ export function runningCount(roster: AgentRoster): number {
  */
 export function taskLine(session: AgentSession): string | null {
   return session.title ?? session.lastPrompt ?? session.lastReply ?? null;
-}
-
-/** One-word label for an activity, matching the dot beside it. */
-export function activityLabel(activity: AgentActivity): string {
-  switch (activity) {
-    case 'WORKING':
-      return 'Working';
-    case 'WAITING':
-      return 'Your move';
-    case 'IDLE':
-      return 'Idle';
-    case 'ENDED':
-      return 'Ended';
-    default:
-      // A provider or activity added by a newer core: show it rather than
-      // crash, since the protocol is additive by design.
-      return activity;
-  }
-}
-
-/** Maps an activity onto the island's existing dot tones. */
-export function activityTone(activity: AgentActivity): string {
-  switch (activity) {
-    case 'WORKING':
-      return 'active';
-    case 'WAITING':
-      return 'waiting';
-    case 'IDLE':
-      return 'idle';
-    default:
-      return 'done';
-  }
 }
 
 /** `Bash · cargo test`, bounded by the core, or `null` when nothing is running. */

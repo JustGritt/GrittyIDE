@@ -1,7 +1,7 @@
 # Task T231 — The agent rail: a dedicated region for running agents
 
 - **Phase:** 3
-- **Status:** not yet started
+- **Status:** review
 - **Depends on:** T046 (resizable panes), T060 (layout persistence), T220, T230
 
 ## Objective
@@ -199,4 +199,131 @@ pnpm check
 
 ## Completion report
 
-_(filled in by the implementing session)_
+**Status:** implemented, UI only. No Rust, no protocol, no schema change.
+
+### Summary
+
+The shell has a third region. `shell__body` gained a fourth/fifth child — a
+right-anchored `Splitter` driving `--agent-rail-width` and the rail itself —
+and the layout blob gained `panes.agentRailWidth` plus an `agentRail.open`
+section (`LAYOUT_VERSION` 4 → 5). The rail lists the machine's agent sessions in
+the core's own ranking, one row per session, each with its provider, task line,
+working directory, tool in flight and status; selecting a row opens exactly one
+`agents.openTimeline` follower and switching closes the previous one. The body
+under the list is a placeholder: T232 owns the feed and the files touched.
+
+`useAgents` was already lifted into `App.tsx` (T220), so the rail and the island
+consume the same `AgentsController` and cannot report different counts. The
+island's agents section is reduced to a summary line and its single most urgent
+row, pointing at the rail for the rest.
+
+### Files changed
+
+| File | What |
+|---|---|
+| `apps/desktop/src/features/agents/agent-rail.tsx` | new — the region: bar, collapse, chord listener, list, timeline placeholder |
+| `apps/desktop/src/features/agents/agent-rail-reducer.ts` | new — pure state: open, selection, pending selection, timeline handle, error |
+| `apps/desktop/src/features/agents/agent-rail-reducer.test.ts` | new — 12 cases |
+| `apps/desktop/src/features/agents/use-agent-rail.ts` | new — the controller: one follower, mirrors the persisted `open`, closes on collapse/unmount/roster departure |
+| `apps/desktop/src/features/agents/agent-status.ts` | new — the one status mapping (label, tone, hint) and the provider label |
+| `apps/desktop/src/features/agents/agent-status.test.ts` | new — totality over `AgentActivity`, the `WAITING` → "Done" translation, unknown values |
+| `apps/desktop/src/features/agents/agent-status-badge.tsx` | new — the badge both surfaces render, so the word cannot drift |
+| `apps/desktop/src/features/agents/agent-rail-chords.ts` + `.test.ts` | new — ⌥G, matched on `event.code` |
+| `apps/desktop/src/features/agents/agents-panel.tsx` | reduced to a count and the most urgent row |
+| `apps/desktop/src/features/agents/agents-reducer.ts` | `mostUrgent` added; `activityLabel`/`activityTone` moved to `agent-status.ts`; `sessionsHere`/`sessionsElsewhere` removed with the grouping that used them |
+| `apps/desktop/src/features/agents/agents-reducer.test.ts` | follows the above |
+| `apps/desktop/src/features/session/persisted-layout.ts` + `.test.ts` | `PANE_LIMITS.agentRail`, `panes.agentRailWidth`, `agentRail.open`, version 5, parsing and clamping |
+| `apps/desktop/src/App.tsx` | the rail's controller, bounds, splitter, region and chord gate |
+| `apps/desktop/src/app.css` | the three-region grid templates, the rail block, the five status tones |
+| `docs/architecture/agent-sessions.md` | the rail paragraph now says what shipped and what T232 still owns |
+| `docs/tasks/README.md` | status → review |
+
+No new dependency.
+
+### Tests actually executed
+
+- `pnpm test` → **58 files, 410 tests, all passing** (vitest 4.1.11).
+- `pnpm exec vitest run --project desktop --reporter=verbose` → the 24 new
+  cases (`agent rail reducer` ×12, `agentStatus` ×4, `providerLabel` ×1,
+  `isAgentRailChord` ×6, `reads a blob written before the agent rail existed`
+  and the rail cases inside `layout blob`) all reported ✓.
+- `pnpm typecheck` → clean across all four projects.
+- `pnpm exec biome check apps/desktop/src` → "Checked 115 files. No fixes
+  applied." after formatting and a `noDescendingSpecificity` fix (the stacked
+  media query moved below the rules it overrides).
+
+`pnpm check` was **not** run to completion: another session has the Rust tree
+mid-edit and `check:generated` fails on protocol types that are generated but
+not yet committed. Neither is this task's doing, and no Rust file was touched
+here.
+
+### Architectural decisions
+
+- **Nothing optimistic.** A row is not selected because it was clicked; it is
+  selected when `agents.openTimeline` returns. `pendingId` carries the in-flight
+  request, a late answer for a superseded selection is dropped by identity, and
+  a refusal renders the error envelope with nothing selected.
+- **One status mapping** (`agent-status.ts`), typed `Record<AgentActivity, …>`
+  so an activity added to the wire fails the build rather than rendering blank,
+  with a widened runtime lookup for a value from a newer core. `BLOCKED` has its
+  label and tone written down beside the four real ones; `AgentActivity` does
+  not carry the value, so nothing can display it until T221 lands.
+- **Status is not colour.** Each tone draws a different marker shape — filled
+  disc, diamond, square, ring, bar — beside the word, so the five statuses stay
+  apart without colour vision. Every colour is an ADR-016 token.
+- **The rail owns collapse; the blob owns its persistence.** The reducer holds
+  `open` (collapsing is what closes the follower, so it belongs in the pure
+  state), and the persisted value is mirrored in through an effect — the exact
+  bridge `useExplorer` uses for `showHidden`, because the blob is restored after
+  the first render.
+- **The editor's minimum is enforced twice, as the sidebar already does it.**
+  The drag uses `boundsWithin(clientWidth − sidebarWidth, …)`; the grid template
+  clamps the rail track to what is left after the sidebar, both gutters and the
+  editor's minimum, with the collapsed strip as the floor — so a narrow window
+  shrinks the rail toward its strip rather than squeezing the editor.
+- **⌥G, matched on `event.code`**, `preventDefault`ed, gated off while the
+  island is open (`chords={!islandOpen}`), and refused while an `INPUT` has
+  focus.
+
+### Known limitations
+
+- **The chord from inside a focused terminal is reasoned, not observed.**
+  `terminal-view.tsx` refuses only ⌥1…⌥9 through `attachCustomKeyEventHandler`,
+  and that file is outside this task's allowed scope. Reading xterm 6.0.0:
+  `macOptionIsMeta` is left at its default `false`, so on macOS ⌥G is a
+  third-level shift — xterm sends nothing to the shell and the composed `©`
+  arrives as the keydown's default action, which this listener's
+  `preventDefault` suppresses. That is source-reading, not a manual test.
+- **No manual pass was possible in this session** (no display): the acceptance
+  criteria that need a running app and a live Claude Code session — statuses
+  changing, the drag, the restart, the chord fight — are unverified.
+- **With no workspace open the rail is not on screen.** §1 puts it inside
+  `shell__body`, which only exists once a workspace is open, so the failure
+  table's "Workspace closed → the rail keeps listing" does not hold. Following
+  T090's precedent would put the rail outside the body, beside the launcher;
+  that is a design decision, not a bug fix, so it is recorded rather than taken.
+- **The timeline is empty by construction today.** The core returns an empty
+  timeline with `transcriptEvidence: false` until T230's follower lands; the
+  placeholder says the session is being followed and, when
+  `transcriptEvidence` is false, says that instead.
+- **Nothing subscribes to `AgentTimelineAppended`.** The follower runs and the
+  core publishes; T232 is what consumes it.
+- The island no longer renders the roster's error envelope — the rail does. The
+  island says the scan failed and points at it.
+
+### Follow-ups
+
+1. **T232** — the feed, the files touched, the `AgentTimelineAppended`
+   subscription, and the `dropped` / `restarted` gap markers the placeholder
+   currently ignores.
+2. **Extend `attachCustomKeyEventHandler`** in
+   `apps/desktop/src/features/terminal/terminal-view.tsx` to refuse the rail's
+   chord as well, once ⌥G from a focused terminal has been observed. It needs a
+   shared "chords the shell claims" predicate rather than a second literal.
+3. **Decide where the rail lives with no workspace open** (see above).
+4. **T221** — when `BLOCKED` reaches the wire, the label and the token are
+   already in `agent-status.ts`; only the `Record` needs the fifth key.
+5. A stored `agentRailWidth` is clamped to `PANE_LIMITS`, but the rail's
+   *collapsed* strip width is the token `--section-h` rather than a limit — if
+   the strip ever needs to differ from the dock's row height it should become a
+   named token rather than a reuse.

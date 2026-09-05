@@ -1,13 +1,10 @@
 import type { AgentRoster, AgentSession, EventEnvelope } from '@gritty/protocol';
 import { describe, expect, it } from 'vitest';
 import {
-  activityLabel,
-  activityTone,
   agentsReducer,
   initialAgentsState,
+  mostUrgent,
   runningCount,
-  sessionsElsewhere,
-  sessionsHere,
   taskLine,
   toolLine,
 } from './agents-reducer';
@@ -69,15 +66,22 @@ describe('agents reducer', () => {
     expect(after).toBe(state);
   });
 
-  it('splits the roster by workspace and counts what is alive', () => {
+  it('counts what is alive', () => {
     const here = session({ id: 'here', inWorkspace: true });
     const away = session({ id: 'away', inWorkspace: false });
     const gone = session({ id: 'gone', inWorkspace: false, activity: 'ENDED' });
-    const all = roster([here, away, gone]);
 
-    expect(sessionsHere(all).map((entry) => entry.id)).toEqual(['here']);
-    expect(sessionsElsewhere(all).map((entry) => entry.id)).toEqual(['away', 'gone']);
-    expect(runningCount(all)).toBe(2);
+    expect(runningCount(roster([here, away, gone]))).toBe(2);
+  });
+
+  it('picks the session whose move is yours as the one the island shows', () => {
+    const working = session({ id: 'working', activity: 'WORKING' });
+    const waiting = session({ id: 'waiting', activity: 'WAITING' });
+    // The core's ranking is respected for everything else: the first row is
+    // the most relevant one it produced.
+    expect(mostUrgent(roster([working, waiting]))?.id).toBe('waiting');
+    expect(mostUrgent(roster([working]))?.id).toBe('working');
+    expect(mostUrgent(roster([]))).toBeNull();
   });
 
   it('prefers the agent title, then the prompt, then the reply', () => {
@@ -86,21 +90,6 @@ describe('agents reducer', () => {
     expect(taskLine(session({ lastReply: 'C' }))).toBe('C');
     // A process with no readable transcript says nothing rather than guessing.
     expect(taskLine(session())).toBeNull();
-  });
-
-  it('labels every activity and tones it', () => {
-    expect(activityLabel('WORKING')).toBe('Working');
-    expect(activityLabel('WAITING')).toBe('Your move');
-    expect(activityLabel('IDLE')).toBe('Idle');
-    expect(activityLabel('ENDED')).toBe('Ended');
-    expect(activityTone('WORKING')).toBe('active');
-    expect(activityTone('WAITING')).toBe('waiting');
-  });
-
-  it('survives an activity a newer core invented', () => {
-    const future = 'WAITING_FOR_APPROVAL' as never;
-    expect(activityLabel(future)).toBe('WAITING_FOR_APPROVAL');
-    expect(activityTone(future)).toBe('done');
   });
 
   it('renders the tool in flight, with its detail when there is one', () => {

@@ -451,6 +451,39 @@ textarea:focus-visible {
   flex: 1;
 }
 
+/* With the agent rail (T231) the body is a third region wide. The rail is
+   anchored right, so its gutter comes before it and its own track is the last.
+
+   The `clamp()` is the rail's half of the editor-minimum bargain the sidebar
+   already makes in CSS: the rail may take what is left after the sidebar, the
+   two gutters and the editor's minimum, and no more. Squeezed past that it
+   shrinks toward the width of its collapsed strip rather than pushing the
+   editor below what it needs — the same rule the drag enforces, holding when
+   nothing is being dragged.
+
+   Collapsed, the rail is exactly its 32px strip and there is no gutter, so the
+   template has four tracks for four children. */
+.shell__body--rail {
+  grid-template-columns:
+    min(var(--sidebar-width, 244px), calc(100% - 8px - 22.5rem))
+    8px
+    minmax(0, 1fr)
+    8px
+    clamp(
+      var(--section-h),
+      var(--agent-rail-width, 320px),
+      max(var(--section-h), calc(100% - var(--sidebar-width, 244px) - 16px - 22.5rem))
+    );
+}
+
+.shell__body--rail-collapsed {
+  grid-template-columns:
+    min(var(--sidebar-width, 244px), calc(100% - 8px - 22.5rem))
+    8px
+    minmax(0, 1fr)
+    var(--section-h);
+}
+
 /* The column is a surface of its own, edge to edge. The hairline between it and
    the editor belongs to the gutter, so the line you see is the line you grab.
 
@@ -468,9 +501,11 @@ textarea:focus-visible {
    row scrolls as one instead of the tree scrolling inside a fixed frame —
    otherwise a notice above the tree is simply cut off. */
 @media (max-width: 60rem) {
-  .shell__body {
+  .shell__body,
+  .shell__body--rail,
+  .shell__body--rail-collapsed {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(24rem, 1fr);
+    grid-template-rows: auto minmax(24rem, 1fr) auto;
   }
 
   .shell__sidebar {
@@ -2630,6 +2665,21 @@ textarea:focus-visible {
   font-weight: 600;
 }
 
+/* The island points at the rail rather than duplicating it (T231 §7). */
+.agents__hint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  font-size: var(--text-control);
+  color: var(--fg-faint);
+}
+
+.agents__summary {
+  margin: 0;
+  font-size: var(--text-control);
+  color: var(--fg-muted);
+}
+
 .agents__note {
   margin: 0;
   font-size: var(--text-control);
@@ -2724,6 +2774,360 @@ textarea:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   The agent rail (T231)
+
+   The third region of the shell, to the right of the editor: the coding agents
+   running on this machine, beside your code rather than instead of it. Its
+   chrome is one 32px row and the body is what collapses, following the dock —
+   and, like the dock, a collapsed rail still reports. Folded, the row turns on
+   its side into a 32px strip carrying the label and the needs-you count.
+
+   Every colour is an ADR-016 token (there is no literal here), and every status
+   carries a shape as well as a colour so the list survives without colour
+   vision.
+   --------------------------------------------------------------------------- */
+
+.agent-rail {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface-base);
+}
+
+.agent-rail__bar {
+  height: var(--section-h);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 0 var(--gap-sm) 0 var(--gap-md);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Collapsed the rail has no gutter beside it, so it draws its own hairline —
+   expanded, that line belongs to the splitter, which is the line you grab. */
+.agent-rail--collapsed {
+  border-left: 1px solid var(--border);
+}
+
+.agent-rail--collapsed .agent-rail__bar {
+  /* The strip is the whole rail when it is folded, so the row that is normally
+     32px tall becomes the column that is 32px wide. */
+  flex: 1;
+  height: auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--gap);
+  padding: var(--gap-md) 0;
+  border-bottom: none;
+}
+
+.agent-rail__label {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 2px 6px;
+  background: transparent;
+  color: var(--fg-dim);
+  font-weight: 600;
+}
+
+/* Reads top-to-bottom in the strip, which is the only way a word fits in 32px
+   without abbreviating it into something else. */
+.agent-rail--collapsed .agent-rail__label {
+  writing-mode: vertical-rl;
+  padding: 6px 2px;
+}
+
+.agent-rail__needs {
+  color: var(--warn-text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The count survives the fold; the sentence around it does not. */
+.agent-rail--collapsed .agent-rail__needs-word {
+  display: none;
+}
+
+.agent-rail__spacer {
+  flex: 1;
+}
+
+.agent-rail__chord {
+  font-size: var(--text-label);
+  color: var(--fg-faint);
+}
+
+.agent-rail__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm);
+}
+
+.agent-rail__error {
+  font-size: var(--text-control);
+}
+
+.agent-rail__note {
+  margin: 0;
+  font-size: var(--text-control);
+  line-height: 1.5;
+  color: var(--warn-text);
+}
+
+.agent-rail__empty,
+.agent-rail__placeholder {
+  margin: 0;
+  padding: var(--gap-sm);
+  font-size: var(--text-control);
+  line-height: 1.5;
+  color: var(--fg-muted);
+}
+
+.agent-rail__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* A row is a toggle, not a tab: it opens one session's timeline. */
+.agent-rail__row {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 6px var(--gap-sm);
+  border-radius: var(--radius-md);
+  background: transparent;
+  text-align: left;
+}
+
+.agent-rail__row:hover:not(:disabled) {
+  background: var(--ghost);
+}
+
+.agent-rail__row--selected,
+.agent-rail__row--selected:hover:not(:disabled) {
+  background: var(--accent-wash-strong);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* The roster is machine-wide: a session from another project is marked rather
+   than hidden, and marked by an edge rather than by dimming, which the ended
+   status already uses. */
+.agent-rail__row--away {
+  border-left: 2px solid var(--fg-gutter);
+  padding-left: calc(var(--gap-sm) - 2px);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+/* Transcript text is untrusted and can be long: one line, clipped. */
+.agent-rail__task {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+}
+
+.agent-rail__unknown {
+  color: var(--fg-faint);
+  font-style: italic;
+}
+
+.agent-rail__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  min-width: 0;
+  font-size: var(--text-control);
+  color: var(--fg-faint);
+}
+
+.agent-rail__root {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+}
+
+.agent-rail__away {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--ghost);
+  font-size: var(--text-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.agent-rail__tool {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--text-control);
+  color: var(--fg-muted);
+}
+
+.agent-rail__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+.agent-rail__pending {
+  font-size: var(--text-control);
+  color: var(--fg-faint);
+}
+
+/* Where T232 draws the feed and the files a session touched. Until then it
+   says what is true: the follower is running and the view is not built. */
+.agent-rail__timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  margin-top: var(--gap-sm);
+  padding-top: var(--gap-sm);
+  border-top: 1px solid var(--border);
+}
+
+.agent-rail__timeline-head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 0 var(--gap-sm);
+}
+
+.agent-rail__timeline-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+/* The status of one session: a word, and a shape that means the same thing.
+   Colour is the third channel, never the only one — five statuses that differ
+   only in hue are four statuses and a guess for anyone who cannot see the
+   difference. */
+
+.agent-status {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 5px;
+  font-size: var(--text-control);
+  color: var(--fg-muted);
+}
+
+.agent-status__mark {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--fg-faint);
+}
+
+/* A tool call is outstanding: filled disc, the colour of something happening. */
+.agent-status--working {
+  color: var(--accent-text);
+}
+
+.agent-status--working .agent-status__mark {
+  background: var(--accent);
+}
+
+/* Waiting on you to approve something (T221): a diamond, which is the one
+   shape here that is not on an axis. */
+.agent-status--blocked {
+  color: var(--warn-text);
+}
+
+.agent-status--blocked .agent-status__mark {
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+  background: var(--warn);
+  transform: rotate(45deg);
+}
+
+/* The turn finished — the wire calls this `WAITING`, the rail calls it Done. */
+.agent-status--done {
+  color: var(--ok-text);
+}
+
+.agent-status--done .agent-status__mark {
+  border-radius: 1px;
+  background: var(--ok);
+}
+
+/* Alive but quiet: a ring, because there is nothing filling it. */
+.agent-status--idle .agent-status__mark {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--fg-faint);
+}
+
+/* No live process: a flat bar, and the quietest colour in the ramp. */
+.agent-status--ended {
+  color: var(--fg-faint);
+}
+
+.agent-status--ended .agent-status__mark {
+  height: 2px;
+  border-radius: 1px;
+  background: var(--fg-gutter);
+}
+
+/* An activity from a newer core: shown as it arrived, marked as unrecognised
+   rather than folded into a status this build would be guessing at. */
+.agent-status--unknown .agent-status__mark {
+  border-radius: 2px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--fg-muted);
+}
+
+/* Stacked, there is no width to take from the editor: the rail stops being a
+   column and becomes the last row, the way the sidebar becomes the first. */
+@media (max-width: 60rem) {
+  .agent-rail,
+  .agent-rail--collapsed {
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+
+  .agent-rail--collapsed .agent-rail__bar {
+    height: var(--section-h);
+    flex-direction: row;
+    justify-content: flex-start;
+    padding: 0 var(--gap-md);
+  }
+
+  .agent-rail--collapsed .agent-rail__label {
+    writing-mode: horizontal-tb;
+    padding: 2px 6px;
+  }
+
+  .agent-rail--collapsed .agent-rail__needs-word {
+    display: inline;
+  }
 }
 
 /* The queue takes the whole body: one column of items, one of detail. */
