@@ -141,3 +141,119 @@ still works. Nothing claims cross-platform support that was not tested (rule 11)
 One variant on `Provider`, one arm in `provider_of_command`, and a transcript
 reader for that agent's format. Deliberately not a trait: one match arm is
 cheaper to read than an abstraction with a single implementation.
+
+**A second provider is not quite free, and T222 says why.** Claude Code repeats
+`sessionId`, `cwd` and `gitBranch` on nearly every record, which is what makes
+the tail sufficient. Codex writes its identity once, in a `session_meta` record
+on the **first** line, so its reader needs a bounded *head* read as well as the
+bounded tail. Both bounds are constant, so the O(1)-in-file-size property
+survives — but a provider added without checking where its identity lives will
+quietly lose it.
+
+## Specified but not built (T221–T232)
+
+Everything above this line is implemented. Everything below is written down and
+not yet built; nothing here may be described as behaviour Gritty has.
+
+**The timeline (T230), and why the roster is not the whole answer.** The scan
+above reads a *fixed tail* of each transcript to produce one roster line. That
+is the right shape for "which agents are running" and the wrong one for "what is
+this one doing". T230 adds a **follower** beside the scanner: given a session
+and a byte offset, it parses only the bytes appended since, which makes a live
+feed cost the same on a 400 MB transcript as on a 4 KB one.
+
+```
+   scan()    fixed tail of every transcript   → roster      (6 s loop)
+   follow()  new bytes of the open one        → timeline    (fast loop, ~300 ms)
+```
+
+Nothing about this needs the agent's cooperation. Claude Code's transcript
+already carries the whole vocabulary: `type=assistant` with `text`, `thinking`
+and `tool_use` content blocks, `type=user` with `tool_result`, `type=system` for
+notices, `file-history-delta` for files touched, and `isSidechain` marking
+subagent work. The entries are folded into a provider-neutral
+`AgentTimelineEntry` in the core (hard rule 4), bounded there (rule 13), held in
+a ring that drops from the oldest end and *reports* the loss — the terminal's
+rule, not a new one — and delivered in coalesced batches (rule 8).
+
+`file-history-delta.trackingPath` is already relative to the agent's project
+root, so a touched file inside the open workspace resolves to a `WorkspacePath`
+the UI may open, and one outside it crosses the protocol as a display string
+with no openable path (ADR-010).
+
+**Two loops, deliberately.** Discovery stays at 6 s because `ps` and `lsof` are
+its cost. The fast loop follows only the timeline that is open and stats the
+hook state directory, both of which are cheap enough to run three times a
+second — and the hook state *must* be on the fast loop, because a permission
+prompt reported six seconds late is not worth reporting.
+
+**A third evidence source (T221, ADR-018).** The `WAITING_FOR_APPROVAL` value
+this document refuses is earned by asking the agent instead of guessing:
+
+```
+agent process                         gritty (usually not running)
+  │ PermissionRequest hook fires
+  ▼
+gritty-agent-hook  ──▶  <app-data>/agents/state/<session-id>.json
+  (writes atomically, exits 0)   one small file, overwritten, never appended
+                                          │
+                                          ▼  next poll tick
+                             merged as a third source, joined on session id
+```
+
+A file rather than a socket because Gritty is usually closed when a hook fires,
+and a hook must never stall the agent. Overwritten rather than appended because
+only the current phase is ever asked for, which removes rotation, truncation and
+age policy from the design.
+
+The derivation gains one row, at a defined precedence:
+
+| Value | Evidence |
+|---|---|
+| `ENDED` | no live process, or the process table was unreadable |
+| `IDLE` | live process, transcript quiet past the idle threshold |
+| **`BLOCKED`** | live process, hook phase `BLOCKED`, not stale |
+| `WORKING` | live process, a `tool_use` with no matching `tool_result` |
+| `WAITING` | live process, nothing outstanding |
+
+`ENDED` still outranks `BLOCKED` — an agent killed at a prompt is gone, not
+blocked — and so does `IDLE`, for the reason already given above: a prompt
+nobody answered for half an hour is a session someone walked away from. The
+hook is *evidence, not authority*, which is what keeps the integration optional:
+without it the roster is exactly what T220 shipped.
+
+`BLOCKED` is only ever set from hook evidence. No transcript pattern, process
+state or elapsed-time threshold may produce it, which satisfies rule 12 by
+construction. A new `activitySource` field (`PROCESS | TRANSCRIPT | HOOK`) says
+which source produced a verdict, so a row is attributable rather than magic.
+
+**The rail (T231, T232).** The roster and the timeline surface in a third region
+of the shell, to the right of the editor, with its own splitter: a list of
+sessions coloured by status, and beneath it the selected session's feed and the
+files it touched. Clicking a touched file opens it in the editor — the thing a
+terminal multiplexer structurally cannot do.
+
+It is deliberately **not** a tab in the document strip. Agent sessions and open
+files are different kinds of thing, and `SessionTab.path` is a required
+`WorkspacePath` in a non-nullable column, so a non-document tab would cost a
+wire change, a ts-rs regeneration and a migration. The rail's width lives in the
+UI-owned layout blob and costs none of that.
+
+The rail and the island read **one** `useAgents` controller, following T210's
+rule that two surfaces over one controller cannot disagree; the island's agents
+section reduces to a count and its most urgent row. The rail's five labels map
+onto the wire as Working=`WORKING`, Pending validation=`BLOCKED`, Done=`WAITING`,
+Idle=`IDLE`, Ended=`ENDED` — `WAITING` keeps its name because it means *the
+user's move*, and renaming the wire for a word is not worth the ripple.
+
+**The rest.** T222 adds Codex. T223 notifies on entering `BLOCKED`/`WAITING`
+and links a session to a workstream — through a separate table, never a field
+on `Workstream`, because the domain model takes no provider-specific fields
+(rule 6) and a durable row must not carry an ephemeral session id. T224 turns
+the pid and tty into a "reveal the terminal" action behind a new platform
+crate.
+
+**Still deliberately absent afterwards:** any control (prompting, answering,
+approving, keystroke injection), any screen-scraping of another terminal, a
+daemon that outlives the app, and a socket or plugin surface. Runs Gritty owns
+are T300 and remain a different type with a different lifecycle.
