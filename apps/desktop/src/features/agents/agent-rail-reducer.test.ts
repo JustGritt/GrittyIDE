@@ -1,15 +1,35 @@
-import { type AgentTimeline, CoreError } from '@gritty/protocol';
+import {
+  type AgentTimeline,
+  type AgentTimelineAppendedPayload,
+  type AgentTimelineEntry,
+  CoreError,
+} from '@gritty/protocol';
 import { describe, expect, it } from 'vitest';
 import {
   type AgentRailAction,
   type AgentRailState,
   agentRailReducer,
+  applyAppended,
   followedSession,
   initialAgentRailState,
 } from './agent-rail-reducer';
+import { MAX_TIMELINE_ENTRIES } from './agent-timeline-model';
 
 function timeline(sessionId: string): AgentTimeline {
   return { sessionId, entries: [], dropped: 0, restarted: false, transcriptEvidence: true };
+}
+
+/** One assistant line at `seq`; the kind does not matter to the accumulation. */
+function said(seq: number, text: string): AgentTimelineEntry {
+  return { seq, kind: { type: 'ASSISTANT_TEXT', text }, sidechain: false };
+}
+
+function batch(
+  sessionId: string,
+  entries: readonly AgentTimelineEntry[],
+  extra: Partial<AgentTimelineAppendedPayload> = {},
+): AgentTimelineAppendedPayload {
+  return { sessionId, entries: [...entries], dropped: 0, restarted: false, ...extra };
 }
 
 // `openTimeline` on a session that left the roster between the click and the
@@ -41,6 +61,7 @@ describe('agent rail reducer', () => {
       selectedId: null,
       pendingId: null,
       timeline: null,
+      openingPath: null,
       error: null,
     });
   });
@@ -155,11 +176,134 @@ describe('agent rail reducer', () => {
     expect(followedSession(following('a'))).toBe('a');
   });
 
+  it('appends the delta rather than waiting for a snapshot', () => {
+    // `AgentTimelineAppended` is a delta by design: a timeline grows without
+    // bound, so the core never resends it. Anything that assumed a snapshot
+    // would show one batch and lose everything before it.
+    const state = run(
+      { type: 'setOpen', open: true },
+      { type: 'selecting', sessionId: 'a' },
+      { type: 'opened', sessionId: 'a', timeline: { ...timeline('a'), entries: [said(0, 'one')] } },
+      { type: 'appended', payload: batch('a', [said(1, 'two')]) },
+      { type: 'appended', payload: batch('a', [said(2, 'three')]) },
+    );
+    expect(state.timeline?.entries.map((entry) => entry.seq)).toEqual([0, 1, 2]);
+  });
+
+  it('ignores a delta for a session it is not showing', () => {
+    // The subscription is bound once for whatever is selected under it, so a
+    // batch for another session reaches this reducer and must be dropped.
+    const state = following('a');
+    expect(agentRailReducer(state, { type: 'appended', payload: batch('b', [said(0, 'x')]) })).toBe(
+      state,
+    );
+  });
+
+  it('ignores a delta that arrives with nothing selected', () => {
+    const state = run({ type: 'setOpen', open: true });
+    expect(agentRailReducer(state, { type: 'appended', payload: batch('a', [said(0, 'x')]) })).toBe(
+      state,
+    );
+  });
+
+  it('records a touched file being opened, and the refusal when it is not', () => {
+    const opening = agentRailReducer(following('a'), { type: 'openingFile', path: 'src/main.rs' });
+    expect(opening.openingPath).toBe('src/main.rs');
+
+    const failed = agentRailReducer(opening, {
+      type: 'openFileFailed',
+      path: 'src/main.rs',
+      error: refusal,
+    });
+    // The list is history, not a live directory: the agent may have deleted the
+    // file since it wrote it, and the row stays either way.
+    expect(failed.openingPath).toBeNull();
+    expect(failed.error).toBe(refusal);
+    expect(failed.timeline).not.toBeNull();
+  });
+
+  it('leaves a newer open alone when an older one finally answers', () => {
+    const state = run(
+      { type: 'setOpen', open: true },
+      { type: 'selecting', sessionId: 'a' },
+      { type: 'opened', sessionId: 'a', timeline: timeline('a') },
+      { type: 'openingFile', path: 'a.rs' },
+      { type: 'openingFile', path: 'b.rs' },
+    );
+    expect(agentRailReducer(state, { type: 'openedFile', path: 'a.rs' })).toBe(state);
+    expect(agentRailReducer(state, { type: 'openedFile', path: 'b.rs' }).openingPath).toBeNull();
+  });
+
   it('returns the same state for a no-op, so React does not re-render', () => {
     const state = following('a');
     expect(agentRailReducer(state, { type: 'setOpen', open: true })).toBe(state);
     expect(agentRailReducer(state, { type: 'clearError' })).toBe(state);
     expect(agentRailReducer(state, { type: 'roster', ids: ['a'] })).toBe(state);
     expect(agentRailReducer(state, { type: 'deselect' })).not.toBe(state);
+  });
+});
+
+describe('applying a timeline delta', () => {
+  const held: AgentTimeline = {
+    sessionId: 'a',
+    entries: [said(0, 'one'), said(1, 'two')],
+    dropped: 0,
+    restarted: false,
+    transcriptEvidence: true,
+  };
+
+  it('appends by seq', () => {
+    const next = applyAppended(held, batch('a', [said(2, 'three')]));
+    expect(next.entries.map((entry) => entry.seq)).toEqual([0, 1, 2]);
+  });
+
+  it('does not append an entry it already holds', () => {
+    // `openTimeline` forgets the batch it answered with, so this should never
+    // happen; if it does, drawing the same turn twice is worse than dropping it.
+    const next = applyAppended(held, batch('a', [said(1, 'two'), said(2, 'three')]));
+    expect(next.entries.map((entry) => entry.seq)).toEqual([0, 1, 2]);
+  });
+
+  it('reports a drop as a running total instead of splicing around it', () => {
+    const next = applyAppended(held, batch('a', [said(2, 'three')], { dropped: 7 }));
+    // The entries either side of the gap are kept exactly as they arrived: the
+    // core counted what it lost so the UI can draw the loss, not hide it.
+    expect(next.entries.map((entry) => entry.seq)).toEqual([0, 1, 2]);
+    expect(next.dropped).toBe(7);
+    // A second batch adds to the total rather than replacing it.
+    expect(applyAppended(next, batch('a', [said(3, 'four')], { dropped: 2 })).dropped).toBe(9);
+  });
+
+  it('drops what it held on a restart rather than joining two transcripts', () => {
+    const next = applyAppended(held, batch('a', [said(9, 'fresh')], { restarted: true }));
+    expect(next.entries.map((entry) => entry.seq)).toEqual([9]);
+    // Sticky, matching the core's own snapshot: the reset happened, and a later
+    // quiet tick does not unhappen it.
+    expect(next.restarted).toBe(true);
+    expect(applyAppended(next, batch('a', [said(10, 'more')])).restarted).toBe(true);
+  });
+
+  it('does not grow past the ring the core keeps', () => {
+    const entries = Array.from({ length: MAX_TIMELINE_ENTRIES }, (_, index) =>
+      said(index, `line ${index}`),
+    );
+    const full: AgentTimeline = { ...held, entries };
+    const next = applyAppended(
+      full,
+      // What the core reports for exactly this overflow: it dropped the oldest
+      // three when the same three entries pushed its ring past the bound.
+      batch('a', [said(500, 'a'), said(501, 'b'), said(502, 'c')], { dropped: 3 }),
+    );
+    expect(next.entries).toHaveLength(MAX_TIMELINE_ENTRIES);
+    expect(next.entries[0]?.seq).toBe(3);
+    // Counted once, not once per side.
+    expect(next.dropped).toBe(3);
+  });
+
+  it('leaves transcript evidence to the core', () => {
+    // The delta does not carry it, and reconstructing it here would be the UI
+    // asserting something the core did not send (a T230 follow-up).
+    const blind: AgentTimeline = { ...held, transcriptEvidence: false };
+    expect(applyAppended(blind, batch('a', [said(2, 'three')])).transcriptEvidence).toBe(false);
   });
 });

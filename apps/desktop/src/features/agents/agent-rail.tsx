@@ -4,6 +4,7 @@ import { ErrorEnvelope } from '../../components/error-envelope';
 import { AGENT_RAIL_CHORD_HINT, isAgentRailChord } from './agent-rail-chords';
 import { agentStatus, providerLabel } from './agent-status';
 import { AgentStatusBadge } from './agent-status-badge';
+import { AgentTimelinePanel } from './agent-timeline';
 import { taskLine, toolLine } from './agents-reducer';
 import type { AgentRailController } from './use-agent-rail';
 import type { AgentsController } from './use-agents';
@@ -106,7 +107,14 @@ export function AgentRail({
       </header>
 
       {rail.open && (
-        <div className="agent-rail__body" id={bodyId}>
+        // Following a session, the body stops being one scrolling column: the
+        // roster keeps a bounded share of the height and the timeline takes the
+        // rest, so a feed that never stops growing cannot push the list that
+        // selects it off the screen.
+        <div
+          className={`agent-rail__body${selected ? ' agent-rail__body--following' : ''}`}
+          id={bodyId}
+        >
           {agents.error && (
             <div className="agent-rail__error">
               <ErrorEnvelope error={agents.error} onDismiss={agents.clearError} />
@@ -154,7 +162,15 @@ export function AgentRail({
             </div>
           )}
 
-          {selected && <TimelinePlaceholder session={selected} rail={rail} />}
+          {selected && (
+            <AgentTimelinePanel
+              session={selected}
+              timeline={rail.timeline}
+              openingPath={rail.openingPath}
+              canOpenFiles={rail.canOpenFiles}
+              onOpenFile={rail.openFile}
+            />
+          )}
         </div>
       )}
     </aside>
@@ -216,42 +232,5 @@ function AgentRow({
         {pending && <span className="agent-rail__pending">Opening…</span>}
       </span>
     </button>
-  );
-}
-
-/**
- * Where the timeline goes (T232).
- *
- * The follower is running — `agents.openTimeline` returned, and the core is
- * publishing `AgentTimelineAppended` for this session — but rendering the feed
- * and the files it touched is the next task. Saying so is better than an empty
- * frame that looks like a session with nothing in it.
- */
-function TimelinePlaceholder({
-  session,
-  rail,
-}: {
-  session: AgentSession;
-  rail: AgentRailController;
-}) {
-  const title = taskLine(session);
-  return (
-    <section className="agent-rail__timeline" aria-label="Timeline">
-      <div className="agent-rail__timeline-head">
-        <span className="agent-rail__timeline-title">{title ?? 'Selected session'}</span>
-        <span className="agent-rail__spacer" />
-        <AgentStatusBadge activity={session.activity} />
-      </div>
-      {rail.timeline && !rail.timeline.transcriptEvidence ? (
-        <p className="agent-rail__note">
-          No transcript could be read for this session, so there is nothing to follow. Gritty knows
-          it is running, not what it is doing.
-        </p>
-      ) : (
-        <p className="agent-rail__placeholder">
-          Following this session. Its timeline is not drawn yet.
-        </p>
-      )}
-    </section>
   );
 }

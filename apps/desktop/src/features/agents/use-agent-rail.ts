@@ -1,4 +1,10 @@
-import { type AgentTimeline, type CoreError, toCoreError } from '@gritty/protocol';
+import {
+  type AgentTimeline,
+  type CoreError,
+  toCoreError,
+  type WorkspaceId,
+  type WorkspacePath,
+} from '@gritty/protocol';
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { core } from '../../core/client';
 import {
@@ -7,6 +13,7 @@ import {
   followedSession,
   initialAgentRailState,
 } from './agent-rail-reducer';
+import { openTouchedFile, type TouchedFileDocuments } from './open-touched-file';
 import type { AgentsController } from './use-agents';
 
 export interface AgentRailOptions {
@@ -15,6 +22,17 @@ export interface AgentRailOptions {
   /** Controlled by the session layout blob (T060); the local state follows it. */
   readonly open: boolean;
   onOpenChange(open: boolean): void;
+  /**
+   * How a file the agent touched reaches the editor (T232). The document store,
+   * narrowed to the two calls the rail is allowed to make.
+   */
+  readonly documents: TouchedFileDocuments;
+  /**
+   * The open workspace, which is what a `FileTouched` path was resolved
+   * against. `null` with no workspace open, and then nothing is openable — the
+   * core sends no paths in that case either.
+   */
+  readonly workspaceId: WorkspaceId | null;
 }
 
 export interface AgentRailController {
@@ -22,12 +40,18 @@ export interface AgentRailController {
   readonly selectedId: string | null;
   readonly pendingId: string | null;
   readonly timeline: AgentTimeline | null;
+  /** The touched file being opened right now, so its row can say so. */
+  readonly openingPath: string | null;
+  /** False with no workspace open: there is nothing for a path to be inside. */
+  readonly canOpenFiles: boolean;
   readonly error: CoreError | null;
   clearError(): void;
   setOpen(open: boolean): void;
   toggle(): void;
   /** Follow this session, or stop following it if it is the selected one. */
   select(sessionId: string): void;
+  /** Open a file the agent touched, in the editor beside it (§11). */
+  openFile(path: WorkspacePath): void;
 }
 
 /**
@@ -42,6 +66,8 @@ export function useAgentRail({
   agents,
   open,
   onOpenChange,
+  documents,
+  workspaceId,
 }: AgentRailOptions): AgentRailController {
   const [state, dispatch] = useReducer(agentRailReducer, initialAgentRailState);
 
@@ -57,6 +83,16 @@ export function useAgentRail({
   // they run rather than as it was when they were created.
   const latest = useRef<AgentRailState>(state);
   latest.current = state;
+
+  // The timeline arrives as deltas, never as a snapshot: a timeline grows
+  // without bound, so the core appends rather than resending (rule 8). The
+  // subscription is bound once and the reducer decides whether a batch is for
+  // the session on screen — one listener, whatever is selected under it.
+  useEffect(() => {
+    return core.subscribe('AgentTimelineAppended', (event) =>
+      dispatch({ type: 'appended', payload: event.payload }),
+    );
+  }, []);
 
   /**
    * Stop following whatever is open. `closeTimeline` is idempotent and its
@@ -122,15 +158,48 @@ export function useAgentRail({
     };
   }, []);
 
+  /**
+   * The point of the whole rail (§9-§12): the file the agent just changed,
+   * open in the editor next to the agent that changed it.
+   *
+   * Only ever called with a `WorkspacePath` the core put on a `FileTouched`
+   * entry, which it does only for files inside the open workspace. A file
+   * outside it carries no path at all, so there is nothing for this to be
+   * called with (ADR-010) — the protocol enforces the boundary, not the
+   * renderer's restraint.
+   */
+  const openFile = useCallback(
+    (path: WorkspacePath) => {
+      if (workspaceId === null) return;
+      // A second click while the first open is in flight would race two
+      // `documents.status` calls for no gain.
+      if (latest.current.openingPath !== null) return;
+      dispatch({ type: 'openingFile', path });
+      openTouchedFile(documents, workspaceId, path).then(
+        (result) => {
+          if (result.ok) dispatch({ type: 'openedFile', path });
+          // `NotFound` is the ordinary failure: the list is history, and the
+          // agent may have deleted the file since it wrote it.
+          else dispatch({ type: 'openFileFailed', path, error: result.error });
+        },
+        (cause: unknown) => dispatch({ type: 'openFileFailed', path, error: toCoreError(cause) }),
+      );
+    },
+    [documents, workspaceId],
+  );
+
   return {
     open: state.open,
     selectedId: state.selectedId,
     pendingId: state.pendingId,
     timeline: state.timeline,
+    openingPath: state.openingPath,
+    canOpenFiles: workspaceId !== null,
     error: state.error,
     clearError: useCallback(() => dispatch({ type: 'clearError' }), []),
     setOpen,
     toggle: useCallback(() => setOpen(!latest.current.open), [setOpen]),
     select,
+    openFile,
   };
 }

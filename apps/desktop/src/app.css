@@ -2867,11 +2867,21 @@ textarea:focus-visible {
 .agent-rail__body {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow-y: auto;
+  /* The rail never scrolls sideways as a whole (T232 §8): a long line wraps,
+     or scrolls inside the one container that owns it. */
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   gap: var(--gap-sm);
   padding: var(--gap-sm);
+}
+
+/* Following a session, the body stops scrolling as one column. The roster keeps
+   a bounded share of the height and the timeline takes the rest, so a feed that
+   grows all day cannot push the list that selects it out of reach. */
+.agent-rail__body--following {
+  overflow: hidden;
 }
 
 .agent-rail__error {
@@ -2998,8 +3008,7 @@ textarea:focus-visible {
   color: var(--fg-faint);
 }
 
-/* Where T232 draws the feed and the files a session touched. Until then it
-   says what is true: the follower is running and the view is not built. */
+/* The selected session's feed, and the files it touched (T232). */
 .agent-rail__timeline {
   display: flex;
   flex-direction: column;
@@ -3022,6 +3031,325 @@ textarea:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 600;
+}
+
+/* The two halves of a followed rail, declared after the rules they refine so
+   the cascade needs no specificity trick to reach them. */
+.agent-rail__body--following .agent-rail__list {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 40%;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.agent-rail__body--following .agent-rail__timeline {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* The files the session wrote (T232 §9). Above the feed rather than below it:
+   this is the list you act on, and a conversation that never stops growing must
+   not be able to push it out of reach. */
+.agent-files {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agent-files__head {
+  margin: 0;
+  padding: 0 var(--gap-sm);
+  font-size: var(--text-label);
+  font-weight: 600;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+
+.agent-files__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  /* Bounded by the core's ring already, but a session that rewrote two hundred
+     files still must not own the whole rail. */
+  max-height: 9rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.agent-files__row {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  min-width: 0;
+  padding: 3px var(--gap-sm);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  font-size: var(--text-control);
+}
+
+/* Inside the open workspace: a button, because there is something to open. */
+.agent-files__row--open {
+  color: var(--fg-dim);
+}
+
+.agent-files__row--open:hover:not(:disabled) {
+  background: var(--ghost);
+  color: var(--fg);
+}
+
+.agent-files__row--open:disabled {
+  color: var(--fg-faint);
+}
+
+/* Outside it: text. The core sent no path for this file, so there is nothing
+   here that could open it — the protocol drew the line, not the renderer. */
+.agent-files__row--outside {
+  color: var(--fg-faint);
+  cursor: default;
+}
+
+.agent-files__path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  /* The interesting end of a path is the last one. */
+  direction: rtl;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+}
+
+.agent-files__outside {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--ghost);
+  font-size: var(--text-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.agent-files__at {
+  flex: none;
+  font-size: var(--text-label);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-faint);
+}
+
+/* The feed: what the session has been doing, oldest entry first. It owns its
+   own scrolling so that new entries can pin it to the bottom without moving
+   anything else, and so a reader who scrolled up stays where they are (§1). */
+.agent-feed {
+  flex: 1 1 auto;
+  min-height: 6rem;
+  overflow-y: auto;
+  /* Never sideways: long content wraps, and each row bounds its own detail. */
+  overflow-x: hidden;
+  border-top: 1px solid var(--border);
+}
+
+.agent-feed__list {
+  list-style: none;
+  margin: 0;
+  padding: var(--gap-sm) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+
+.agent-feed__row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 3px var(--gap-sm) 3px calc(var(--gap-sm) + 3px);
+  /* The kind of an entry is an edge down its left, so the feed can be read at a
+     glance without relying on the colour of the text (the same reasoning as the
+     status marks: hue is never the only channel). */
+  border-left: 3px solid transparent;
+}
+
+.agent-feed__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  min-width: 0;
+}
+
+.agent-feed__label {
+  flex: none;
+  font-size: var(--text-label);
+  font-weight: 600;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.agent-feed__at {
+  flex: none;
+  font-size: var(--text-label);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-faint);
+}
+
+.agent-feed__badge {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--ghost);
+  font-size: var(--text-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.agent-feed__badge--running {
+  color: var(--accent-text);
+  background: var(--accent-wash);
+}
+
+.agent-feed__badge--ok {
+  color: var(--ok-text);
+  background: var(--ok-fill);
+}
+
+.agent-feed__badge--fail {
+  color: var(--error-text);
+  background: var(--error-wash);
+}
+
+/* Untrusted text, and possibly one very long line of it: it wraps, including
+   mid-word when a word is a 300-character path, so the rail never widens. */
+.agent-feed__text {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--text-control);
+  line-height: 1.45;
+  color: var(--fg-dim);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The core already bounded this; the box bounds how much of the rail it may
+   take, and scrolls the rest inside itself (§8). */
+.agent-feed__detail {
+  margin: 0;
+  min-width: 0;
+  max-height: 7rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  line-height: 1.45;
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.agent-feed__detail--result {
+  border-left: 2px solid var(--border);
+}
+
+/* Subagent work: indented and quieter, marked rather than hidden (§4). */
+.agent-feed__row--sidechain {
+  margin-left: var(--gap-md);
+  opacity: 0.82;
+}
+
+.agent-feed__row--prompt {
+  border-left-color: var(--accent);
+}
+
+.agent-feed__row--prompt .agent-feed__text {
+  color: var(--fg);
+}
+
+.agent-feed__row--assistant {
+  border-left-color: var(--fg-gutter);
+}
+
+.agent-feed__row--thinking .agent-feed__text {
+  color: var(--fg-faint);
+  font-style: italic;
+}
+
+.agent-feed__row--tool .agent-feed__text,
+.agent-feed__row--file .agent-feed__text,
+.agent-feed__row--result .agent-feed__text {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+}
+
+.agent-feed__row--tool {
+  border-left-color: var(--accent-fill);
+}
+
+.agent-feed__row--file {
+  border-left-color: var(--ok);
+}
+
+.agent-feed__row--notice {
+  border-left-color: var(--warn);
+}
+
+.agent-feed__row--notice .agent-feed__label {
+  color: var(--warn-text);
+}
+
+/* The one row the user is meant to act on (§2). It reads as such: the warning
+   colour, a filled edge, and the word rather than a colour alone. */
+.agent-feed__row--permission {
+  border-left-color: var(--warn);
+  background: var(--warn-wash);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.agent-feed__row--permission .agent-feed__label {
+  color: var(--warn-text);
+}
+
+/* A loss the core reported, drawn rather than repaired (§5). Dashed, because
+   what it marks is the absence of entries and not an entry of its own. */
+.agent-feed__row--gap {
+  border-left-color: transparent;
+  border-top: 1px dashed var(--fg-gutter);
+  border-bottom: 1px dashed var(--fg-gutter);
+  padding-top: var(--gap-sm);
+  padding-bottom: var(--gap-sm);
+}
+
+.agent-feed__row--gap .agent-feed__label,
+.agent-feed__row--gap .agent-feed__text {
+  color: var(--fg-faint);
+}
+
+/* An entry kind from a newer core: shown as it arrived, marked as something
+   this build does not understand rather than folded into a kind it would be
+   guessing at (the allowance `agent-status.ts` makes for an activity). */
+.agent-feed__row--unknown {
+  border-left-color: var(--fg-gutter);
+  border-left-style: dashed;
+}
+
+.agent-feed__row--unknown .agent-feed__text {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  color: var(--fg-faint);
 }
 
 /* The status of one session: a word, and a shape that means the same thing.

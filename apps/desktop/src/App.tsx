@@ -93,6 +93,12 @@ export function App() {
         setLayout((current) => ({ ...current, agentRail: { ...current.agentRail, open } })),
       [],
     ),
+    // How a file the agent touched reaches the editor (T232). The rail is given
+    // the document store rather than its own way in, so opening from the
+    // timeline is the same `documents.status` / `documents.open` pair the
+    // explorer and the launcher already use.
+    documents,
+    workspaceId: workspace?.id ?? null,
   });
   // What the previous window had open, for the launcher's resume rail (T051).
   // Asked for whenever no workspace is open, which is exactly when the
