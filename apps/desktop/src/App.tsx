@@ -78,6 +78,14 @@ export function App() {
   const workstreams = useWorkstreams(workspace);
   const [islandOpen, setIslandOpen] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
+  // Closing the workspace ends the queue with it: reopening should land in the
+  // editor, not in a triage view of work you have not looked at yet.
+  useEffect(() => {
+    if (!workspace) {
+      setQueueOpen(false);
+      setIslandOpen(false);
+    }
+  }, [workspace]);
   const active = activeTab(documents.state);
   const activeEol = active ? (editor.eols[active.document.id] ?? null) : null;
   const session = useSession({
