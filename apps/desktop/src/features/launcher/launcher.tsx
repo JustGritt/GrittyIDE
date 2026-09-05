@@ -1,4 +1,4 @@
-import type { LastSession, RecentWorkspace } from '@gritty/protocol';
+import type { LastSession, RecentWorkspace, SessionTab } from '@gritty/protocol';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
 import type { Accelerator } from '../shell/open-shortcuts';
@@ -51,8 +51,12 @@ export function Launcher({
   onPickFolder(): void;
   /** What the previous window had open, when there is anything worth saying. */
   lastSession: LastSession | null;
-  /** Open that workspace; `withTabs` reopens what was in it. */
-  onResume(root: string, withTabs: boolean): void;
+  /**
+   * Open that workspace and reopen `tabs` in it. The tabs travel with the
+   * call rather than being read back from state, so dismissing the rail in
+   * the same click cannot race the reopen.
+   */
+  onResume(root: string, tabs: readonly SessionTab[]): void;
   onDismissLastSession(): void;
 }) {
   // Read here rather than in the shell: this component mounts only while no
@@ -222,7 +226,7 @@ function LastSessionRail({
 }: {
   last: LastSession;
   now: number;
-  onResume(root: string, withTabs: boolean): void;
+  onResume(root: string, tabs: readonly SessionTab[]): void;
   onDismiss(): void;
 }) {
   const { workspace, tabs, unsaved } = last;
@@ -247,11 +251,11 @@ function LastSessionRail({
             <button
               type="button"
               className="btn--primary"
-              onClick={() => onResume(workspace.root, true)}
+              onClick={() => onResume(workspace.root, tabs)}
             >
               Restore
             </button>
-            <button type="button" onClick={() => onResume(workspace.root, false)}>
+            <button type="button" onClick={() => onResume(workspace.root, [])}>
               Open without them
             </button>
             <button type="button" className="btn--bare" onClick={onDismiss}>

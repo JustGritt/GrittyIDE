@@ -1,4 +1,4 @@
-import { toCoreError } from '@gritty/protocol';
+import { type SessionTab, toCoreError } from '@gritty/protocol';
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { Splitter } from './components/splitter';
 import { boundsWithin } from './components/splitter-geometry';
@@ -144,17 +144,15 @@ export function App() {
    * go through it; `session.resumeTabs` is the same code path on demand.
    */
   const resume = useCallback(
-    async (root: string, withTabs: boolean) => {
-      const tabs = lastSession.value?.tabs ?? [];
+    async (root: string, tabs: readonly SessionTab[]) => {
       setPathOpen(false);
       const opened = await explorer.openFolder(root);
-      if (!withTabs || tabs.length === 0) return;
+      if (tabs.length === 0) return;
       // `openFolder` reports its own failures; without a workspace there is
       // nothing to reopen into.
-      const workspaceId = opened?.id;
-      if (workspaceId) await session.resumeTabs(workspaceId, tabs);
+      if (opened) await session.resumeTabs(opened.id, tabs);
     },
-    [explorer.openFolder, lastSession.value, session.resumeTabs],
+    [explorer.openFolder, session.resumeTabs],
   );
 
   const sidebarBounds = useCallback(
@@ -257,9 +255,9 @@ export function App() {
           onOpen={openFolder}
           onPickFolder={() => openFolder()}
           lastSession={lastSession.value}
-          onResume={(root, withTabs) => {
+          onResume={(root, tabs) => {
             lastSession.dismiss();
-            void resume(root, withTabs);
+            void resume(root, tabs);
           }}
           onDismissLastSession={lastSession.dismiss}
         />
