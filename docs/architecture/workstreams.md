@@ -124,6 +124,27 @@ Every command requires its workspace to be open (`WorkspaceManager::require`),
 and a workstream belonging to another workspace reads as `NotFound` rather than
 as forbidden — the caller has no business knowing it exists.
 
+## The UI (T210)
+
+Two surfaces over the same controller, so they cannot disagree:
+
+- **The island** — `apps/desktop/src/features/workstreams/island.tsx`. A pill in
+  the top bar (artboard 6a, placement A: it costs no layout track, so the tab
+  strip never moves) that expands into a sheet hanging under the bar. It shows
+  the single most urgent item in full, then the roster, then a field for adding
+  a workstream. ⌥A toggles it; Escape or a click outside closes it.
+- **The attention queue** — `attention-queue.tsx`. Replaces the editor body:
+  filters with counts, items oldest first, detail rail on the right.
+
+`Workstream.allowedTransitions` exists so the renderer can offer exactly the
+legal moves without keeping its own copy of the state machine. Nothing is
+applied optimistically: every mutation waits for the core, and a refusal is
+shown as the error envelope rather than swallowed.
+
+The two surfaces show only what the domain can produce — work, its state, and
+the questions blocking it. Artboards 4a (run launcher) and 4c (conflict), and
+the queue's approval/conflict/failure filters, wait for T300 and T400.
+
 ## Deliberately not here
 
 - **Agent runs, providers, capabilities, permissions** (T300/T310, ADR-005).

@@ -27,7 +27,7 @@ domain abstraction before its upstream contract exists.
 | T100 | Git baseline | 2 | ADR-001 | not yet specified |
 | T110 | Diagnostics | 2 | ADR-001 | not yet specified |
 | [T200](T200-workstream-model.md) | Workstream model + decisions (Gate C) | 3 | T010, T020, T060 | review |
-| T210 | Workstream UI (island, attention queue) | 3 | T200 | not yet specified |
+| [T210](T210-workstream-ui.md) | Workstream UI: the island and the attention queue | 3 | T200 | review |
 | T300–T410 | Agent protocol, runs, orchestration | 4–5 | T200, T210 | not yet specified |
 
 ## Dependency graph (architecture addendum §2)

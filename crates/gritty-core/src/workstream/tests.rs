@@ -233,6 +233,11 @@ async fn a_new_workstream_starts_as_a_draft_and_announces_itself() {
     let workstream = harness.create(&ws, "  Search index  ").await;
     assert_eq!(workstream.title, "Search index", "titles are trimmed");
     assert_eq!(workstream.state, WorkstreamState::Draft);
+    assert_eq!(
+        workstream.allowed_transitions,
+        [WorkstreamState::Ready, WorkstreamState::Abandoned],
+        "the UI is told what it may offer, so it cannot invent an illegal move"
+    );
     assert_eq!(workstream.open_decisions, 0);
     assert_eq!(workstream.workspace_id, ws.id);
 

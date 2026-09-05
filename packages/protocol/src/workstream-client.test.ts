@@ -29,6 +29,7 @@ const workstream: Workstream = {
   workspaceId,
   title: 'Terminal profiles',
   state: 'IN_PROGRESS',
+  allowedTransitions: ['BLOCKED', 'IN_REVIEW', 'READY', 'ABANDONED'],
   openDecisions: 0,
   createdAt: 1,
   updatedAt: 2,

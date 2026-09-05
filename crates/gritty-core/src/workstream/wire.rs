@@ -41,6 +41,10 @@ pub struct Workstream {
     #[ts(optional)]
     pub goal: Option<String>,
     pub state: WorkstreamState,
+    /// Where `state` may go next. Derived from the same table the core checks
+    /// against, so a UI can offer exactly the legal moves instead of keeping
+    /// its own copy of the machine and drifting from it.
+    pub allowed_transitions: Vec<WorkstreamState>,
     /// Decisions still `OPEN`. Derived on read, never stored: the decisions
     /// table is the truth.
     pub open_decisions: u32,
@@ -400,6 +404,7 @@ mod tests {
             title: "Terminal".to_owned(),
             goal: None,
             state: WorkstreamState::Draft,
+            allowed_transitions: WorkstreamState::Draft.allowed_transitions().to_vec(),
             open_decisions: 0,
             created_at: Timestamp::from_millis(1),
             updated_at: Timestamp::from_millis(2),
@@ -412,6 +417,7 @@ mod tests {
                 "workspaceId": "w-1",
                 "title": "Terminal",
                 "state": "DRAFT",
+                "allowedTransitions": ["READY", "ABANDONED"],
                 "openDecisions": 0,
                 "createdAt": 1,
                 "updatedAt": 2,

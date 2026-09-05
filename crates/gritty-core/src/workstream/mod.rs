@@ -705,12 +705,14 @@ fn to_workstream(
     workspace_id: &WorkspaceId,
     open_decisions: i64,
 ) -> Result<Workstream, CoreError> {
+    let state = WorkstreamState::parse(&row.state)?;
     Ok(Workstream {
         id: WorkstreamId::from_raw(row.id.clone()),
         workspace_id: workspace_id.clone(),
         title: row.title.clone(),
         goal: row.goal.clone(),
-        state: WorkstreamState::parse(&row.state)?,
+        state,
+        allowed_transitions: state.allowed_transitions().to_vec(),
         open_decisions: u32::try_from(open_decisions).unwrap_or(u32::MAX),
         created_at: Timestamp::from_millis(u64::try_from(row.created_at).unwrap_or(0)),
         updated_at: Timestamp::from_millis(u64::try_from(row.updated_at).unwrap_or(0)),

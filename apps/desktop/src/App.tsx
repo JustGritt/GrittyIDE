@@ -26,6 +26,9 @@ import { type Accelerator, acceleratorForOs } from './features/shell/open-shortc
 import { useOpenShortcuts } from './features/shell/use-open-shortcuts';
 import { TerminalPanel } from './features/terminal/terminal-panel';
 import { useTerminals } from './features/terminal/use-terminals';
+import { AttentionQueue } from './features/workstreams/attention-queue';
+import { AgentIsland } from './features/workstreams/island';
+import { useWorkstreams } from './features/workstreams/use-workstreams';
 
 /** What the editor needs beside the sidebar, and above the dock. */
 const EDITOR_MIN_WIDTH = 360;
@@ -69,6 +72,12 @@ export function App() {
   // Closing a tab with unsaved edits asks first. The tab strip raises the
   // request and the status bar does too, so the flow belongs to the shell.
   const closeFlow = useCloseFlow(documents);
+  // Workstreams and their decisions (T210). The island lives in the top bar
+  // and the queue replaces the editor body; both read this one controller, so
+  // answering a question in either clears it in the other.
+  const workstreams = useWorkstreams(workspace);
+  const [islandOpen, setIslandOpen] = useState(false);
+  const [queueOpen, setQueueOpen] = useState(false);
   const active = activeTab(documents.state);
   const activeEol = active ? (editor.eols[active.document.id] ?? null) : null;
   const session = useSession({
@@ -148,14 +157,34 @@ export function App() {
         } as React.CSSProperties
       }
     >
-      <AppBar health={state} workspace={workspace} />
+      <AppBar
+        health={state}
+        workspace={workspace}
+        island={
+          workspace ? (
+            <AgentIsland
+              controller={workstreams}
+              open={islandOpen}
+              onOpenChange={setIslandOpen}
+              onOpenQueue={() => {
+                setIslandOpen(false);
+                setQueueOpen(true);
+              }}
+            />
+          ) : null
+        }
+      />
       <SessionNotices session={session} />
       <DropOverlay drop={drop} />
       {/* The panels are hidden until a workspace exists (T049, artboard 3a),
           and the launcher waits for the session to settle rather than
           flashing while the last workspace is being reopened: `workspace` is
           null both before and after that, `phase` is what tells them apart. */}
-      {workspace ? (
+      {workspace && queueOpen ? (
+        <div className="shell__body shell__body--queue">
+          <AttentionQueue controller={workstreams} onClose={() => setQueueOpen(false)} />
+        </div>
+      ) : workspace ? (
         <div className="shell__body">
           <aside className="shell__sidebar">
             <ExplorerPanel

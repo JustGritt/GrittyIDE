@@ -14,6 +14,12 @@ export type Workstream = { id: WorkstreamId,
  */
 workspaceId: WorkspaceId, title: string, goal?: string, state: WorkstreamState, 
 /**
+ * Where `state` may go next. Derived from the same table the core checks
+ * against, so a UI can offer exactly the legal moves instead of keeping
+ * its own copy of the machine and drifting from it.
+ */
+allowedTransitions: Array<WorkstreamState>, 
+/**
  * Decisions still `OPEN`. Derived on read, never stored: the decisions
  * table is the truth.
  */
