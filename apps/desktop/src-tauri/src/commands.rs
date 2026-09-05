@@ -21,8 +21,8 @@ use gritty_core::operation::{CancelOperationRequest, Operation};
 use gritty_core::protocol::actor::Actor;
 use gritty_core::protocol::ids::CorrelationId;
 use gritty_core::session::{
-    CandidatesRequest, DiscardSnapshotRequest, RecoverSnapshotRequest, RecoveryCandidate,
-    SessionRestoreResponse, UpdateSessionRequest,
+    CandidatesRequest, DiscardSnapshotRequest, LastSession, RecoverSnapshotRequest,
+    RecoveryCandidate, SessionRestoreResponse, UpdateSessionRequest,
 };
 use gritty_core::shell::OpenExternalRequest;
 use gritty_core::terminal::wire::{
@@ -33,6 +33,11 @@ use gritty_core::workspace::{
     CloseWorkspaceRequest, DEFAULT_LIST_BUDGET, ForgetWorkspaceRequest, ListDirectoryRequest,
     ListDirectoryResponse, OpenWorkspaceRequest, RecentWorkspace, RecentWorkspacesRequest,
     UnsavedPolicy, Workspace,
+};
+use gritty_core::workstream::{
+    CreateWorkstreamRequest, Decision, DismissDecisionRequest, ListDecisionsRequest,
+    ListWorkstreamsRequest, RaiseDecisionRequest, RemoveWorkstreamRequest, ResolveDecisionRequest,
+    TransitionWorkstreamRequest, UpdateWorkstreamRequest, Workstream,
 };
 use gritty_core::{CoreError, HealthReport};
 use serde::de::DeserializeOwned;
@@ -492,6 +497,150 @@ pub async fn terminal_list(core: State<'_, Core>) -> Result<Vec<Terminal>, CoreE
         "terminal.list",
         move |_| async move { Ok(terminals.list()) },
     )
+    .await
+}
+
+/// `session.lastSession`
+#[tauri::command]
+pub async fn session_last_session(core: State<'_, Core>) -> Result<Option<LastSession>, CoreError> {
+    let session = core.session.clone();
+    guard("session.lastSession", move |correlation| async move {
+        session.last_session(correlation).await
+    })
+    .await
+}
+
+/// `workstreams.list`
+#[tauri::command]
+pub async fn workstreams_list(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Vec<Workstream>, CoreError> {
+    let workstreams = core.workstreams.clone();
+    guard("workstreams.list", move |correlation| async move {
+        let request: ListWorkstreamsRequest = parse_request(request)?;
+        workstreams.list(request, correlation).await
+    })
+    .await
+}
+
+/// `workstreams.create`
+#[tauri::command]
+pub async fn workstreams_create(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Workstream, CoreError> {
+    let workstreams = core.workstreams.clone();
+    guard("workstreams.create", move |correlation| async move {
+        let request: CreateWorkstreamRequest = parse_request(request)?;
+        workstreams.create(request, Actor::User, correlation).await
+    })
+    .await
+}
+
+/// `workstreams.update`
+#[tauri::command]
+pub async fn workstreams_update(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Workstream, CoreError> {
+    let workstreams = core.workstreams.clone();
+    guard("workstreams.update", move |correlation| async move {
+        let request: UpdateWorkstreamRequest = parse_request(request)?;
+        workstreams.update(request, Actor::User, correlation).await
+    })
+    .await
+}
+
+/// `workstreams.transition`
+#[tauri::command]
+pub async fn workstreams_transition(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Workstream, CoreError> {
+    let workstreams = core.workstreams.clone();
+    guard("workstreams.transition", move |correlation| async move {
+        let request: TransitionWorkstreamRequest = parse_request(request)?;
+        workstreams
+            .transition(request, Actor::User, correlation)
+            .await
+    })
+    .await
+}
+
+/// `workstreams.remove`
+#[tauri::command]
+pub async fn workstreams_remove(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<(), CoreError> {
+    let workstreams = core.workstreams.clone();
+    guard("workstreams.remove", move |correlation| async move {
+        let request: RemoveWorkstreamRequest = parse_request(request)?;
+        workstreams.remove(request, Actor::User, correlation).await
+    })
+    .await
+}
+
+/// `decisions.list`
+#[tauri::command]
+pub async fn decisions_list(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Vec<Decision>, CoreError> {
+    let workstreams = core.workstreams.clone();
+    guard("decisions.list", move |correlation| async move {
+        let request: ListDecisionsRequest = parse_request(request)?;
+        workstreams.list_decisions(request, correlation).await
+    })
+    .await
+}
+
+/// `decisions.raise`
+#[tauri::command]
+pub async fn decisions_raise(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Decision, CoreError> {
+    let workstreams = core.workstreams.clone();
+    guard("decisions.raise", move |correlation| async move {
+        let request: RaiseDecisionRequest = parse_request(request)?;
+        workstreams
+            .raise_decision(request, Actor::User, correlation)
+            .await
+    })
+    .await
+}
+
+/// `decisions.resolve`
+#[tauri::command]
+pub async fn decisions_resolve(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Decision, CoreError> {
+    let workstreams = core.workstreams.clone();
+    guard("decisions.resolve", move |correlation| async move {
+        let request: ResolveDecisionRequest = parse_request(request)?;
+        workstreams
+            .resolve_decision(request, Actor::User, correlation)
+            .await
+    })
+    .await
+}
+
+/// `decisions.dismiss`
+#[tauri::command]
+pub async fn decisions_dismiss(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Decision, CoreError> {
+    let workstreams = core.workstreams.clone();
+    guard("decisions.dismiss", move |correlation| async move {
+        let request: DismissDecisionRequest = parse_request(request)?;
+        workstreams
+            .dismiss_decision(request, Actor::User, correlation)
+            .await
+    })
     .await
 }
 

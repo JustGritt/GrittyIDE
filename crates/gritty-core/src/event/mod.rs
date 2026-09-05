@@ -32,6 +32,10 @@ use crate::protocol::ids::{CorrelationId, DocumentId, OperationId, WorkspaceId};
 use crate::session::wire::PersistenceStatusPayload;
 use crate::terminal::wire::{TerminalExitedPayload, TerminalOutputPayload};
 use crate::workspace::{Workspace, WorkspaceClosedReason};
+use crate::workstream::wire::{
+    DecisionRequestedPayload, DecisionResolvedPayload, WorkstreamChangedPayload,
+    WorkstreamCreatedPayload, WorkstreamRemovedPayload,
+};
 
 /// Envelope fields that are not the event itself.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -86,6 +90,18 @@ pub enum CoreEvent {
     /// A drag entered or left the window, so the UI can show its drop target.
     /// Enter and leave only, never the moves in between (rule 8).
     DropHoverChanged(DropHoverPayload),
+    /// A workstream was created (T200).
+    WorkstreamCreated(WorkstreamCreatedPayload),
+    /// Its title, goal, state or open-decision count changed. One event per
+    /// change, carrying the whole workstream: the roster is small and a
+    /// consumer that missed an event still converges.
+    WorkstreamChanged(WorkstreamChangedPayload),
+    /// A workstream and its decisions were deleted.
+    WorkstreamRemoved(WorkstreamRemovedPayload),
+    /// A question was raised against a workstream and is waiting for the user.
+    DecisionRequested(DecisionRequestedPayload),
+    /// It was answered or dismissed; the payload's `state` says which.
+    DecisionResolved(DecisionResolvedPayload),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -197,6 +213,11 @@ impl CoreEvent {
             Self::TerminalExited(_) => "TerminalExited",
             Self::PathsDropped(_) => "PathsDropped",
             Self::DropHoverChanged(_) => "DropHoverChanged",
+            Self::WorkstreamCreated(_) => "WorkstreamCreated",
+            Self::WorkstreamChanged(_) => "WorkstreamChanged",
+            Self::WorkstreamRemoved(_) => "WorkstreamRemoved",
+            Self::DecisionRequested(_) => "DecisionRequested",
+            Self::DecisionResolved(_) => "DecisionResolved",
         }
     }
 
@@ -219,7 +240,12 @@ impl CoreEvent {
             | Self::TerminalOutput(_)
             | Self::TerminalExited(_)
             | Self::PathsDropped(_)
-            | Self::DropHoverChanged(_) => None,
+            | Self::DropHoverChanged(_)
+            | Self::WorkstreamCreated(_)
+            | Self::WorkstreamChanged(_)
+            | Self::WorkstreamRemoved(_)
+            | Self::DecisionRequested(_)
+            | Self::DecisionResolved(_) => None,
         }
     }
 

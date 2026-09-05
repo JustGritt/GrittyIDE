@@ -1,4 +1,5 @@
 import type { CoreError, HealthReport, Workspace } from '@gritty/protocol';
+import type { ReactNode } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
 import { describeHealth } from '../../core/health';
 
@@ -13,13 +14,20 @@ export type HealthState =
  * beside it, and the core's health as a dot on the right. The health facts are
  * a popover anchored to the bar rather than a panel that pushes the layout
  * down, so opening them never moves the editor.
+ *
+ * The island (T210) sits here too, for the same reason: the bar is where the
+ * window's identity already is, so putting it there costs no layout (artboard
+ * 6a, placement A). The bar owns the slot, not the island's state.
  */
 export function AppBar({
   health,
   workspace,
+  island,
 }: {
   health: HealthState;
   workspace: Workspace | null;
+  /** The island, when a workspace is open; nothing otherwise. */
+  island?: ReactNode;
 }) {
   return (
     <header className="appbar">
@@ -38,6 +46,7 @@ export function AppBar({
         </code>
       )}
       <span className="appbar__spacer" />
+      {island}
       <details className="appbar__health">
         <summary aria-live="polite">
           <span className={`appbar__dot appbar__dot--${dotState(health)}`} />

@@ -85,7 +85,15 @@ impl Intent {
             // opened, a document opened — is persisted by those events; the
             // gesture itself must not survive a restart (T045).
             | CoreEvent::PathsDropped(_)
-            | CoreEvent::DropHoverChanged(_) => None,
+            | CoreEvent::DropHoverChanged(_)
+            // Workstreams write themselves (T200): the command that changed
+            // one has already committed before its event is emitted, so there
+            // is nothing here for the session writer to persist afterwards.
+            | CoreEvent::WorkstreamCreated(_)
+            | CoreEvent::WorkstreamChanged(_)
+            | CoreEvent::WorkstreamRemoved(_)
+            | CoreEvent::DecisionRequested(_)
+            | CoreEvent::DecisionResolved(_) => None,
         }
     }
 }

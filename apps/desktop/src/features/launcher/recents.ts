@@ -107,3 +107,18 @@ export function pathToOpen(input: string): string | null {
   const trimmed = input.trim();
   return trimmed === '' ? null : trimmed;
 }
+
+/**
+ * What the resume rail says was open (T051, artboard 3b).
+ *
+ * The artboard says "4 tabs, 2 shells and 3 agent worktrees". Shells are not
+ * persisted per workspace and agent worktrees do not exist yet, so this counts
+ * the one thing Gritty actually kept — and says how much of it is unsaved,
+ * because that is the part with consequences.
+ */
+export function describeLastSession(tabs: number, unsaved: number): string {
+  const files = tabs === 1 ? '1 tab was' : `${tabs} tabs were`;
+  if (unsaved === 0) return `${files} open when the window closed.`;
+  const dirty = unsaved === 1 ? 'one had unsaved edits' : `${unsaved} of them had unsaved edits`;
+  return `${files} open when the window closed, and ${dirty}.`;
+}

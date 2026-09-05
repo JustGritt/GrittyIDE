@@ -11,7 +11,7 @@ use gritty_workspace::WorkspacePath;
 
 use crate::protocol::ids::WorkspaceId;
 use crate::protocol::time::Timestamp;
-use crate::workspace::Workspace;
+use crate::workspace::{RecentWorkspace, Workspace};
 
 /// One-based line and column, as the editor reports them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -43,6 +43,24 @@ pub struct SessionTab {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub scroll_line: Option<u64>,
+}
+
+/// What the launcher offers to pick up again (T051, artboard 3b).
+///
+/// Only present when there is something to say that the recent-workspaces list
+/// does not already say: a workspace that is *not* open and had tabs in it.
+/// Reopening the same folder from the history is one click either way, so a
+/// rail that only repeats the history has not earned its space.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct LastSession {
+    /// The workspace itself, including whether its root is still there.
+    pub workspace: RecentWorkspace,
+    /// The tabs that were open in it, in their persisted order.
+    pub tabs: Vec<SessionTab>,
+    /// How many of those buffers have unsaved edits waiting in a recovery
+    /// snapshot. Restoring keeps them dirty; the file on disk is untouched.
+    pub unsaved: u32,
 }
 
 /// Whether the session database is usable right now.

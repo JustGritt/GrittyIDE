@@ -200,6 +200,16 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::terminal_kill,
             commands::terminal_list,
             commands::terminal_profiles,
+            commands::session_last_session,
+            commands::workstreams_list,
+            commands::workstreams_create,
+            commands::workstreams_update,
+            commands::workstreams_transition,
+            commands::workstreams_remove,
+            commands::decisions_list,
+            commands::decisions_raise,
+            commands::decisions_resolve,
+            commands::decisions_dismiss,
         ])
 }
 

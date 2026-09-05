@@ -1,4 +1,4 @@
-import { toCoreError } from '@gritty/protocol';
+import { type SessionTab, toCoreError } from '@gritty/protocol';
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { Splitter } from './components/splitter';
 import { boundsWithin } from './components/splitter-geometry';
@@ -16,6 +16,7 @@ import { useEditorBinding } from './features/editor/use-editor-binding';
 import { ExplorerPanel } from './features/explorer/explorer-panel';
 import { useExplorer } from './features/explorer/use-explorer';
 import { Launcher } from './features/launcher/launcher';
+import { useLastSession } from './features/launcher/use-last-session';
 import { viewModesReducer } from './features/markdown/view-modes';
 import { OperationsPanel } from './features/operations/operations-panel';
 import { DEFAULT_LAYOUT, type Layout, PANE_LIMITS } from './features/session/persisted-layout';
@@ -26,6 +27,9 @@ import { type Accelerator, acceleratorForOs } from './features/shell/open-shortc
 import { useOpenShortcuts } from './features/shell/use-open-shortcuts';
 import { TerminalPanel } from './features/terminal/terminal-panel';
 import { useTerminals } from './features/terminal/use-terminals';
+import { AttentionQueue } from './features/workstreams/attention-queue';
+import { AgentIsland } from './features/workstreams/island';
+import { useWorkstreams } from './features/workstreams/use-workstreams';
 
 /** What the editor needs beside the sidebar, and above the dock. */
 const EDITOR_MIN_WIDTH = 360;
@@ -69,6 +73,24 @@ export function App() {
   // Closing a tab with unsaved edits asks first. The tab strip raises the
   // request and the status bar does too, so the flow belongs to the shell.
   const closeFlow = useCloseFlow(documents);
+  // Workstreams and their decisions (T210). The island lives in the top bar
+  // and the queue replaces the editor body; both read this one controller, so
+  // answering a question in either clears it in the other.
+  const workstreams = useWorkstreams(workspace);
+  // What the previous window had open, for the launcher's resume rail (T051).
+  // Asked for whenever no workspace is open, which is exactly when the
+  // launcher is on screen — including after the user closes one mid-run.
+  const lastSession = useLastSession(workspace);
+  const [islandOpen, setIslandOpen] = useState(false);
+  const [queueOpen, setQueueOpen] = useState(false);
+  // Closing the workspace ends the queue with it: reopening should land in the
+  // editor, not in a triage view of work you have not looked at yet.
+  useEffect(() => {
+    if (!workspace) {
+      setQueueOpen(false);
+      setIslandOpen(false);
+    }
+  }, [workspace]);
   const active = activeTab(documents.state);
   const activeEol = active ? (editor.eols[active.document.id] ?? null) : null;
   const session = useSession({
@@ -116,6 +138,23 @@ export function App() {
     onOpenPath: workspace ? undefined : () => setPathOpen(true),
   });
 
+  /**
+   * Open a workspace and, when asked, put its persisted tabs back. The startup
+   * restore runs once per WebView, so a workspace opened from the rail cannot
+   * go through it; `session.resumeTabs` is the same code path on demand.
+   */
+  const resume = useCallback(
+    async (root: string, tabs: readonly SessionTab[]) => {
+      setPathOpen(false);
+      const opened = await explorer.openFolder(root);
+      if (tabs.length === 0) return;
+      // `openFolder` reports its own failures; without a workspace there is
+      // nothing to reopen into.
+      if (opened) await session.resumeTabs(opened.id, tabs);
+    },
+    [explorer.openFolder, session.resumeTabs],
+  );
+
   const sidebarBounds = useCallback(
     (root: HTMLElement) =>
       boundsWithin(
@@ -148,14 +187,34 @@ export function App() {
         } as React.CSSProperties
       }
     >
-      <AppBar health={state} workspace={workspace} />
+      <AppBar
+        health={state}
+        workspace={workspace}
+        island={
+          workspace ? (
+            <AgentIsland
+              controller={workstreams}
+              open={islandOpen}
+              onOpenChange={setIslandOpen}
+              onOpenQueue={() => {
+                setIslandOpen(false);
+                setQueueOpen(true);
+              }}
+            />
+          ) : null
+        }
+      />
       <SessionNotices session={session} />
       <DropOverlay drop={drop} />
       {/* The panels are hidden until a workspace exists (T049, artboard 3a),
           and the launcher waits for the session to settle rather than
           flashing while the last workspace is being reopened: `workspace` is
           null both before and after that, `phase` is what tells them apart. */}
-      {workspace ? (
+      {workspace && queueOpen ? (
+        <div className="shell__body shell__body--queue">
+          <AttentionQueue controller={workstreams} onClose={() => setQueueOpen(false)} />
+        </div>
+      ) : workspace ? (
         <div className="shell__body">
           <aside className="shell__sidebar">
             <ExplorerPanel
@@ -195,6 +254,12 @@ export function App() {
           onPathOpenChange={setPathOpen}
           onOpen={openFolder}
           onPickFolder={() => openFolder()}
+          lastSession={lastSession.value}
+          onResume={(root, tabs) => {
+            lastSession.dismiss();
+            void resume(root, tabs);
+          }}
+          onDismissLastSession={lastSession.dismiss}
         />
       ) : null}
       {/* The dock stays mounted with no workspace open: T095 roots a shell in

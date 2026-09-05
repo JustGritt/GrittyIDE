@@ -18,14 +18,21 @@ pub struct Migration {
 }
 
 /// Every migration, in order. Append only; never edit an applied one.
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "initial",
-    sql: include_str!("migrations/0001_initial.sql"),
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "initial",
+        sql: include_str!("migrations/0001_initial.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "workstreams",
+        sql: include_str!("migrations/0002_workstreams.sql"),
+    },
+];
 
 /// The schema version this build expects after migrating.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 const _: () = assert!(MIGRATIONS[MIGRATIONS.len() - 1].version == SCHEMA_VERSION);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,6 +167,8 @@ mod tests {
             "workspace_tab",
             "buffer_snapshot",
             "operation_record",
+            "workstream",
+            "decision",
         ] {
             assert!(table_exists(&conn, table), "{table}");
         }

@@ -2,6 +2,7 @@ import type { RecentWorkspace } from '@gritty/protocol';
 import { describe, expect, it } from 'vitest';
 import {
   COLLAPSED_RECENTS,
+  describeLastSession,
   formatRelativeTime,
   hasMore,
   parentOf,
@@ -102,5 +103,18 @@ describe('pathToOpen', () => {
     // back as InvalidInput or NotFound. Guessing here would only let the two
     // rulesets disagree.
     expect(pathToOpen('../secrets')).toBe('../secrets');
+  });
+});
+
+describe('describing the last session', () => {
+  it('counts tabs and names the unsaved ones', () => {
+    expect(describeLastSession(4, 0)).toBe('4 tabs were open when the window closed.');
+    expect(describeLastSession(1, 0)).toBe('1 tab was open when the window closed.');
+    expect(describeLastSession(4, 1)).toBe(
+      '4 tabs were open when the window closed, and one had unsaved edits.',
+    );
+    expect(describeLastSession(4, 3)).toBe(
+      '4 tabs were open when the window closed, and 3 of them had unsaved edits.',
+    );
   });
 });

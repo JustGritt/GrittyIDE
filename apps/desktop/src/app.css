@@ -2088,3 +2088,591 @@ textarea:focus-visible {
   background: var(--fg-muted);
   flex: none;
 }
+
+/* ---------------------------------------------------------------------------
+   The island and the attention queue (T210, artboards 5a/5b, 4b, 6a-A)
+
+   The island rides in the top bar and expands downward as a sheet: no track in
+   the shell grid, no layout shift, and the tab strip never moves. The queue is
+   a body view, so it gets the whole editor area instead of fighting the sheet
+   for width.
+   --------------------------------------------------------------------------- */
+
+.island {
+  position: relative;
+  flex: none;
+}
+
+.island__pill {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--surface-control);
+  font-size: var(--text-control);
+  white-space: nowrap;
+}
+
+/* The one state worth colouring the whole control for. */
+.island__pill--waiting {
+  background: var(--warn-wash);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 30%, transparent);
+}
+
+.island__dots {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.island__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--fg-faint);
+}
+
+.island__dot--active {
+  background: var(--accent);
+}
+
+.island__dot--waiting,
+.island__dot--blocked {
+  background: var(--warn);
+}
+
+.island__dot--done {
+  background: var(--ok);
+}
+
+.island__needs {
+  color: var(--warn-text);
+}
+
+.island__count {
+  color: var(--fg-dim);
+}
+
+/* Hangs under the bar, over the editor, centred on the island itself. */
+.island__sheet {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  width: 520px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - var(--bar-h) - var(--status-h) - 24px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding: var(--gap);
+  border-radius: 14px;
+  background: var(--surface-chrome);
+  box-shadow:
+    0 20px 48px rgb(0 0 0 / 45%),
+    inset 0 0 0 1px var(--border);
+}
+
+.island__sheet:focus-visible {
+  outline: none;
+}
+
+.island__head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 2px 2px 0;
+}
+
+.island__title {
+  font-size: var(--text-control);
+  font-weight: 600;
+}
+
+.island__spacer {
+  flex: 1;
+}
+
+.island__chord {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  color: var(--fg-muted);
+}
+
+.island__meta {
+  font-size: var(--text-meta);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.island__name {
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.island__error {
+  padding: 0 2px;
+}
+
+/* A card is what one item looks like in both surfaces. */
+.island__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--surface-raised);
+}
+
+.island__card--question {
+  background: var(--warn-wash);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 24%, transparent);
+}
+
+.island__card--review {
+  background: var(--accent-wash);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.island__card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+}
+
+.island__card-body {
+  font-size: var(--text-code);
+  line-height: 1.45;
+}
+
+.island__card-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+.island__options {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+}
+
+.island__option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  padding: 7px 10px;
+  border-radius: 7px;
+  background: var(--surface-control);
+  text-align: left;
+}
+
+.island__answer {
+  display: flex;
+  gap: var(--gap-sm);
+}
+
+.island__answer input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 9px;
+}
+
+.island__roster {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.island__empty {
+  margin: 0;
+  padding: var(--gap) 2px;
+  font-size: var(--text-control);
+  line-height: 1.55;
+  color: var(--fg-muted);
+}
+
+.island__row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  padding: 7px 9px;
+  border-radius: var(--radius-lg);
+}
+
+.island__row:hover {
+  background: var(--ghost);
+}
+
+.island__row-name {
+  font-size: var(--text-control);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.island__row-state,
+.island__row-open {
+  font-size: var(--text-meta);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.island__row-open {
+  color: var(--warn-text);
+}
+
+/* Only on hover or focus: a roster of five workstreams should read as five
+   names, not as fifteen buttons. */
+.island__move {
+  padding: 3px 8px;
+  font-size: var(--text-micro);
+  opacity: 0;
+}
+
+.island__row:hover .island__move,
+.island__row:focus-within .island__move {
+  opacity: 1;
+}
+
+.island__new {
+  display: flex;
+  gap: var(--gap-sm);
+  padding-top: 2px;
+}
+
+.island__new input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 9px;
+}
+
+/* The queue takes the whole body: one column of items, one of detail. */
+
+.shell__body--queue {
+  display: block;
+  overflow: hidden;
+}
+
+.queue {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface-base);
+}
+
+.queue__bar {
+  height: 40px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 0 var(--gap-lg);
+  border-bottom: 1px solid var(--border);
+}
+
+.queue__filter {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  border-radius: var(--radius-md);
+}
+
+.queue__filter--on {
+  background: var(--surface-active);
+  color: var(--fg);
+}
+
+.queue__filter-count {
+  font-size: var(--text-meta);
+  color: var(--fg-muted);
+}
+
+.queue__spacer {
+  flex: 1;
+}
+
+.queue__hint,
+.queue__meta {
+  font-size: var(--text-control);
+  color: var(--fg-muted);
+}
+
+.queue__error {
+  padding: var(--gap) var(--gap-lg) 0;
+}
+
+.queue__body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 460px);
+}
+
+.queue__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding: var(--gap-md);
+  overflow: auto;
+  min-height: 0;
+}
+
+.queue__empty {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-control);
+}
+
+.queue__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding: 11px 12px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  text-align: left;
+}
+
+.queue__row--question {
+  background: var(--warn-wash);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 20%, transparent);
+}
+
+.queue__row--on {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.queue__row-head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+}
+
+.queue__row-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue__row-body {
+  font-size: var(--text-code);
+  line-height: 1.45;
+  color: var(--fg-dim);
+}
+
+.queue__detail {
+  border-left: 1px solid var(--border);
+  background: var(--surface-chrome);
+  overflow: auto;
+  min-height: 0;
+}
+
+.queue__detail-body,
+.queue__detail-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md);
+  padding: var(--gap-md);
+}
+
+.queue__detail-empty p {
+  margin: 0;
+  font-size: var(--text-control);
+  color: var(--fg-muted);
+}
+
+.queue__detail-head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+.queue__goal {
+  margin: 0;
+  font-size: var(--text-control);
+  color: var(--fg-dim);
+  line-height: 1.5;
+}
+
+.queue__facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--gap-xs) var(--gap-md);
+  margin: 0;
+  font-size: var(--text-control);
+}
+
+.queue__facts dt {
+  color: var(--fg-muted);
+}
+
+.queue__facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.queue__detail-moves {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+
+.queue__moves {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+}
+
+.queue__foot {
+  height: var(--status-h);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-lg);
+  padding: 0 var(--gap-lg);
+  border-top: 1px solid var(--border);
+  background: var(--surface-chrome);
+}
+
+/* ---------------------------------------------------------------------------
+   The launcher's resume rail (T051, artboard 3b)
+
+   Only present when the core has something to offer, so the launcher stays a
+   single centred column the rest of the time.
+   --------------------------------------------------------------------------- */
+
+.launcher--with-rail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 420px);
+  align-items: stretch;
+}
+
+.launcher__rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md);
+  padding: var(--gap-md);
+  border-left: 1px solid var(--border);
+  background: var(--surface-chrome);
+  overflow: auto;
+  min-height: 0;
+}
+
+.launcher__rail-head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+.launcher__rail-when {
+  font-size: var(--text-meta);
+  color: var(--fg-muted);
+}
+
+.launcher__rail-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding: var(--gap-md);
+  border-radius: var(--radius-lg);
+  background: var(--accent-wash);
+}
+
+.launcher__rail-name {
+  font-size: var(--text-body);
+  font-weight: 600;
+}
+
+.launcher__rail-path {
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.launcher__rail-body {
+  margin: 0;
+  font-size: var(--text-control);
+  line-height: 1.5;
+  color: var(--fg-dim);
+}
+
+.launcher__rail-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  flex-wrap: wrap;
+}
+
+.launcher__rail-gone {
+  font-size: var(--text-control);
+  color: var(--error-text);
+}
+
+.launcher__rail-tabs ul {
+  list-style: none;
+  margin: var(--gap-sm) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.launcher__rail-tabs li {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+}
+
+.launcher__rail-tab {
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.launcher__rail-active {
+  font-size: var(--text-meta);
+  color: var(--accent-text);
+}
+
+.launcher__rail-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gap);
+  margin: 0;
+  padding: 10px 11px;
+  border-radius: var(--radius-lg);
+  background: var(--warn-wash);
+  font-size: var(--text-control);
+  line-height: 1.5;
+  color: var(--fg-dim);
+}
+
+.launcher__dot--warn {
+  background: var(--warn);
+  margin-top: 5px;
+}

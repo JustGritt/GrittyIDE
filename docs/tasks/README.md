@@ -17,6 +17,7 @@ domain abstraction before its upstream contract exists.
 | [T048](T048-ui-revamp.md) | Shell UI revamp from design artboard 2a | 0 | T020, T030, T040, T046, T050, T060, T090 | done |
 | [T049](T049-startup-screen.md) | Startup screen from design artboard 3a | 0 | T020, T030, T048, T060, T095 | review |
 | [T050](T050-markdown.md) | Markdown | 0/1B | T030, T040 | done |
+| [T051](T051-launcher-resume-rail.md) | Launcher resume rail from design artboard 3b | 0/1B | T049, T060 | review |
 | [T060](T060-session-persistence.md) | Session persistence + recovery | 0/1B | T030, T040 | done |
 | [T090](T090-terminal-pty.md) | Terminal (PTY) spike | 0/2 | T010 | done |
 | [T095](T095-terminal-profiles.md) | Terminal shell profiles and rooting | 0/2 | T090, T060 | done |
@@ -26,7 +27,9 @@ domain abstraction before its upstream contract exists.
 | T080 | Search | 2 | T020, ADR-001 | not yet specified |
 | T100 | Git baseline | 2 | ADR-001 | not yet specified |
 | T110 | Diagnostics | 2 | ADR-001 | not yet specified |
-| T200–T410 | Workstreams, agents, orchestration | 3–5 | Phase 2 | not yet specified |
+| [T200](T200-workstream-model.md) | Workstream model + decisions (Gate C) | 3 | T010, T020, T060 | review |
+| [T210](T210-workstream-ui.md) | Workstream UI: the island and the attention queue | 3 | T200 | review |
+| T300–T410 | Agent protocol, runs, orchestration | 4–5 | T200, T210 | not yet specified |
 
 ## Dependency graph (architecture addendum §2)
 
@@ -45,7 +48,7 @@ T090 Terminal                 ├─ Phase 2 dogfood milestone
 T100 Git                      │
 T110 Diagnostics ─────────────┘
 
-T200 Workstream model
+T200 Workstream model (done: state machine, decisions, persistence)
  └─ T210 Workstream UI
      └─ T300 Agent protocol + deterministic fake agent
          ├─ T310 First real agent

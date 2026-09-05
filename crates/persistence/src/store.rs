@@ -446,3 +446,245 @@ pub mod operations {
             .map_err(Into::into)
     }
 }
+
+/// `workstream`: durable units of work (T200). Unlike everything above, the
+/// row's own `id` is the domain id — a workstream is not a per-process handle.
+pub mod workstreams {
+    use super::*;
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct WorkstreamRow {
+        pub id: String,
+        pub workspace_root: String,
+        pub title: String,
+        pub goal: Option<String>,
+        pub state: String,
+        pub created_at: i64,
+        pub updated_at: i64,
+    }
+
+    const COLUMNS: &str = "id, workspace_root, title, goal, state, created_at, updated_at";
+
+    fn from_row(row: &Row<'_>) -> rusqlite::Result<WorkstreamRow> {
+        Ok(WorkstreamRow {
+            id: row.get(0)?,
+            workspace_root: row.get(1)?,
+            title: row.get(2)?,
+            goal: row.get(3)?,
+            state: row.get(4)?,
+            created_at: row.get(5)?,
+            updated_at: row.get(6)?,
+        })
+    }
+
+    pub fn insert(conn: &Connection, row: &WorkstreamRow) -> Result<()> {
+        conn.execute(
+            "INSERT INTO workstream (id, workspace_root, title, goal, state, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                row.id,
+                row.workspace_root,
+                row.title,
+                row.goal,
+                row.state,
+                row.created_at,
+                row.updated_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get(conn: &Connection, id: &str) -> Result<Option<WorkstreamRow>> {
+        conn.query_row(
+            &format!("SELECT {COLUMNS} FROM workstream WHERE id = ?1"),
+            [id],
+            from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// Newest first; the caller orders by attention.
+    pub fn list(conn: &Connection, workspace_root: &str) -> Result<Vec<WorkstreamRow>> {
+        let mut statement = conn.prepare(&format!(
+            "SELECT {COLUMNS} FROM workstream WHERE workspace_root = ?1
+             ORDER BY created_at DESC, id DESC"
+        ))?;
+        let rows = statement.query_map([workspace_root], from_row)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Replace title and goal. `None` clears the goal; the caller decides what
+    /// "leave alone" means before calling.
+    pub fn update(
+        conn: &Connection,
+        id: &str,
+        title: &str,
+        goal: Option<&str>,
+        now: i64,
+    ) -> Result<bool> {
+        let changed = conn.execute(
+            "UPDATE workstream SET title = ?2, goal = ?3, updated_at = ?4 WHERE id = ?1",
+            params![id, title, goal, now],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn set_state(conn: &Connection, id: &str, state: &str, now: i64) -> Result<bool> {
+        let changed = conn.execute(
+            "UPDATE workstream SET state = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, state, now],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Deletes the workstream; its decisions go with it (`ON DELETE CASCADE`).
+    pub fn delete(conn: &Connection, id: &str) -> Result<bool> {
+        let changed = conn.execute("DELETE FROM workstream WHERE id = ?1", [id])?;
+        Ok(changed > 0)
+    }
+}
+
+/// `decision`: questions raised against a workstream (T200).
+pub mod decisions {
+    use super::*;
+
+    pub const OPEN: &str = "OPEN";
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct DecisionRow {
+        pub id: String,
+        pub workstream_id: String,
+        pub question: String,
+        /// JSON array of `{ key, label }`; `None` for a free-form question.
+        pub options: Option<String>,
+        pub state: String,
+        pub chosen: Option<String>,
+        pub rationale: Option<String>,
+        /// JSON `Actor`.
+        pub raised_by: String,
+        pub raised_at: i64,
+        pub resolved_at: Option<i64>,
+    }
+
+    const COLUMNS: &str = "d.id, d.workstream_id, d.question, d.options, d.state, d.chosen,
+                           d.rationale, d.raised_by, d.raised_at, d.resolved_at";
+
+    fn from_row(row: &Row<'_>) -> rusqlite::Result<DecisionRow> {
+        Ok(DecisionRow {
+            id: row.get(0)?,
+            workstream_id: row.get(1)?,
+            question: row.get(2)?,
+            options: row.get(3)?,
+            state: row.get(4)?,
+            chosen: row.get(5)?,
+            rationale: row.get(6)?,
+            raised_by: row.get(7)?,
+            raised_at: row.get(8)?,
+            resolved_at: row.get(9)?,
+        })
+    }
+
+    pub fn insert(conn: &Connection, row: &DecisionRow) -> Result<()> {
+        conn.execute(
+            "INSERT INTO decision (id, workstream_id, question, options, state, chosen,
+                                   rationale, raised_by, raised_at, resolved_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                row.id,
+                row.workstream_id,
+                row.question,
+                row.options,
+                row.state,
+                row.chosen,
+                row.rationale,
+                row.raised_by,
+                row.raised_at,
+                row.resolved_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get(conn: &Connection, id: &str) -> Result<Option<DecisionRow>> {
+        conn.query_row(
+            &format!("SELECT {COLUMNS} FROM decision d WHERE d.id = ?1"),
+            [id],
+            from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// Every decision of one workspace, oldest first: the order the attention
+    /// queue triages in.
+    pub fn list(
+        conn: &Connection,
+        workspace_root: &str,
+        workstream_id: Option<&str>,
+        open_only: bool,
+    ) -> Result<Vec<DecisionRow>> {
+        let mut sql = format!(
+            "SELECT {COLUMNS} FROM decision d
+             JOIN workstream w ON w.id = d.workstream_id
+             WHERE w.workspace_root = ?1"
+        );
+        if workstream_id.is_some() {
+            sql.push_str(" AND d.workstream_id = ?2");
+        }
+        if open_only {
+            sql.push_str(&format!(" AND d.state = '{OPEN}'"));
+        }
+        sql.push_str(" ORDER BY d.raised_at ASC, d.id ASC");
+        let mut statement = conn.prepare(&sql)?;
+        let rows = match workstream_id {
+            Some(id) => statement.query_map(params![workspace_root, id], from_row)?,
+            None => statement.query_map(params![workspace_root], from_row)?,
+        };
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    /// How many decisions are still open, per workstream of this workspace.
+    /// Only workstreams with at least one open decision appear.
+    pub fn open_counts(conn: &Connection, workspace_root: &str) -> Result<Vec<(String, i64)>> {
+        let mut statement = conn.prepare(
+            "SELECT d.workstream_id, COUNT(*) FROM decision d
+             JOIN workstream w ON w.id = d.workstream_id
+             WHERE w.workspace_root = ?1 AND d.state = 'OPEN'
+             GROUP BY d.workstream_id",
+        )?;
+        let rows = statement.query_map([workspace_root], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    pub fn count_open(conn: &Connection, workstream_id: &str) -> Result<i64> {
+        conn.query_row(
+            "SELECT COUNT(*) FROM decision WHERE workstream_id = ?1 AND state = 'OPEN'",
+            [workstream_id],
+            |row| row.get(0),
+        )
+        .map_err(Into::into)
+    }
+
+    /// Move an open decision to `state` (`RESOLVED` or `DISMISSED`). Returns
+    /// `false` when the row is gone or is no longer open, so the caller can
+    /// tell "not found" from "already answered" without a second query.
+    pub fn close(
+        conn: &Connection,
+        id: &str,
+        state: &str,
+        chosen: Option<&str>,
+        rationale: Option<&str>,
+        now: i64,
+    ) -> Result<bool> {
+        let changed = conn.execute(
+            "UPDATE decision SET state = ?2, chosen = ?3, rationale = ?4, resolved_at = ?5
+             WHERE id = ?1 AND state = 'OPEN'",
+            params![id, state, chosen, rationale, now],
+        )?;
+        Ok(changed > 0)
+    }
+}

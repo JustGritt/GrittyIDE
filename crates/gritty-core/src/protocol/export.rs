@@ -21,8 +21,8 @@ use crate::operation::demo::StartDemoRequest;
 use crate::operation::registry::CancelOperationRequest;
 use crate::protocol::error::CoreError;
 use crate::session::wire::{
-    CandidatesRequest, DiscardSnapshotRequest, RecoverSnapshotRequest, RecoveryCandidate,
-    SessionRestoreResponse, UpdateSessionRequest,
+    CandidatesRequest, DiscardSnapshotRequest, LastSession, RecoverSnapshotRequest,
+    RecoveryCandidate, SessionRestoreResponse, UpdateSessionRequest,
 };
 use crate::shell::OpenExternalRequest;
 use crate::terminal::wire::{
@@ -32,6 +32,11 @@ use crate::terminal::wire::{
 use crate::workspace::{
     CloseWorkspaceRequest, ForgetWorkspaceRequest, ListDirectoryRequest, ListDirectoryResponse,
     OpenWorkspaceRequest, RecentWorkspace, RecentWorkspacesRequest, Workspace,
+};
+use crate::workstream::wire::{
+    CreateWorkstreamRequest, Decision, DismissDecisionRequest, ListDecisionsRequest,
+    ListWorkstreamsRequest, RaiseDecisionRequest, RemoveWorkstreamRequest, ResolveDecisionRequest,
+    TransitionWorkstreamRequest, UpdateWorkstreamRequest, Workstream,
 };
 
 /// Relative to this crate's `Cargo.toml`.
@@ -82,6 +87,7 @@ fn export_bindings() {
     RecoverSnapshotRequest::export_all(&cfg).expect("export RecoverSnapshotRequest");
     DiscardSnapshotRequest::export_all(&cfg).expect("export DiscardSnapshotRequest");
     UpdateSessionRequest::export_all(&cfg).expect("export UpdateSessionRequest");
+    LastSession::export_all(&cfg).expect("export LastSession");
     Terminal::export_all(&cfg).expect("export Terminal");
     TerminalProfile::export_all(&cfg).expect("export TerminalProfile");
     ListProfilesRequest::export_all(&cfg).expect("export ListProfilesRequest");
@@ -90,6 +96,17 @@ fn export_bindings() {
     ResizeTerminalRequest::export_all(&cfg).expect("export ResizeTerminalRequest");
     KillTerminalRequest::export_all(&cfg).expect("export KillTerminalRequest");
     RenameTerminalRequest::export_all(&cfg).expect("export RenameTerminalRequest");
+    Workstream::export_all(&cfg).expect("export Workstream");
+    ListWorkstreamsRequest::export_all(&cfg).expect("export ListWorkstreamsRequest");
+    CreateWorkstreamRequest::export_all(&cfg).expect("export CreateWorkstreamRequest");
+    UpdateWorkstreamRequest::export_all(&cfg).expect("export UpdateWorkstreamRequest");
+    TransitionWorkstreamRequest::export_all(&cfg).expect("export TransitionWorkstreamRequest");
+    RemoveWorkstreamRequest::export_all(&cfg).expect("export RemoveWorkstreamRequest");
+    Decision::export_all(&cfg).expect("export Decision");
+    ListDecisionsRequest::export_all(&cfg).expect("export ListDecisionsRequest");
+    RaiseDecisionRequest::export_all(&cfg).expect("export RaiseDecisionRequest");
+    ResolveDecisionRequest::export_all(&cfg).expect("export ResolveDecisionRequest");
+    DismissDecisionRequest::export_all(&cfg).expect("export DismissDecisionRequest");
 
     let version = format!(
         "{HEADER}export const PROTOCOL_VERSION = \"{PROTOCOL_VERSION}\";\n\
