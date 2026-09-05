@@ -201,6 +201,13 @@ pub struct AgentSessionManager {
     /// `None` until the first scan completes, which is what lets `list` scan on
     /// demand instead of reporting a confident empty roster it never checked.
     roster: Mutex<Option<AgentRoster>>,
+    /// Held for the length of a scan so only one runs at a time.
+    ///
+    /// `start` fires its first tick immediately, so without this a `list`
+    /// arriving in the same instant runs a *second* `ps`/`lsof` pair against the
+    /// same moment, and the two publish two rosters for one change. Async rather
+    /// than `std`, because a scan is awaited across `spawn_blocking`.
+    scan_gate: tokio::sync::Mutex<()>,
     /// The raw evidence the last discovery tick found, kept so the fast loop can
     /// re-derive the roster against fresh hook state without paying for `ps` and
     /// `lsof` again (T221).
@@ -224,8 +231,9 @@ pub struct AgentSessionManager {
 }
 
 impl AgentSessionManager {
-    /// Builds the manager and starts polling. The first tick fires immediately,
-    /// so the roster is populated without waiting out an interval.
+    /// Builds the manager and starts both loops. Neither fires immediately:
+    /// the roster is populated by the first `list`, which scans on demand when
+    /// nothing is cached, so an immediate tick would only duplicate it.
     pub fn start(
         handle: Handle,
         events: Arc<EventBus>,
@@ -237,6 +245,7 @@ impl AgentSessionManager {
             workspaces,
             config,
             roster: Mutex::new(None),
+            scan_gate: tokio::sync::Mutex::new(()),
             discovery: Mutex::new(None),
             hooks: Mutex::new(HashMap::new()),
             permissions: Mutex::new(HashMap::new()),
@@ -261,12 +270,22 @@ impl AgentSessionManager {
         if let Some(roster) = self.cached() {
             return roster;
         }
-        self.scan_and_publish().await
+        // Re-check under the gate: the scan this was about to duplicate may
+        // have been the startup tick, and by the time we hold the gate its
+        // roster is already cached.
+        let _gate = self.scan_gate.lock().await;
+        if let Some(roster) = self.cached() {
+            return roster;
+        }
+        self.scan_and_publish_locked().await
     }
 
-    /// `agents.refresh`. Always rescans.
+    /// `agents.refresh`. Always rescans, but never concurrently with another
+    /// scan: two at once cost twice the subprocesses and race each other's
+    /// roster into the event bus.
     pub async fn refresh(&self) -> AgentRoster {
-        self.scan_and_publish().await
+        let _gate = self.scan_gate.lock().await;
+        self.scan_and_publish_locked().await
     }
 
     /// Stops both loops. Called from the composition root's shutdown.
@@ -657,7 +676,14 @@ impl AgentSessionManager {
     }
 
     async fn poll(self: Arc<Self>) {
-        let mut ticker = tokio::time::interval(self.config.poll_interval);
+        // Like the timeline loop, this does *not* fire immediately. `list`
+        // already scans on demand when nothing is cached, and the renderer
+        // calls it on mount — so an immediate tick only ever duplicated that
+        // scan, paying for a second `ps`/`lsof` pair against the same moment.
+        let mut ticker = tokio::time::interval_at(
+            tokio::time::Instant::now() + self.config.poll_interval,
+            self.config.poll_interval,
+        );
         // A scan that overruns the interval must not queue up backlogged ticks
         // and then fire them back to back.
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -672,7 +698,14 @@ impl AgentSessionManager {
     }
 
     /// Scans, stores the result, and emits only if it differs from the last one.
+    /// Takes the gate, then scans. The poll loop's entry point.
     async fn scan_and_publish(&self) -> AgentRoster {
+        let _gate = self.scan_gate.lock().await;
+        self.scan_and_publish_locked().await
+    }
+
+    /// The scan itself. The caller must hold `scan_gate`.
+    async fn scan_and_publish_locked(&self) -> AgentRoster {
         let found = self.scan().await;
         // Kept so the fast loop can re-derive against fresh hook state without
         // paying for the two subprocesses again.
