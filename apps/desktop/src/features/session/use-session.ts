@@ -3,14 +3,19 @@ import {
   parseEditorPreferences,
   serializeEditorPreferences,
 } from '@gritty/editor';
-import { type RecoveryCandidate, toCoreError, type WorkspaceId } from '@gritty/protocol';
+import {
+  type RecoveryCandidate,
+  type SessionTab,
+  toCoreError,
+  type WorkspaceId,
+} from '@gritty/protocol';
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { core } from '../../core/client';
 import type { DocumentsController } from '../documents/use-documents';
 import type { EditorBinding } from '../editor/use-editor-binding';
 import type { ViewModes, ViewModesAction } from '../markdown/view-modes';
 import { buildSessionTabs, type Layout, parseLayout, serializeLayout } from './persisted-layout';
-import { type RestoreOutcome, runRestore } from './restore-flow';
+import { applyTabs, type RestoreOutcome, runRestore } from './restore-flow';
 import {
   initialSessionState,
   pendingChoices,
@@ -39,6 +44,12 @@ export interface SessionController {
   discard(path: string): void;
   dismissNotice(index: number): void;
   dismissSkipped(): void;
+  /**
+   * Put a workspace's persisted tabs back after it was opened by hand (T051).
+   * The startup restore runs once per WebView, so a workspace opened later
+   * cannot go through it; this is the same code path, on demand.
+   */
+  resumeTabs(workspaceId: WorkspaceId, tabs: readonly SessionTab[]): Promise<void>;
 }
 
 /**
@@ -278,5 +289,41 @@ export function useSession(deps: SessionDeps): SessionController {
   );
   const dismissSkipped = useCallback(() => dispatch({ type: 'dismissSkipped' }), []);
 
-  return { state, restoreAll, discardAll, recover, discard, dismissNotice, dismissSkipped };
+  /**
+   * Reopen a set of persisted tabs into a workspace that was just opened by
+   * hand (T051, the launcher's resume rail).
+   *
+   * The startup restore runs once per WebView, so a workspace opened later
+   * cannot go through it; this is the same `applyTabs` it uses, called on
+   * demand. Tabs whose file has gone are reported the same way too.
+   */
+  const resumeTabs = useCallback(async (workspaceId: WorkspaceId, tabs: readonly SessionTab[]) => {
+    const { skipped } = await applyTabs(
+      {
+        openFile: (id, path) => depsRef.current.documents.openFile(id, path, { quiet: true }),
+        applyOrder: (ids, activeId) => {
+          const { documents } = depsRef.current;
+          for (const [index, id] of ids.entries()) documents.reorder(id, index);
+          if (activeId !== null) documents.activate(activeId);
+        },
+        setViewMode: (documentId, mode) =>
+          depsRef.current.dispatchViewMode({ type: 'set', documentId, mode }),
+        restoreView: (documentId, view) => depsRef.current.editor.restoreView(documentId, view),
+      },
+      workspaceId,
+      tabs,
+    );
+    if (skipped.length > 0) dispatch({ type: 'restoreSettled', skipped });
+  }, []);
+
+  return {
+    state,
+    restoreAll,
+    discardAll,
+    recover,
+    discard,
+    dismissNotice,
+    dismissSkipped,
+    resumeTabs,
+  };
 }

@@ -21,8 +21,8 @@ use crate::operation::demo::StartDemoRequest;
 use crate::operation::registry::CancelOperationRequest;
 use crate::protocol::error::CoreError;
 use crate::session::wire::{
-    CandidatesRequest, DiscardSnapshotRequest, RecoverSnapshotRequest, RecoveryCandidate,
-    SessionRestoreResponse, UpdateSessionRequest,
+    CandidatesRequest, DiscardSnapshotRequest, LastSession, RecoverSnapshotRequest,
+    RecoveryCandidate, SessionRestoreResponse, UpdateSessionRequest,
 };
 use crate::shell::OpenExternalRequest;
 use crate::terminal::wire::{
@@ -87,6 +87,7 @@ fn export_bindings() {
     RecoverSnapshotRequest::export_all(&cfg).expect("export RecoverSnapshotRequest");
     DiscardSnapshotRequest::export_all(&cfg).expect("export DiscardSnapshotRequest");
     UpdateSessionRequest::export_all(&cfg).expect("export UpdateSessionRequest");
+    LastSession::export_all(&cfg).expect("export LastSession");
     Terminal::export_all(&cfg).expect("export Terminal");
     TerminalProfile::export_all(&cfg).expect("export TerminalProfile");
     ListProfilesRequest::export_all(&cfg).expect("export ListProfilesRequest");

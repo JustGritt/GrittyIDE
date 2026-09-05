@@ -47,6 +47,7 @@ export type { ExternalModificationState } from './generated/ExternalModification
 export type { ForgetWorkspaceRequest } from './generated/ForgetWorkspaceRequest';
 export type { HealthReport } from './generated/HealthReport';
 export type { KillTerminalRequest } from './generated/KillTerminalRequest';
+export type { LastSession } from './generated/LastSession';
 export type { ListDecisionsRequest } from './generated/ListDecisionsRequest';
 export type { ListDirectoryRequest } from './generated/ListDirectoryRequest';
 export type { ListDirectoryResponse } from './generated/ListDirectoryResponse';

@@ -200,6 +200,7 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::terminal_kill,
             commands::terminal_list,
             commands::terminal_profiles,
+            commands::session_last_session,
             commands::workstreams_list,
             commands::workstreams_create,
             commands::workstreams_update,

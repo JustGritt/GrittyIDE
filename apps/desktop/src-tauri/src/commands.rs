@@ -21,8 +21,8 @@ use gritty_core::operation::{CancelOperationRequest, Operation};
 use gritty_core::protocol::actor::Actor;
 use gritty_core::protocol::ids::CorrelationId;
 use gritty_core::session::{
-    CandidatesRequest, DiscardSnapshotRequest, RecoverSnapshotRequest, RecoveryCandidate,
-    SessionRestoreResponse, UpdateSessionRequest,
+    CandidatesRequest, DiscardSnapshotRequest, LastSession, RecoverSnapshotRequest,
+    RecoveryCandidate, SessionRestoreResponse, UpdateSessionRequest,
 };
 use gritty_core::shell::OpenExternalRequest;
 use gritty_core::terminal::wire::{
@@ -497,6 +497,16 @@ pub async fn terminal_list(core: State<'_, Core>) -> Result<Vec<Terminal>, CoreE
         "terminal.list",
         move |_| async move { Ok(terminals.list()) },
     )
+    .await
+}
+
+/// `session.lastSession`
+#[tauri::command]
+pub async fn session_last_session(core: State<'_, Core>) -> Result<Option<LastSession>, CoreError> {
+    let session = core.session.clone();
+    guard("session.lastSession", move |correlation| async move {
+        session.last_session(correlation).await
+    })
     .await
 }
 
