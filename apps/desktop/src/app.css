@@ -2552,3 +2552,127 @@ textarea:focus-visible {
   border-top: 1px solid var(--border);
   background: var(--surface-chrome);
 }
+
+/* ---------------------------------------------------------------------------
+   The launcher's resume rail (T051, artboard 3b)
+
+   Only present when the core has something to offer, so the launcher stays a
+   single centred column the rest of the time.
+   --------------------------------------------------------------------------- */
+
+.launcher--with-rail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 420px);
+  align-items: stretch;
+}
+
+.launcher__rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md);
+  padding: var(--gap-md);
+  border-left: 1px solid var(--border);
+  background: var(--surface-chrome);
+  overflow: auto;
+  min-height: 0;
+}
+
+.launcher__rail-head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+.launcher__rail-when {
+  font-size: var(--text-meta);
+  color: var(--fg-muted);
+}
+
+.launcher__rail-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding: var(--gap-md);
+  border-radius: var(--radius-lg);
+  background: var(--accent-wash);
+}
+
+.launcher__rail-name {
+  font-size: var(--text-body);
+  font-weight: 600;
+}
+
+.launcher__rail-path {
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.launcher__rail-body {
+  margin: 0;
+  font-size: var(--text-control);
+  line-height: 1.5;
+  color: var(--fg-dim);
+}
+
+.launcher__rail-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  flex-wrap: wrap;
+}
+
+.launcher__rail-gone {
+  font-size: var(--text-control);
+  color: var(--error-text);
+}
+
+.launcher__rail-tabs ul {
+  list-style: none;
+  margin: var(--gap-sm) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.launcher__rail-tabs li {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+}
+
+.launcher__rail-tab {
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.launcher__rail-active {
+  font-size: var(--text-meta);
+  color: var(--accent-text);
+}
+
+.launcher__rail-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gap);
+  margin: 0;
+  padding: 10px 11px;
+  border-radius: var(--radius-lg);
+  background: var(--warn-wash);
+  font-size: var(--text-control);
+  line-height: 1.5;
+  color: var(--fg-dim);
+}
+
+.launcher__dot--warn {
+  background: var(--warn);
+  margin-top: 5px;
+}

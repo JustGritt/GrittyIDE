@@ -20,6 +20,7 @@ import {
   type ForgetWorkspaceRequest,
   type HealthReport,
   type KillTerminalRequest,
+  type LastSession,
   type ListDecisionsRequest,
   type ListDirectoryRequest,
   type ListDirectoryResponse,
@@ -158,6 +159,13 @@ export interface CoreClient {
     recover(request: RecoverSnapshotRequest): Promise<DocumentContent>;
     discard(request: DiscardSnapshotRequest): Promise<void>;
     update(request: UpdateSessionRequest): Promise<void>;
+    /**
+     * What the launcher offers to pick up again (T051): the workspace that is
+     * not open and the tabs it had. `null` while a workspace is open, without
+     * a database, or when the last workspace had no tabs — the recent list
+     * already covers that case.
+     */
+    lastSession(): Promise<LastSession | null>;
   };
   /**
    * Terminal sessions (T090). `spawn` starts the user's login shell in the
@@ -333,6 +341,7 @@ export function createCoreClient(
       recover: (request) => command<DocumentContent>('session.recover', { request }),
       discard: (request) => command<void>('session.discard', { request }),
       update: (request) => command<void>('session.update', { request }),
+      lastSession: () => command<LastSession | null>('session.lastSession'),
     },
     terminal: {
       spawn: (request) => command<Terminal>('terminal.spawn', { request }),

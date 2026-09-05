@@ -16,6 +16,7 @@ import { useEditorBinding } from './features/editor/use-editor-binding';
 import { ExplorerPanel } from './features/explorer/explorer-panel';
 import { useExplorer } from './features/explorer/use-explorer';
 import { Launcher } from './features/launcher/launcher';
+import { useLastSession } from './features/launcher/use-last-session';
 import { viewModesReducer } from './features/markdown/view-modes';
 import { OperationsPanel } from './features/operations/operations-panel';
 import { DEFAULT_LAYOUT, type Layout, PANE_LIMITS } from './features/session/persisted-layout';
@@ -76,6 +77,10 @@ export function App() {
   // and the queue replaces the editor body; both read this one controller, so
   // answering a question in either clears it in the other.
   const workstreams = useWorkstreams(workspace);
+  // What the previous window had open, for the launcher's resume rail (T051).
+  // Asked for whenever no workspace is open, which is exactly when the
+  // launcher is on screen — including after the user closes one mid-run.
+  const lastSession = useLastSession(workspace);
   const [islandOpen, setIslandOpen] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
   // Closing the workspace ends the queue with it: reopening should land in the
@@ -132,6 +137,25 @@ export function App() {
     // is left to whatever else wants it.
     onOpenPath: workspace ? undefined : () => setPathOpen(true),
   });
+
+  /**
+   * Open a workspace and, when asked, put its persisted tabs back. The startup
+   * restore runs once per WebView, so a workspace opened from the rail cannot
+   * go through it; `session.resumeTabs` is the same code path on demand.
+   */
+  const resume = useCallback(
+    async (root: string, withTabs: boolean) => {
+      const tabs = lastSession.value?.tabs ?? [];
+      setPathOpen(false);
+      const opened = await explorer.openFolder(root);
+      if (!withTabs || tabs.length === 0) return;
+      // `openFolder` reports its own failures; without a workspace there is
+      // nothing to reopen into.
+      const workspaceId = opened?.id;
+      if (workspaceId) await session.resumeTabs(workspaceId, tabs);
+    },
+    [explorer.openFolder, lastSession.value, session.resumeTabs],
+  );
 
   const sidebarBounds = useCallback(
     (root: HTMLElement) =>
@@ -232,6 +256,12 @@ export function App() {
           onPathOpenChange={setPathOpen}
           onOpen={openFolder}
           onPickFolder={() => openFolder()}
+          lastSession={lastSession.value}
+          onResume={(root, withTabs) => {
+            lastSession.dismiss();
+            void resume(root, withTabs);
+          }}
+          onDismissLastSession={lastSession.dismiss}
         />
       ) : null}
       {/* The dock stays mounted with no workspace open: T095 roots a shell in

@@ -1,8 +1,9 @@
-import type { RecentWorkspace } from '@gritty/protocol';
+import type { LastSession, RecentWorkspace } from '@gritty/protocol';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
 import type { Accelerator } from '../shell/open-shortcuts';
 import {
+  describeLastSession,
   formatRelativeTime,
   hasMore,
   parentOf,
@@ -23,6 +24,11 @@ import { type RecentsController, useRecents } from './use-recents';
  *
  * Presentational: every decision it makes lives in `recents.ts`, and the
  * history itself comes from the core.
+ *
+ * When the core has a last session to offer (T051, artboard 3b) the screen
+ * becomes two columns and the rail appears on the right. It only shows up when
+ * there is something the recents list does not already say — a workspace that
+ * is not open and had tabs in it — so it never repeats the row beside it.
  */
 export function Launcher({
   accelerator,
@@ -30,6 +36,9 @@ export function Launcher({
   onPathOpenChange,
   onOpen,
   onPickFolder,
+  lastSession,
+  onResume,
+  onDismissLastSession,
 }: {
   /** For the shortcut hints. Null until the core has reported its platform. */
   accelerator: Accelerator | null;
@@ -40,6 +49,11 @@ export function Launcher({
   onOpen(path: string): void;
   /** Open the native directory picker (the core shows it). */
   onPickFolder(): void;
+  /** What the previous window had open, when there is anything worth saying. */
+  lastSession: LastSession | null;
+  /** Open that workspace; `withTabs` reopens what was in it. */
+  onResume(root: string, withTabs: boolean): void;
+  onDismissLastSession(): void;
 }) {
   // Read here rather than in the shell: this component mounts only while no
   // workspace is open, which is exactly when the history is worth a snapshot.
@@ -66,7 +80,10 @@ export function Launcher({
   }
 
   return (
-    <section className="launcher" aria-labelledby="launcher-title">
+    <section
+      className={`launcher${lastSession ? ' launcher--with-rail' : ''}`}
+      aria-labelledby="launcher-title"
+    >
       <div className="launcher__panel">
         <div className="launcher__intro">
           {/* h2, not h1: the app bar's wordmark is the document's heading and
@@ -174,7 +191,104 @@ export function Launcher({
           Drop a folder anywhere in the window to open it as a workspace.
         </p>
       </div>
+
+      {lastSession && (
+        <LastSessionRail
+          last={lastSession}
+          now={now}
+          onResume={onResume}
+          onDismiss={onDismissLastSession}
+        />
+      )}
     </section>
+  );
+}
+
+/**
+ * The right-hand rail (artboard 3b): what the last window had open, and one
+ * click to get it back.
+ *
+ * The artboard offers "Restore all / Files only / Discard". Shells are not
+ * persisted per workspace and agent worktrees do not exist, so "all" and
+ * "files only" would be the same button pressed twice — this offers the two
+ * choices that actually differ, and Dismiss hides the rail without deleting
+ * anything (the tabs and any recovery snapshots stay where they are).
+ */
+function LastSessionRail({
+  last,
+  now,
+  onResume,
+  onDismiss,
+}: {
+  last: LastSession;
+  now: number;
+  onResume(root: string, withTabs: boolean): void;
+  onDismiss(): void;
+}) {
+  const { workspace, tabs, unsaved } = last;
+  return (
+    <aside className="launcher__rail" aria-label="Last session">
+      <div className="launcher__rail-head">
+        <span className="label">Last session</span>
+        <span className="launcher__spacer" />
+        <span className="launcher__rail-when">
+          {formatRelativeTime(workspace.lastOpenedAt, now)}
+        </span>
+      </div>
+
+      <div className="launcher__rail-card">
+        <div className="launcher__rail-name">{workspace.name}</div>
+        <code className="launcher__rail-path" title={workspace.root}>
+          {workspace.displayRoot}
+        </code>
+        <p className="launcher__rail-body">{describeLastSession(tabs.length, unsaved)}</p>
+        {workspace.exists ? (
+          <div className="launcher__rail-actions">
+            <button
+              type="button"
+              className="btn--primary"
+              onClick={() => onResume(workspace.root, true)}
+            >
+              Restore
+            </button>
+            <button type="button" onClick={() => onResume(workspace.root, false)}>
+              Open without them
+            </button>
+            <button type="button" className="btn--bare" onClick={onDismiss}>
+              Dismiss
+            </button>
+          </div>
+        ) : (
+          <div className="launcher__rail-actions">
+            {/* Nothing to open: say why rather than offering a button that
+                would fail. The history row beside it offers Forget. */}
+            <span className="launcher__rail-gone">That folder is no longer there.</span>
+            <button type="button" className="btn--bare" onClick={onDismiss}>
+              Dismiss
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="launcher__rail-tabs">
+        <span className="label">Open tabs</span>
+        <ul>
+          {tabs.map((tab) => (
+            <li key={tab.path}>
+              <span className="launcher__rail-tab">{tab.path}</span>
+              {tab.active && <span className="launcher__rail-active">active</span>}
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {unsaved > 0 && (
+        <p className="launcher__rail-note">
+          <span className="launcher__dot launcher__dot--warn" aria-hidden="true" />
+          Restoring keeps those buffers dirty; the files on disk are untouched.
+        </p>
+      )}
+    </aside>
   );
 }
 

@@ -38,6 +38,13 @@ The last two are the workstream domain (T200); their rules live in
 through the debounced writer: a workstream is committed by the command that
 creates it, so nothing is lost if the process dies a moment later.
 
+`session.lastSession` (T051) reads the newest `workspace` row together with
+its `workspace_tab` and `buffer_snapshot` rows to tell the launcher what the
+previous window had open. It answers `None` while a workspace is open, without
+a database, or when that workspace had no tabs — the history row alone is then
+the whole story. It changes no policy: the core still reopens the last
+workspace by itself.
+
 The `workspace` table is the startup screen's history (T049).
 `workspace.recents` reads it newest-first under a caller-supplied limit and
 `stat`s each root, so an entry whose directory is gone is shown as unavailable

@@ -377,6 +377,49 @@ impl SessionService {
 
     /// `session.restore`. Infallible: persistence trouble is reported in the
     /// response, never as a rejection, so the UI's rehydration always runs.
+    /// `session.lastSession` (T051): the workspace the launcher offers to pick
+    /// up again, and what was open in it.
+    ///
+    /// Deliberately *not* part of `restore`: restore runs once per WebView and
+    /// reopens the last workspace by itself, so by the time the launcher is on
+    /// screen the interesting question is a different one — "what did not come
+    /// back, and why". This answers that, and it answers it again after the
+    /// user closes a workspace mid-run, when restore will never run again.
+    ///
+    /// `None` when a workspace is open (the launcher is not showing), when
+    /// there is no database (the notices already say so), or when the last
+    /// workspace had no tabs — the history row is then the whole story.
+    pub async fn last_session(
+        &self,
+        correlation: CorrelationId,
+    ) -> Result<Option<LastSession>, CoreError> {
+        if self.workspaces.current(&correlation).is_some() {
+            return Ok(None);
+        }
+        let Some(database) = self.database.clone() else {
+            return Ok(None);
+        };
+        let home = home_directory();
+        self.blocking(database, move |db| {
+            let Some(workspace) = recents::load(db, 1, home.as_deref())?.into_iter().next() else {
+                return Ok(None);
+            };
+            let root = workspace.root.clone();
+            let rows = db.read(|conn| tabs::list(conn, &root))?;
+            let tabs: Vec<SessionTab> = rows.iter().filter_map(tab_from_row).collect();
+            if tabs.is_empty() {
+                return Ok(None);
+            }
+            let unsaved = db.read(|conn| snapshots::list_meta(conn, &root))?.len();
+            Ok(Some(LastSession {
+                workspace,
+                tabs,
+                unsaved: u32::try_from(unsaved).unwrap_or(u32::MAX),
+            }))
+        })
+        .await
+    }
+
     pub async fn restore(&self, correlation: CorrelationId) -> SessionRestoreResponse {
         let mut notices = self.notices();
         let current = self.workspaces.current(&correlation);
@@ -1256,6 +1299,207 @@ mod tests {
         h.flush().await;
         assert!(h.snapshot_row(&root, "notes.txt").is_some());
         assert_eq!(h.candidates(&ws).await.len(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_last_session_is_offered_only_once_there_is_something_to_offer() {
+        let data = TempDir::new("last-session");
+        let db = data.join(DB_FILE_NAME);
+        let dir = workspace_dir("last-session");
+        let h = start(&db, FAST);
+        let correlation = CorrelationId::new();
+
+        // Nothing has ever been opened.
+        assert!(
+            h.session
+                .last_session(correlation.clone())
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        let ws = h.open_ws(&dir);
+        h.flush().await;
+        assert!(
+            h.session
+                .last_session(correlation.clone())
+                .await
+                .unwrap()
+                .is_none(),
+            "a workspace is open, so the launcher is not showing"
+        );
+
+        // Opened, but nothing was ever in it: the history row is the whole story.
+        h.workspaces
+            .close(
+                &ws.id,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                correlation.clone(),
+            )
+            .unwrap();
+        h.flush().await;
+        assert!(
+            h.session
+                .last_session(correlation.clone())
+                .await
+                .unwrap()
+                .is_none(),
+            "a rail that only repeats the recents list has not earned its space"
+        );
+
+        // With tabs, it has something to say.
+        let ws = h.open_ws(&dir);
+        h.session
+            .update(
+                UpdateSessionRequest {
+                    workspace_id: Some(ws.id.clone()),
+                    tabs: Some(vec![
+                        SessionTab {
+                            path: WorkspacePath::parse("README.md").unwrap(),
+                            active: true,
+                            view_mode: None,
+                            cursor: None,
+                            anchor: None,
+                            scroll_line: None,
+                        },
+                        SessionTab {
+                            path: WorkspacePath::parse("src/main.rs").unwrap(),
+                            active: false,
+                            view_mode: None,
+                            cursor: None,
+                            anchor: None,
+                            scroll_line: None,
+                        },
+                    ]),
+                    preferences: None,
+                    layout: None,
+                },
+                correlation.clone(),
+            )
+            .await
+            .unwrap();
+        h.workspaces
+            .close(
+                &ws.id,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                correlation.clone(),
+            )
+            .unwrap();
+        h.flush().await;
+
+        let last = h
+            .session
+            .last_session(correlation.clone())
+            .await
+            .unwrap()
+            .expect("the workspace that was just closed");
+        assert_eq!(last.workspace.root, root_of(&dir).display().to_string());
+        assert!(last.workspace.exists);
+        assert_eq!(
+            last.tabs
+                .iter()
+                .map(|tab| tab.path.as_str())
+                .collect::<Vec<_>>(),
+            ["README.md", "src/main.rs"]
+        );
+        assert_eq!(last.unsaved, 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_last_session_counts_unsaved_buffers_and_reports_a_missing_root() {
+        let data = TempDir::new("last-session-unsaved");
+        let db = data.join(DB_FILE_NAME);
+        let dir = workspace_dir("last-session-unsaved");
+        let correlation = CorrelationId::new();
+
+        // A window that closed with unsaved work in it — a crash or a quit,
+        // not a user closing the workspace, which would have discarded it.
+        {
+            let previous = start(&db, FAST);
+            let ws = previous.open_ws(&dir);
+            let opened = previous.open_doc(&ws, "README.md").await;
+            previous
+                .update(
+                    &opened.document.id,
+                    opened.document.current_version,
+                    "# edited\n",
+                )
+                .await;
+            previous
+                .session
+                .update(
+                    UpdateSessionRequest {
+                        workspace_id: Some(ws.id.clone()),
+                        tabs: Some(vec![SessionTab {
+                            path: WorkspacePath::parse("README.md").unwrap(),
+                            active: true,
+                            view_mode: None,
+                            cursor: None,
+                            anchor: None,
+                            scroll_line: None,
+                        }]),
+                        preferences: None,
+                        layout: None,
+                    },
+                    correlation.clone(),
+                )
+                .await
+                .unwrap();
+            previous.flush().await;
+            wait_for("the dirty buffer to be snapshotted", || {
+                previous
+                    .database
+                    .as_ref()
+                    .is_some_and(|db| db.read(snapshots::count).unwrap_or(0) > 0)
+            })
+            .await;
+            std::mem::forget(previous);
+        }
+
+        let h = start(&db, FAST);
+        let last = h
+            .session
+            .last_session(correlation.clone())
+            .await
+            .unwrap()
+            .expect("the workspace the window closed on");
+        assert_eq!(last.tabs.len(), 1);
+        assert_eq!(
+            last.unsaved, 1,
+            "restoring keeps the buffer dirty, so the rail has to say so"
+        );
+        assert!(last.workspace.exists);
+
+        // The directory disappears: the rail still knows about it, and says the
+        // root is gone rather than offering to reopen nothing.
+        fs::remove_dir_all(dir.path()).unwrap();
+        let gone = h
+            .session
+            .last_session(correlation)
+            .await
+            .unwrap()
+            .expect("still known, just not there");
+        assert!(!gone.workspace.exists);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn without_a_database_there_is_no_last_session_to_offer() {
+        let data = TempDir::new("last-session-nodb");
+        let h = start_with(
+            &data.join(DB_FILE_NAME),
+            FAST,
+            SessionStore::unavailable("no data directory"),
+        );
+        assert!(
+            h.session
+                .last_session(CorrelationId::new())
+                .await
+                .unwrap()
+                .is_none(),
+            "the notices already explain that nothing is being saved"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

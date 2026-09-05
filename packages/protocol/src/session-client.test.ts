@@ -71,6 +71,29 @@ describe('session client', () => {
     });
   });
 
+  it('offers the last session only when the core has one, and takes no arguments', async () => {
+    const { transport, core } = client();
+    transport.handlers.set('session_last_session', () => ({
+      workspace: {
+        root: '/repo',
+        displayRoot: '~/repo',
+        name: 'repo',
+        lastOpenedAt: 42,
+        exists: true,
+      },
+      tabs: [{ path: 'README.md', active: true }],
+      unsaved: 1,
+    }));
+    await expect(core.session.lastSession()).resolves.toMatchObject({
+      unsaved: 1,
+      workspace: { name: 'repo', exists: true },
+    });
+    expect(transport.calls.find((c) => c.command === 'session_last_session')?.args).toBeUndefined();
+
+    transport.handlers.set('session_last_session', () => null);
+    await expect(core.session.lastSession()).resolves.toBeNull();
+  });
+
   it('surfaces a core rejection as a CoreError', async () => {
     const { transport, core } = client();
     transport.handlers.set('session_recover', () => {

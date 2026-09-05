@@ -27,6 +27,7 @@ export const COMMANDS = {
   'session.recover': 'session_recover',
   'session.discard': 'session_discard',
   'session.update': 'session_update',
+  'session.lastSession': 'session_last_session',
   'terminal.spawn': 'terminal_spawn',
   'terminal.write': 'terminal_write',
   'terminal.resize': 'terminal_resize',

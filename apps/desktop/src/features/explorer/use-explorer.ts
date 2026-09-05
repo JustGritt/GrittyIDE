@@ -89,12 +89,15 @@ export function useExplorer(options: ExplorerOptions = {}) {
     }
   }, [workspace, root, load]);
 
-  const run = useCallback(async (action: () => Promise<unknown>) => {
+  /** Runs an action, reporting a refusal instead of throwing. `undefined` on failure. */
+  const run = useCallback(async <T>(action: () => Promise<T>): Promise<T | undefined> => {
     try {
-      await action();
+      const result = await action();
       setError(null);
+      return result;
     } catch (cause: unknown) {
       setError(toCoreError(cause));
+      return undefined;
     }
   }, []);
 
@@ -125,6 +128,8 @@ export function useExplorer(options: ExplorerOptions = {}) {
     [workspace, load],
   );
 
+  /** Returns the workspace that was opened, so a caller can act on it at once
+   *  rather than waiting for the state to come back around (T051). */
   const openFolder = useCallback(
     (path?: string, force = false) =>
       run(async () => {
@@ -132,6 +137,7 @@ export function useExplorer(options: ExplorerOptions = {}) {
         const opened = await core.workspace.open(path, force ? { force } : undefined);
         refused.current = null;
         if (opened) dispatch({ type: 'workspace', workspace: opened });
+        return opened;
       }),
     [run],
   );
