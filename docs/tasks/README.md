@@ -37,8 +37,8 @@ domain abstraction before its upstream contract exists.
 | [T222](T222-agent-providers.md) | More providers: Codex first, then what can be verified | 3 | T220, T221 | not yet started |
 | [T223](T223-agent-attention.md) | Attention: notify when an agent needs you, and link it to the work | 3 | T200, T210, T220, T221 | not yet started |
 | [T224](T224-reveal-terminal.md) | Reveal the terminal a session is running in | 3 | T220 | not yet started |
-| [T230](T230-agent-timeline.md) | Agent timeline: what a session is actually doing | 3 | T020, T220 | not yet started |
-| [T231](T231-agent-rail.md) | The agent rail: a dedicated region for running agents | 3 | T046, T060, T220, T230 | not yet started |
+| [T230](T230-agent-timeline.md) | Agent timeline: what a session is actually doing | 3 | T020, T220 | review |
+| [T231](T231-agent-rail.md) | The agent rail: a dedicated region for running agents | 3 | T046, T060, T220, T230 | review |
 | [T232](T232-timeline-view.md) | The timeline view, and the files an agent touched | 3 | T030, T230, T231 | not yet started |
 | T300–T410 | Agent protocol, runs, orchestration | 4–5 | T200, T210 | not yet specified |
 

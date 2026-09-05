@@ -150,21 +150,18 @@ bounded tail. Both bounds are constant, so the O(1)-in-file-size property
 survives — but a provider added without checking where its identity lives will
 quietly lose it.
 
-## Specified but not built (T221–T232)
+## The timeline (T230)
 
-Everything above this line is implemented. Everything below is written down and
-not yet built; nothing here may be described as behaviour Gritty has.
-
-**The timeline (T230), and why the roster is not the whole answer.** The scan
-above reads a *fixed tail* of each transcript to produce one roster line. That
-is the right shape for "which agents are running" and the wrong one for "what is
-this one doing". T230 adds a **follower** beside the scanner: given a session
-and a byte offset, it parses only the bytes appended since, which makes a live
-feed cost the same on a 400 MB transcript as on a 4 KB one.
+The scan above reads a *fixed tail* of each transcript to produce one roster
+line. That is the right shape for "which agents are running" and the wrong one
+for "what is this one doing", so `gritty-agents` carries a **follower** beside
+the scanner: given a session and a byte offset, `follow` parses only the bytes
+appended since, which makes a live feed cost the same on a 400 MB transcript as
+on a 4 KB one.
 
 ```
    scan()    fixed tail of every transcript   → roster      (6 s loop)
-   follow()  new bytes of the open one        → timeline    (fast loop, ~300 ms)
+   follow()  new bytes of the open one        → timeline    (fast loop, 400 ms)
 ```
 
 Nothing about this needs the agent's cooperation. Claude Code's transcript
@@ -173,19 +170,51 @@ and `tool_use` content blocks, `type=user` with `tool_result`, `type=system` for
 notices, `file-history-delta` for files touched, and `isSidechain` marking
 subagent work. The entries are folded into a provider-neutral
 `AgentTimelineEntry` in the core (hard rule 4), bounded there (rule 13), held in
-a ring that drops from the oldest end and *reports* the loss — the terminal's
-rule, not a new one — and delivered in coalesced batches (rule 8).
+a ring of 500 that drops from the oldest end and *reports* the loss — the
+terminal's rule, not a new one — and delivered in coalesced batches, one per
+tick per session, with **nothing at all** emitted while a transcript is
+unchanged (rule 8).
 
-`file-history-delta.trackingPath` is already relative to the agent's project
-root, so a touched file inside the open workspace resolves to a `WorkspacePath`
-the UI may open, and one outside it crosses the protocol as a display string
-with no openable path (ADR-010).
+Four things the follower refuses to do, each because the alternative lies:
+
+- a **partial final line** is not consumed and not counted into the next offset.
+  The agent is appending while we read, so half a record is re-read on the next
+  tick rather than parsed into a truncated entry;
+- a file **shorter than the offset** was truncated or replaced, so the follower
+  restarts from a bounded tail and sets `restarted`. The ring is cleared and the
+  UI is told its view reset, instead of two unrelated files being spliced
+  together. The same flag covers a burst larger than one call may read (1 MiB),
+  which is a gap in the feed by another name;
+- a line that does not parse is **skipped**, and non-UTF-8 costs a glyph rather
+  than the batch around it;
+- an entry's time comes from the record's own `timestamp` or is **absent**.
+  Stamping it with the read time would make a static timeline look like it was
+  moving.
+
+`file-history-delta.trackingPath` is relative to the agent's working directory
+when the file is inside it and absolute when it is not. Both are resolved
+lexically — no `stat` per entry on a loop that runs twice a second — against the
+**open workspace root**: inside it the entry carries a `WorkspacePath` the UI
+may open, outside it the entry carries a display string and no openable path
+(ADR-010). Because that resolution is fixed at read time, an open timeline
+**closes** when the workspace changes rather than quietly re-pointing itself.
 
 **Two loops, deliberately.** Discovery stays at 6 s because `ps` and `lsof` are
-its cost. The fast loop follows only the timeline that is open and stats the
-hook state directory, both of which are cheap enough to run three times a
-second — and the hook state *must* be on the fast loop, because a permission
+its cost. The fast loop follows only the timelines that are open (at most eight;
+the rail opens one), which is what makes 400 ms affordable. Measured in a
+release build on a 400 MB transcript: **1.4–3.4 ms** for a cold open, **~25 µs**
+for a tick that finds nothing appended, and **~55 µs** for one that finds a
+turn's worth of records. A cold open of a 5 KB transcript costs ~85 µs, so the
+cost tracks the 256 KiB window and not the file. A tick with nothing open does
+no I/O at all.
+
+T221 will put the hook state directory on this same loop, because a permission
 prompt reported six seconds late is not worth reporting.
+
+## Specified but not built (T221, T222, T232)
+
+Everything above this line is implemented. Everything below is written down and
+not yet built; nothing here may be described as behaviour Gritty has.
 
 **A third evidence source (T221, ADR-018).** The `WAITING_FOR_APPROVAL` value
 this document refuses is earned by asking the agent instead of guessing:
@@ -227,11 +256,19 @@ state or elapsed-time threshold may produce it, which satisfies rule 12 by
 construction. A new `activitySource` field (`PROCESS | TRANSCRIPT | HOOK`) says
 which source produced a verdict, so a row is attributable rather than magic.
 
-**The rail (T231, T232).** The roster and the timeline surface in a third region
-of the shell, to the right of the editor, with its own splitter: a list of
-sessions coloured by status, and beneath it the selected session's feed and the
-files it touched. Clicking a touched file opens it in the editor — the thing a
-terminal multiplexer structurally cannot do.
+**The rail (T231, built; T232, not yet).** The roster and the timeline surface
+in a third region of the shell, to the right of the editor, with its own
+splitter: a list of sessions coloured by status, and beneath it the selected
+session's feed and the files it touched. Clicking a touched file opens it in the
+editor — the thing a terminal multiplexer structurally cannot do.
+
+T231 shipped the region and the list: the third child of `shell__body`, a
+right-anchored splitter driving `--agent-rail-width`, `agentRailWidth` and the
+collapsed flag in the layout blob, one row per session in the core's ranking,
+the five status labels below, and selection that opens exactly one timeline
+follower (`⌥G` toggles the rail; collapsing it closes the follower, because an
+invisible one is waste). The body under the list is a placeholder until T232
+draws the feed and the files touched.
 
 It is deliberately **not** a tab in the document strip. Agent sessions and open
 files are different kinds of thing, and `SessionTab.path` is a required
