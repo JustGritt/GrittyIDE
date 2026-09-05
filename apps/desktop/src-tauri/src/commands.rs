@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::Once;
 use std::time::Instant;
 
+use gritty_core::agent_session::{AgentRoster, ListAgentSessionsRequest};
 use gritty_core::document::{
     CloseDocumentRequest, Document, DocumentContent, DocumentStatusRequest, OpenDocumentRequest,
     ReloadDocumentRequest, SaveDocumentRequest, UpdateDocumentRequest,
@@ -26,8 +27,8 @@ use gritty_core::session::{
 };
 use gritty_core::shell::OpenExternalRequest;
 use gritty_core::terminal::wire::{
-    KillTerminalRequest, ListProfilesRequest, RenameTerminalRequest, ResizeTerminalRequest,
-    SpawnTerminalRequest, Terminal, TerminalProfile, WriteTerminalRequest,
+    KillTerminalRequest, ListProfilesRequest, RecolorTerminalRequest, RenameTerminalRequest,
+    ResizeTerminalRequest, SpawnTerminalRequest, Terminal, TerminalProfile, WriteTerminalRequest,
 };
 use gritty_core::workspace::{
     CloseWorkspaceRequest, DEFAULT_LIST_BUDGET, ForgetWorkspaceRequest, ListDirectoryRequest,
@@ -457,6 +458,20 @@ pub async fn terminal_rename(
     .await
 }
 
+/// `terminal.recolor`
+#[tauri::command]
+pub async fn terminal_recolor(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Terminal, CoreError> {
+    let terminals = core.terminals.clone();
+    guard("terminal.recolor", move |_| async move {
+        let request: RecolorTerminalRequest = parse_request(request)?;
+        terminals.recolor(request)
+    })
+    .await
+}
+
 /// `terminal.kill`
 #[tauri::command]
 pub async fn terminal_kill(
@@ -506,6 +521,37 @@ pub async fn session_last_session(core: State<'_, Core>) -> Result<Option<LastSe
     let session = core.session.clone();
     guard("session.lastSession", move |correlation| async move {
         session.last_session(correlation).await
+    })
+    .await
+}
+
+/// `agents.list`
+///
+/// The roster of agent sessions running on this machine (T220). Read-only:
+/// there is no command that acts on one, because Gritty does not own them.
+#[tauri::command]
+pub async fn agents_list(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentRoster, CoreError> {
+    let agents = core.agents.clone();
+    guard("agents.list", move |_| async move {
+        let _request: ListAgentSessionsRequest = parse_request(request)?;
+        Ok(agents.list().await)
+    })
+    .await
+}
+
+/// `agents.refresh`
+#[tauri::command]
+pub async fn agents_refresh(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentRoster, CoreError> {
+    let agents = core.agents.clone();
+    guard("agents.refresh", move |_| async move {
+        let _request: ListAgentSessionsRequest = parse_request(request)?;
+        Ok(agents.refresh().await)
     })
     .await
 }

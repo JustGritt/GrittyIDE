@@ -4,6 +4,7 @@ import { type ITheme, Terminal } from '@xterm/xterm';
 import { useEffect, useRef } from 'react';
 import '@xterm/xterm/css/xterm.css';
 import type { OutputBus } from './output-bus';
+import { terminalChordIndex } from './terminal-chords';
 import { describeTerminal } from './terminal-reducer';
 
 /**
@@ -69,6 +70,12 @@ export function TerminalView({
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(container);
+    // ⌥1…⌥9 belong to the dock, not to the shell. Refusing the chord here stops
+    // xterm sending it to the PTY; the panel's own handler calls
+    // `preventDefault`, which stops the browser inserting the character Option
+    // composed (⌥1 is `¡`) into xterm's helper textarea. Both are needed —
+    // neither alone silences it.
+    terminal.attachCustomKeyEventHandler((event) => terminalChordIndex(event) === null);
     term.current = terminal;
     fit.current = fitAddon;
 

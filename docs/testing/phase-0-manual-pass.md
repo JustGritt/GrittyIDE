@@ -8,9 +8,9 @@ this machine.
 
 This is every outstanding human check in one ordered session. It replaces the
 "Not executed (human WKWebView pass)" lists spread across the T040, T045, T048,
-T049, T050, T060 and T090 completion reports.
+T049, T050, T060, T090, T096 and T098 completion reports.
 
-- **Time:** about 90 minutes, in six sessions you can run separately.
+- **Time:** about 105 minutes, in seven sessions you can run separately.
 - **Fills:** the `–` rows in `docs/testing/platform-matrix.md`, the perceptual
   rows of `docs/plans/phase-0-spike.md` §C, and the §D go/no-go answers.
 - **Record:** tick each step, note anything surprising, and keep the log file.
@@ -235,7 +235,8 @@ Rows filled: all seven Markdown rows.
 
 ## Session 4 — Terminal, T090 (~15 min)
 
-Any workspace; open the Terminal dock at the bottom (collapsed by default).
+Any workspace; open the Terminal dock at the bottom (collapsed by default —
+click the `TERMINAL` label). Session 7 covers the bar itself.
 
 | # | Do | Expect |
 |---|---|---|
@@ -244,9 +245,9 @@ Any workspace; open the Terminal dock at the bottom (collapsed by default).
 | 4.3 | `vim` a file, `:q`; then `less` a long file, `q`; then `top`, `q` | All three draw, redraw on resize, and exit cleanly |
 | 4.4 | Run `ping example.com`, press Ctrl+C | Interrupted immediately |
 | 4.5 | `yes` | UI stays responsive; a yellow `[gritty] N bytes of output dropped` marker appears. Ctrl+C to stop |
-| 4.6 | Open three terminals, type something distinct in each, switch tabs | Scrollback survives every switch |
-| 4.7 | In a tab run `sleep 300 &`, note the pid, close the tab, then `pgrep -f "sleep 300"` | No output — the job died with the session |
-| 4.8 | Type `exit` in a tab | The tab stays, showing its exit status; it does not vanish |
+| 4.6 | Open three terminals, type something distinct in each, switch pills | Scrollback survives every switch |
+| 4.7 | In a session run `sleep 300 &`, note the pid, press its ✕, then `pgrep -f "sleep 300"` | No output — the job died with the session |
+| 4.8 | Type `exit` in a session | The pill stays, showing its exit status; it does not vanish |
 | 4.9 | `pgrep -f zsh \| wc -l`, quit Gritty (Cmd+Q), `pgrep -f zsh \| wc -l` again | The same number — no shell survives the quit |
 
 Rows filled: interactive shell, tabs/scrollback/exit status, and the human
@@ -302,6 +303,48 @@ Rows filled: Build (launchable bundle), the packaged-app halves of the worker,
 XSS, external-link and data-directory rows.
 
 ---
+
+## Session 7 — Terminal dock, T096 / T098 (~15 min)
+
+The chrome, not the PTY. Session 4 is the shell; this is the row above it. Open
+a workspace, and leave a second window's worth of shells running.
+
+| # | Do | Expect |
+|---|---|---|
+| 7.1 | Look at the dock collapsed, then expanded | One 32px row either way. Collapsed, the pills are still readable |
+| 7.2 | With the dock collapsed, click a pill | The dock opens onto that session |
+| 7.3 | Open a shell at the root, `cd crates/terminal` in another, and one with no folder open | The pills read `zsh GrittyIDE`, `zsh crates/terminal` and `zsh ~`. The `cd`-ed one keeps the directory it *started* in — the pill is the rooting, not the cwd |
+| 7.4 | Click into a terminal so it has focus, press ⌥2 | Switches to the second session. Nothing is printed and nothing reaches the shell |
+| 7.5 | Press ⌥7 with three sessions open | Nothing happens, and nothing is typed |
+| 7.6 | Start a rename (F2), press ⌥1 while typing | The character goes into the field; no session switch |
+| 7.7 | Open the island (⌥A) onto a decision with options, press ⌥1 | It answers the decision. The dock does not switch |
+| 7.8 | Press ✕ on a running pill | The shell dies, the pill stays, its dot turns red and it reads `exit N` |
+| 7.9 | Press ✕ again on that pill | The pill goes |
+| 7.10 | Right-click a running pill → Close | Gone in one step, no intermediate state |
+| 7.11 | Right-click a pill → Rename, and double-click another | Both open the field; only one at a time; the row does not jump |
+| 7.12 | Click the caret half of "New terminal" | Only `available` profiles are listed; picking one changes the caret's label and the next shell |
+| 7.13 | Quit and relaunch | The picked profile is still selected |
+| 7.14 | Open `⋯` | It opens *upward*, fully on screen. Adding a custom shell and changing the font still work, and the bar does not grow |
+| 7.15 | Drag the dock's top edge to its smallest | The row survives at 120px; the terminal below it is still usable |
+| 7.16 | Switch macOS to Light appearance | The bar, pills, dots and the split button all re-colour; nothing is unreadable |
+
+Then T098, on the same shells:
+
+| # | Do | Expect |
+|---|---|---|
+| 7.17 | Right-click a pill → Blue | A blue bar on the pill's left edge. The dot is unchanged and still says whether the shell is alive |
+| 7.18 | Terminate that shell with ✕ | The bar stays blue; the dot turns red. Two facts, two channels |
+| 7.19 | Reopen the menu on it | "Blue" is ticked; the others are not |
+| 7.20 | → No colour | The bar goes; nothing takes its place |
+| 7.21 | Colour three shells differently, then reload the window (⌘R in the dev build) | Every colour comes back with its session — it is core state, not the panel's |
+| 7.22 | Open `crates/terminal/src/system.rs`, then "New terminal" | The shell starts in `crates/terminal/src`, and the pill says `crates/terminal/src` |
+| 7.23 | Switch to a `README.md` tab, then "New terminal" | The workspace root, as before. Hover "New terminal" first — the tooltip says where it will land |
+| 7.24 | Close every editor tab, then "New terminal" | The workspace root |
+| 7.25 | Open a file, delete its folder in Finder, then "New terminal" | A shell at the workspace root, with no error — the fallback, not a failed spawn |
+| 7.26 | With no folder open at all, "New terminal" | `~`, as before |
+| 7.27 | In Light appearance, colour a pill each of the six | All six are visible against the bar; none disappears |
+
+Rows filled: the T096 and T098 completion reports' "not yet exercised by a pointer".
 
 ## Then: the three questions that actually decide ADR-001
 

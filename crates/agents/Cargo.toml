@@ -1,0 +1,16 @@
+[package]
+name = "gritty-agents"
+description = "Gritty agent session discovery: local coding-agent sessions read from process and transcript evidence"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

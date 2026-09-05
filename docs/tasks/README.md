@@ -21,6 +21,9 @@ domain abstraction before its upstream contract exists.
 | [T060](T060-session-persistence.md) | Session persistence + recovery | 0/1B | T030, T040 | done |
 | [T090](T090-terminal-pty.md) | Terminal (PTY) spike | 0/2 | T010 | done |
 | [T095](T095-terminal-profiles.md) | Terminal shell profiles and rooting | 0/2 | T090, T060 | done |
+| [T096](T096-terminal-chrome.md) | Terminal chrome from design artboard 8a | 0/2 | T047, T048, T090, T095 | review |
+| [T097](T097-shell-integration-blocks.md) | Shell integration (OSC 133) and command blocks | 2 | T090, T095, T096 | not yet started |
+| [T098](T098-terminal-colours-and-rooting.md) | Terminal session colours, and starting where you work | 0/2 | T047, T090, T095, T096 | review |
 | Phase 0 tests | `docs/plans/phase-0-spike.md` sections B–D | 0 | T060, T090 | in-progress |
 | ADR-001 | Confirm or reject Tauri | 0 | Phase 0 tests | todo |
 | T070 | File watcher | 1A/2 | T020, ADR-001 | not yet specified |
@@ -29,6 +32,7 @@ domain abstraction before its upstream contract exists.
 | T110 | Diagnostics | 2 | ADR-001 | not yet specified |
 | [T200](T200-workstream-model.md) | Workstream model + decisions (Gate C) | 3 | T010, T020, T060 | review |
 | [T210](T210-workstream-ui.md) | Workstream UI: the island and the attention queue | 3 | T200 | review |
+| [T220](T220-agent-session-discovery.md) | Agent session discovery: what is running, and on what | 3 | T010, T020, T210 | review |
 | T300–T410 | Agent protocol, runs, orchestration | 4–5 | T200, T210 | not yet specified |
 
 ## Dependency graph (architecture addendum §2)
@@ -50,6 +54,8 @@ T110 Diagnostics ─────────────┘
 
 T200 Workstream model (done: state machine, decisions, persistence)
  └─ T210 Workstream UI
+     ├─ T220 Agent session discovery (read-only; observes agents Gritty
+     │        does not own, so it does not gate on T300)
      └─ T300 Agent protocol + deterministic fake agent
          ├─ T310 First real agent
          ├─ T320 Context manifest

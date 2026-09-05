@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use gritty_core::CORE_EVENT_CHANNEL;
 use gritty_core::CoreError;
+use gritty_core::agent_session::{AgentDiscoveryConfig, AgentSessionManager};
 use gritty_core::document::{DocumentLimits, DocumentManager};
 use gritty_core::event::{EventBus, EventEnvelope, EventSink, FanOutSink};
 use gritty_core::file_drop::FileDropService;
@@ -51,6 +52,7 @@ pub struct Core {
     pub session: Arc<SessionService>,
     pub terminals: Arc<TerminalManager>,
     pub workstreams: Arc<WorkstreamManager>,
+    pub agents: Arc<AgentSessionManager>,
 }
 
 /// Delivers every envelope on the single core event channel. Failures are
@@ -119,7 +121,21 @@ impl Core {
             receiver,
             WriterConfig::default(),
         );
-        let workstreams = WorkstreamManager::new(handle, events, workspaces.clone(), workstream_db);
+        let workstreams = WorkstreamManager::new(
+            handle.clone(),
+            events.clone(),
+            workspaces.clone(),
+            workstream_db,
+        );
+        // Discovery of *other* agents on this machine (T220). Read-only, and
+        // started here rather than lazily so the roster is warm by the time the
+        // island first asks for it.
+        let agents = AgentSessionManager::start(
+            handle,
+            events,
+            workspaces.clone(),
+            AgentDiscoveryConfig::for_current_home(),
+        );
         Self {
             registry,
             workspaces,
@@ -129,6 +145,7 @@ impl Core {
             session,
             terminals,
             workstreams,
+            agents,
         }
     }
 
@@ -148,6 +165,8 @@ impl Core {
         // Terminals first: a shell left behind outlives the window, and its
         // output would arrive after the session writer has been flushed.
         self.terminals.shutdown();
+        // Stops the discovery poll so no scan outlives the window.
+        self.agents.shutdown();
         tauri::async_runtime::block_on(async {
             if !self.session.flush(SHUTDOWN_GRACE).await {
                 tracing::warn!("session writer did not flush before exit");

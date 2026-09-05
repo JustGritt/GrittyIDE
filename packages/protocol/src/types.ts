@@ -5,7 +5,13 @@ import type { CoreEvent } from './generated/CoreEvent';
 import type { EventMeta } from './generated/EventMeta';
 
 export type { Actor } from './generated/Actor';
+export type { AgentActivity } from './generated/AgentActivity';
+export type { AgentEvidence } from './generated/AgentEvidence';
+export type { AgentProvider } from './generated/AgentProvider';
+export type { AgentRoster } from './generated/AgentRoster';
 export type { AgentRunId } from './generated/AgentRunId';
+export type { AgentSession } from './generated/AgentSession';
+export type { AgentToolCall } from './generated/AgentToolCall';
 export type { CancelOperationRequest } from './generated/CancelOperationRequest';
 export type { CandidatesRequest } from './generated/CandidatesRequest';
 export type { CloseDocumentRequest } from './generated/CloseDocumentRequest';
@@ -48,6 +54,7 @@ export type { ForgetWorkspaceRequest } from './generated/ForgetWorkspaceRequest'
 export type { HealthReport } from './generated/HealthReport';
 export type { KillTerminalRequest } from './generated/KillTerminalRequest';
 export type { LastSession } from './generated/LastSession';
+export type { ListAgentSessionsRequest } from './generated/ListAgentSessionsRequest';
 export type { ListDecisionsRequest } from './generated/ListDecisionsRequest';
 export type { ListDirectoryRequest } from './generated/ListDirectoryRequest';
 export type { ListDirectoryResponse } from './generated/ListDirectoryResponse';
@@ -72,6 +79,7 @@ export type { PersistenceStatusPayload } from './generated/PersistenceStatusPayl
 export type { RaiseDecisionRequest } from './generated/RaiseDecisionRequest';
 export type { RecentWorkspace } from './generated/RecentWorkspace';
 export type { RecentWorkspacesRequest } from './generated/RecentWorkspacesRequest';
+export type { RecolorTerminalRequest } from './generated/RecolorTerminalRequest';
 export type { RecoverSnapshotRequest } from './generated/RecoverSnapshotRequest';
 export type { RecoveryCandidate } from './generated/RecoveryCandidate';
 export type { RecoveryState } from './generated/RecoveryState';
@@ -91,6 +99,7 @@ export type { StartDemoRequest } from './generated/StartDemoRequest';
 export type { SymlinkInfo } from './generated/SymlinkInfo';
 export type { JsonValue } from './generated/serde_json/JsonValue';
 export type { Terminal } from './generated/Terminal';
+export type { TerminalColor } from './generated/TerminalColor';
 export type { TerminalExitedPayload } from './generated/TerminalExitedPayload';
 export type { TerminalId } from './generated/TerminalId';
 export type { TerminalOutputPayload } from './generated/TerminalOutputPayload';

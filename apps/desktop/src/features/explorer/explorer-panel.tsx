@@ -33,7 +33,8 @@ export function ExplorerPanel({
    * instances would mean two subscriptions and two trees.
    */
   explorer: ExplorerController;
-  onOpenFile?: (workspaceId: WorkspaceId, path: string) => void;
+  /** `preview` is a single click — open it for a look, not to keep. */
+  onOpenFile?: (workspaceId: WorkspaceId, path: string, preview: boolean) => void;
 }) {
   const { state } = explorer;
   const [pathInput, setPathInput] = useState('');
@@ -48,7 +49,9 @@ export function ExplorerPanel({
   const hiddenCount = countHidden(state);
   const workspaceId = state.workspace?.id;
   const openFile =
-    onOpenFile && workspaceId ? (path: string) => onOpenFile(workspaceId, path) : undefined;
+    onOpenFile && workspaceId
+      ? (path: string, preview: boolean) => onOpenFile(workspaceId, path, preview)
+      : undefined;
 
   return (
     <section className="explorer" aria-labelledby="explorer-title">
@@ -156,7 +159,7 @@ function TreeRow({
   onReload: (node: ExplorerNode) => void;
   onLoadMore: (node: ExplorerNode) => void;
   onCancel: (node: ExplorerNode) => Promise<void>;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, preview: boolean) => void;
 }) {
   const indent = { paddingLeft: `${0.5 + row.depth * 1.1}rem` };
   switch (row.kind) {
@@ -183,8 +186,11 @@ function TreeRow({
             <button
               type="button"
               className={`tree__name tree__name--file${entry.hidden ? ' tree__name--hidden' : ''}`}
-              onClick={() => onOpenFile(node.path)}
-              title={`Open ${node.path}`}
+              // A single click previews; the double click that follows it
+              // keeps the same tab, so there is no click delay to pay for.
+              onClick={() => onOpenFile(node.path, true)}
+              onDoubleClick={() => onOpenFile(node.path, false)}
+              title={`Open ${node.path} (double-click to keep the tab)`}
             >
               {entry.name}
             </button>

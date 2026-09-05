@@ -874,6 +874,13 @@ textarea:focus-visible {
   color: var(--fg);
 }
 
+/* Opened for a look, not to keep: the next single click in the explorer takes
+   this tab's place. Italic is the convention, and it says "provisional"
+   without spending a badge or a colour that means something else here. */
+.tabs__tab--preview {
+  font-style: italic;
+}
+
 /* The unsaved marker leads the name, so a column of tabs reads down one edge. */
 .tabs__dot {
   display: inline-block;
@@ -902,6 +909,82 @@ textarea:focus-visible {
 .tabs__close:hover:not(:disabled) {
   color: var(--fg);
   background: var(--ghost-strong);
+}
+
+/* The tab whose context menu is open stays legible while the menu covers the strip. */
+.tabs__item--menu {
+  background: var(--ghost-strong);
+}
+
+/* Pop-up menu (editor tabs, terminal pills, the shell picker): fixed to the
+   viewport so a scrolling strip cannot clip it. */
+.menu {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 12rem;
+  padding: 4px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 35%);
+}
+
+.menu__item {
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  padding: 5px 10px;
+  text-align: left;
+  white-space: nowrap;
+  font-size: var(--text-control);
+  color: var(--fg);
+}
+
+.menu__item:hover:not(:disabled),
+.menu__item:focus-visible {
+  background: var(--ghost-strong);
+}
+
+.menu__item:disabled {
+  color: var(--fg-faint);
+}
+
+/* A menu that picks one of a set marks the current choice; the dot is drawn
+   in the gutter the swatches already reserve, so the rows line up either way. */
+.menu__item[role="menuitemradio"] {
+  align-items: center;
+  display: flex;
+  gap: var(--gap);
+}
+
+.menu__item[role="menuitemradio"][aria-checked="true"]::after {
+  color: var(--fg-muted);
+  content: "✓";
+  margin-left: auto;
+  padding-left: var(--gap);
+}
+
+.menu__swatch {
+  border-radius: 2px;
+  flex: none;
+  height: 9px;
+  width: 9px;
+}
+
+/* The gutter a swatch would occupy, so "No colour" aligns with the hues. */
+.menu__item[role="menuitemradio"]:not(:has(.menu__swatch))::before {
+  content: "";
+  flex: none;
+  width: 9px;
+}
+
+.menu__separator {
+  background: var(--border);
+  border: none;
+  height: 1px;
+  margin: 4px 2px;
 }
 
 /* Disclosure popovers (editor preferences, terminal settings). */
@@ -948,6 +1031,13 @@ textarea:focus-visible {
   font-size: var(--text-control);
 }
 
+/* The terminal dock is the bottom of the window, so its popover hangs above its
+   summary; anywhere else it hangs below. */
+.prefs--up > .prefs__form {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+
 .prefs__form label {
   display: flex;
   gap: var(--gap-sm);
@@ -979,6 +1069,12 @@ textarea:focus-visible {
 
 .editor__monaco[hidden] {
   display: none;
+}
+
+/* Monaco lives in an element the editor binding owns and moves between panes,
+   so it has to fill whatever surface it lands in. */
+.editor__monaco-surface {
+  height: 100%;
 }
 
 .editor__empty,
@@ -1166,6 +1262,11 @@ textarea:focus-visible {
 .dialog__error {
   color: var(--error-text);
   font-size: var(--text-control);
+}
+
+/* What else a batch close is still holding, so Cancel is not a guess. */
+.dialog__queued {
+  color: var(--fg-muted);
 }
 
 .dialog__actions {
@@ -1527,104 +1628,304 @@ textarea:focus-visible {
 }
 
 /* ---------------------------------------------------------------------------
-   Terminal dock (T090)
+   Terminal dock (T090, T047, T095; the bar is T096 / design artboard 8a)
+
+   One 32px row carries the whole dock. The label is the disclosure the dock
+   used to spend a second row on, a session is a pill rather than a tab,
+   terminating is the ✕ on the pill you are on, and the shell picker folds into
+   the "New terminal" split button. The row sits outside the collapsible body on
+   purpose: a collapsed dock still says which shells are running, which is what
+   the old count badge only approximated.
    --------------------------------------------------------------------------- */
 
 .shell__dock {
-  border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   flex: 0 0 auto;
   background: var(--surface-base);
 }
 
-.shell__dock-toggle {
-  align-self: flex-start;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius);
-  color: var(--fg-muted);
-  cursor: pointer;
-  font-size: var(--text-control);
-  margin: 3px 0 3px 10px;
-  padding: 3px 9px;
-}
-
-.shell__dock-toggle:hover:not(:disabled) {
-  background: var(--ghost);
-  color: var(--fg);
-}
-
-.shell__dock-toggle[aria-expanded="true"] {
-  color: var(--fg);
-}
-
-.shell__dock-count {
-  background: var(--surface-control);
-  border-radius: var(--radius-sm);
-  font-size: var(--text-label);
-  margin-left: var(--gap-sm);
-  padding: 1px 5px;
-}
-
-.shell__dock-body {
-  /* Same reasoning as the sidebar track: a stored height from a taller window
-     must not leave the editor with no room. */
-  height: min(var(--terminal-height, 280px), calc(100vh - 22rem));
-  overflow: hidden;
-}
-
 .terminal-panel {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  min-height: 0;
 }
 
 .terminal-panel__bar {
   align-items: center;
+  background: var(--surface-chrome);
+  /* The dock's own top border; `.shell__dock` no longer draws one, or the two
+     would stack into a 2px line. */
   border-top: 1px solid var(--border);
   display: flex;
-  gap: var(--gap);
-  height: var(--section-h);
   flex: none;
-  justify-content: space-between;
+  gap: 5px;
+  height: var(--section-h);
   padding: 0 10px;
 }
 
-.terminal-panel__tabs {
+.terminal-panel__label {
+  background: transparent;
+  border: none;
+  border-radius: var(--radius);
+  color: var(--fg-faint);
+  cursor: pointer;
+  flex: none;
+  font-size: var(--text-label);
+  font-weight: 600;
+  letter-spacing: var(--tracking-label);
+  margin-right: 3px;
+  padding: 3px 5px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.terminal-panel__label:hover,
+.terminal-panel__label[aria-expanded="true"] {
+  color: var(--fg-muted);
+}
+
+.terminal-panel__label:hover {
+  background: var(--ghost);
+}
+
+.terminal-panel__pills {
+  align-items: center;
   display: flex;
   gap: var(--gap-xs);
+  min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
 }
 
-.terminal-panel__tabs::-webkit-scrollbar {
+.terminal-panel__pills::-webkit-scrollbar {
   display: none;
 }
 
-.terminal-panel__actions {
+.terminal-panel__spacer {
+  flex: 1 1 auto;
+}
+
+.terminal-panel__chord {
+  color: var(--fg-faint);
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  white-space: nowrap;
+}
+
+/* A session: a dot, what it is, where it is, and how it ended. */
+.terminal-pill {
   align-items: center;
+  border-radius: var(--radius-md);
+  color: var(--fg-muted);
   display: flex;
-  flex: 0 0 auto;
-  gap: var(--gap-sm);
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-control);
+  gap: 7px;
+  max-width: 20rem;
+  padding-left: 9px;
+  position: relative;
 }
 
-.terminal-panel__actions button {
-  padding: 3px 9px;
+/* A colour the user gave the session (T098), for telling groups of shells
+   apart. Deliberately not the dot: the dot says whether the shell is alive, and
+   a group you coloured yellow must not stop telling you that one of them died.
+   The hues are the terminal's own ANSI tokens, so both ramps are defined. */
+.terminal-pill--coloured {
+  padding-left: 13px;
 }
 
-/* Opening the settings grows the bar and shrinks the surface below it, which
-   is what a reader expects of a disclosure; the terminal refits itself. */
-.terminal-panel__bar:has(.prefs[open]) {
-  align-items: flex-start;
-  flex-wrap: wrap;
+.terminal-pill__edge {
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+  bottom: 0;
+  left: 0;
+  position: absolute;
+  top: 0;
+  width: 3px;
 }
 
-/* Sits with the actions, so it reads as part of "start a new terminal"
-   rather than as a property of the session on screen. */
-.terminal-panel__profile {
-  max-width: 14rem;
-  padding: 3px 6px;
+.terminal-pill__edge--red {
+  background: var(--ansi-red);
+}
+
+.terminal-pill__edge--green {
+  background: var(--ansi-green);
+}
+
+.terminal-pill__edge--yellow {
+  background: var(--ansi-yellow);
+}
+
+.terminal-pill__edge--blue {
+  background: var(--ansi-blue);
+}
+
+.terminal-pill__edge--magenta {
+  background: var(--ansi-magenta);
+}
+
+.terminal-pill__edge--cyan {
+  background: var(--ansi-cyan);
+}
+
+.terminal-pill:hover,
+.terminal-pill--menu {
+  background: var(--ghost);
+}
+
+.terminal-pill--active {
+  background: var(--surface-control);
+  color: var(--fg);
+}
+
+.terminal-pill__dot {
+  border-radius: 50%;
+  flex: none;
+  height: 5px;
+  width: 5px;
+}
+
+.terminal-pill__dot--running {
+  background: var(--ok);
+}
+
+/* A shell that ended the way it was asked to. */
+.terminal-pill__dot--idle {
+  background: var(--fg-gutter);
+}
+
+.terminal-pill__dot--failed {
+  background: var(--error);
+}
+
+.terminal-pill__label {
+  align-items: baseline;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  gap: 7px;
+  min-width: 0;
+  padding: 4px 0;
+}
+
+.terminal-pill__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-pill__where {
+  color: var(--fg-faint);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-pill__status {
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+
+.terminal-pill__status--failed {
+  color: var(--error-text);
+}
+
+/* Terminate, and then close. Kept at zero opacity rather than unmounted so the
+   row does not reflow under the pointer; visible on the pill you are on and the
+   one you are pointing at. */
+.terminal-pill__close {
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--fg-faint);
+  cursor: pointer;
+  font: inherit;
+  opacity: 0;
+  padding: 3px 5px;
+}
+
+.terminal-pill--active .terminal-pill__close,
+.terminal-pill:hover .terminal-pill__close,
+.terminal-pill__close:focus-visible {
+  opacity: 1;
+}
+
+.terminal-pill__close:hover {
+  background: var(--ghost-strong);
+  color: var(--fg);
+}
+
+/* Sized to the pill it replaces so the row does not jump when a rename starts
+   or ends. */
+.terminal-pill__rename {
+  border-color: var(--accent);
+  font-family: var(--font-mono);
+  min-width: 0;
+  padding: 2px 6px;
+  width: 10rem;
+}
+
+/* "New terminal" and the shell it will start are one control: which shell is a
+   property of the button, not of the session on screen. */
+.terminal-panel__new {
+  align-items: center;
+  background: var(--accent-fill);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex: none;
+}
+
+.terminal-panel__new-primary,
+.terminal-panel__new-menu {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  white-space: nowrap;
+}
+
+.terminal-panel__new-primary {
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+  color: var(--accent-on);
+  font-size: var(--text-control);
+  font-weight: 500;
+  padding: 4px 9px;
+}
+
+.terminal-panel__new-menu {
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  color: color-mix(in srgb, var(--accent-on) 78%, transparent);
+  font-size: var(--text-micro);
+  padding: 4px 7px;
+}
+
+.terminal-panel__new-primary:hover,
+.terminal-panel__new-menu:hover {
+  background: var(--ghost-strong);
+}
+
+/* Translucent against the fill rather than a colour, so the one rule works on
+   both ramps — the fill is near-black in dark and saturated blue in light. */
+.terminal-panel__new-divider {
+  align-self: stretch;
+  background: color-mix(in srgb, var(--accent-on) 35%, transparent);
+  flex: none;
+  margin: 4px 0;
+  width: 1px;
+}
+
+/* The bar's ⋯. */
+.terminal-settings > summary {
+  color: var(--fg-faint);
+  font-size: var(--text-body);
+  line-height: 1;
+  padding: 3px 5px;
 }
 
 /* The settings popover reuses the editor's `.prefs` shell; only what is
@@ -1689,81 +1990,25 @@ textarea:focus-visible {
   min-width: 0;
 }
 
-/* The same pill as an editor tab: one tab idiom for the whole window. */
-.terminal-tab {
-  align-items: center;
-  border-radius: var(--radius-md);
+/* Everything below the bar, and the only part the disclosure hides. Same
+   reasoning as the sidebar track: a stored height from a taller window must not
+   leave the editor with no room. */
+.terminal-panel__body {
+  border-top: 1px solid var(--border);
   display: flex;
-  flex: none;
-  color: var(--fg-muted);
-  font-family: var(--font-mono);
-  font-size: var(--text-control);
+  flex-direction: column;
+  height: min(var(--terminal-height, 280px), calc(100vh - 22rem));
+  overflow: hidden;
 }
 
-.terminal-tab:not(.terminal-tab--active):hover {
-  background: var(--ghost);
-}
-
-.terminal-tab--active {
-  background: var(--surface-control);
-  color: var(--fg);
-}
-
-.terminal-tab--exited .terminal-tab__name {
-  color: var(--fg-faint);
-}
-
-.terminal-tab__label,
-.terminal-tab__close {
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-md);
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  padding: 4px 9px;
-  white-space: nowrap;
-}
-
-.terminal-tab__label:hover:not(:disabled) {
-  background: transparent;
-}
-
-.terminal-tab__close {
-  color: var(--fg-faint);
-  padding: 4px 7px;
-  opacity: 0;
-}
-
-.terminal-tab--active .terminal-tab__close,
-.terminal-tab:hover .terminal-tab__close,
-.terminal-tab__close:focus-visible {
-  opacity: 1;
-}
-
-.terminal-tab__close:hover:not(:disabled) {
-  background: var(--ghost-strong);
-  color: var(--fg);
-}
-
-/* Sized to the tab it replaces so the strip does not jump when a rename
-   starts or ends. */
-.terminal-tab__rename {
-  border-color: var(--accent);
-  font-family: var(--font-mono);
-  min-width: 0;
-  padding: 3px 6px;
-  width: 10rem;
-}
-
-.terminal-tab__status {
-  color: var(--fg-faint);
-  font-size: var(--text-label);
-  margin-left: var(--gap-sm);
+/* `display: flex` above would otherwise beat the `[hidden]` default. */
+.terminal-panel__body[hidden] {
+  display: none;
 }
 
 .terminal-panel__error {
   border-bottom: 1px solid var(--border);
+  flex: none;
   padding: var(--gap);
 }
 
@@ -2356,6 +2601,129 @@ textarea:focus-visible {
   flex: 1;
   min-width: 0;
   padding: 6px 9px;
+}
+
+/* T220: agent sessions other terminals own. Read-only rows, so nothing here
+   is a control — the tty and pid are shown so the user can go find the
+   session themselves. */
+
+.island__agents {
+  color: var(--fg-muted);
+}
+
+.agents {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  margin-top: var(--gap);
+  padding-top: var(--gap);
+  border-top: 1px solid var(--border);
+}
+
+.agents__head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+.agents__title {
+  font-weight: 600;
+}
+
+.agents__note {
+  margin: 0;
+  font-size: var(--text-control);
+  line-height: 1.5;
+  color: var(--warn-text);
+}
+
+.agents__group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agents__group-title {
+  margin: var(--gap-sm) 0 2px;
+  font-size: var(--text-control);
+  color: var(--fg-faint);
+}
+
+.agents__row {
+  display: flex;
+  gap: var(--gap-sm);
+  align-items: flex-start;
+  padding: 6px 2px;
+  border-radius: var(--radius-sm);
+}
+
+.agents__row .island__dot {
+  margin-top: 6px;
+}
+
+/* Alive but quiet: neutral, the same grey as the base dot. */
+.island__dot--idle {
+  background: var(--fg-faint);
+}
+
+/* An ended session stays listed — it is what just happened — but recedes. */
+.agents__row--done {
+  opacity: 0.6;
+}
+
+.agents__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agents__line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
+}
+
+/* Transcript text is untrusted and can be long; one line, clipped. */
+.agents__task {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agents__unknown {
+  color: var(--fg-faint);
+  font-style: italic;
+}
+
+.agents__activity {
+  flex: none;
+  font-size: var(--text-control);
+  color: var(--fg-muted);
+}
+
+.agents__row--waiting .agents__activity {
+  color: var(--warn-text);
+}
+
+.agents__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+  font-size: var(--text-control);
+  color: var(--fg-faint);
+}
+
+.agents__tool {
+  font-family: var(--font-mono);
+  font-size: var(--text-control);
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The queue takes the whole body: one column of items, one of detail. */

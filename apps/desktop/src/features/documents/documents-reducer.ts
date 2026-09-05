@@ -53,6 +53,17 @@ export interface DocumentsState {
   readonly tabs: Readonly<Record<string, DocumentTab>>;
   readonly order: readonly DocumentId[];
   readonly activeId: DocumentId | null;
+  /**
+   * The one tab opened for a look rather than to keep: at most one exists, and
+   * opening another preview replaces it. `null` when every open tab is kept.
+   *
+   * Preview is a property of the *tab*, not of the document — the core has one
+   * buffer per path either way — so it lives here and never reaches the
+   * protocol. It is also not persisted: a preview that survived a restart is a
+   * tab the user never asked to keep, and restoring it as an ordinary tab is
+   * the honest reading of "I closed the app with this on screen".
+   */
+  readonly previewId: DocumentId | null;
   readonly orphans: readonly OrphanedBuffer[];
   readonly nextOrphanId: number;
 }
@@ -61,12 +72,14 @@ export const initialDocumentsState: DocumentsState = {
   tabs: {},
   order: [],
   activeId: null,
+  previewId: null,
   orphans: [],
   nextOrphanId: 1,
 };
 
 export type DocumentsAction =
-  | { type: 'opened'; content: DocumentContent; activate: boolean }
+  | { type: 'opened'; content: DocumentContent; activate: boolean; preview?: boolean }
+  | { type: 'promote'; documentId: DocumentId }
   | { type: 'touched'; documentId: DocumentId }
   | { type: 'edited'; documentId: DocumentId; text: string }
   | { type: 'updateStarted'; documentId: DocumentId }
@@ -105,6 +118,11 @@ export function pendingExternalState(tab: DocumentTab): PendingExternalState | n
   const state = tab.document.externalModificationState;
   if (state === 'UNCHANGED' || tab.acknowledged === state) return null;
   return state;
+}
+
+/** Whether this tab is the one open for a look rather than to keep. */
+export function isPreview(state: DocumentsState, documentId: DocumentId): boolean {
+  return state.previewId === documentId;
 }
 
 export function activeTab(state: DocumentsState): DocumentTab | null {
@@ -158,7 +176,23 @@ function withDocument(tab: DocumentTab, document: Document): DocumentTab {
   return { ...tab, document, acknowledged };
 }
 
-function open(state: DocumentsState, content: DocumentContent, activate: boolean): DocumentsState {
+/**
+ * Keep this tab: it stops being the preview.
+ *
+ * Called for a double click, for a reorder, and — the one that matters — for
+ * the first edit. A buffer with unsaved work in it must never be the tab that
+ * the next single click silently replaces.
+ */
+function keep(state: DocumentsState, documentId: DocumentId): DocumentsState {
+  return state.previewId === documentId ? { ...state, previewId: null } : state;
+}
+
+function open(
+  state: DocumentsState,
+  content: DocumentContent,
+  activate: boolean,
+  preview = false,
+): DocumentsState {
   const id = content.document.id;
   const existing = state.tabs[id];
   // Reopening (rehydration, `largeFileEditing`) returns the core's buffer: it
@@ -173,11 +207,22 @@ function open(state: DocumentsState, content: DocumentContent, activate: boolean
       }
     : makeTab(content);
   const order = existing ? state.order : [...state.order, id];
+  // Only a *new* tab can become the preview, and any deliberate open keeps the
+  // tab. Both halves matter for the double click, which fires its single click
+  // first: three opens of the same path race, and this makes every order of
+  // arrival land on "kept" rather than leaving it to whichever resolves last.
+  let previewId = state.previewId;
+  if (preview) {
+    if (!existing) previewId = id;
+  } else if (previewId === id) {
+    previewId = null;
+  }
   return {
     ...state,
     tabs: { ...state.tabs, [id]: tab },
     order,
     activeId: activate || state.activeId === null ? id : state.activeId,
+    previewId,
   };
 }
 
@@ -191,7 +236,10 @@ function remove(state: DocumentsState, documentId: DocumentId): DocumentsState {
   if (activeId === documentId) {
     activeId = order[Math.min(index, order.length - 1)] ?? null;
   }
-  return { ...state, tabs, order, activeId };
+  // Whichever path closed it — the tab's ×, a batch, or the core deciding the
+  // document is gone — a closed tab is no longer the preview.
+  const previewId = state.previewId === documentId ? null : state.previewId;
+  return { ...state, tabs, order, activeId, previewId };
 }
 
 function onEvent(state: DocumentsState, event: EventEnvelope): DocumentsState {
@@ -232,21 +280,33 @@ function onEvent(state: DocumentsState, event: EventEnvelope): DocumentsState {
 export function documentsReducer(state: DocumentsState, action: DocumentsAction): DocumentsState {
   switch (action.type) {
     case 'opened':
-      return open(state, action.content, action.activate);
-    case 'touched':
-      return withTab(state, action.documentId, (tab) =>
+      return open(state, action.content, action.activate, action.preview);
+    case 'promote':
+      return keep(state, action.documentId);
+    case 'touched': {
+      const touched = withTab(state, action.documentId, (tab) =>
         tab.text === null || tab.document.readOnly || tab.pending
           ? tab
           : { ...tab, pending: true, notice: null },
       );
-    case 'edited':
-      return withTab(state, action.documentId, (tab) => {
+      // Typing into a preview keeps it. Not doing this would let the next
+      // single click in the explorer close a buffer with unsaved work in it.
+      return touched === state ? state : keep(touched, action.documentId);
+    }
+    case 'edited': {
+      const edited = withTab(state, action.documentId, (tab) => {
         if (tab.text === null || tab.document.readOnly) return tab;
         const draft = action.text === tab.text ? null : action.text;
         return draft === tab.draft && !tab.pending
           ? tab
           : { ...tab, draft, pending: false, notice: null };
       });
+      // The same rule as `touched`, for the edit that arrives without one
+      // (a flush, or text read off a document the core closed).
+      return edited.tabs[action.documentId]?.draft == null
+        ? edited
+        : keep(edited, action.documentId);
+    }
     case 'updateStarted':
       return withTab(state, action.documentId, (tab) => ({ ...tab, syncing: true, error: null }));
     case 'updateAccepted':
@@ -278,14 +338,19 @@ export function documentsReducer(state: DocumentsState, action: DocumentsAction)
         error: action.error,
       }));
     case 'replaced':
-      return withTab(state, action.documentId, (tab) => ({
-        ...withDocument(tab, action.document),
-        text: action.text,
-        draft: null,
-        pending: false,
-        bufferGeneration: tab.bufferGeneration + 1,
-        syncing: false,
-      }));
+      // An explicit whole-buffer rewrite (line-ending normalization) is an
+      // edit, so it keeps the tab like any other.
+      return keep(
+        withTab(state, action.documentId, (tab) => ({
+          ...withDocument(tab, action.document),
+          text: action.text,
+          draft: null,
+          pending: false,
+          bufferGeneration: tab.bufferGeneration + 1,
+          syncing: false,
+        })),
+        action.documentId,
+      );
     case 'reloaded':
       return withTab(state, action.content.document.id, (tab) => ({
         ...withDocument(tab, action.content.document),
@@ -317,7 +382,9 @@ export function documentsReducer(state: DocumentsState, action: DocumentsAction)
       if (from === toIndex) return state;
       const order = state.order.filter((id) => id !== action.documentId);
       order.splice(toIndex, 0, action.documentId);
-      return { ...state, order };
+      // Arranging a tab is asking to keep it; a preview that slid back into
+      // place when the next click replaced it would be its own small betrayal.
+      return keep({ ...state, order }, action.documentId);
     }
     case 'acknowledgeExternal':
       return withTab(state, action.documentId, (tab) => ({

@@ -1,6 +1,8 @@
 import type { Decision, Workstream } from '@gritty/protocol';
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
+import { AgentsSection, agentsPillLabel } from '../agents/agents-panel';
+import type { AgentsController } from '../agents/use-agents';
 import {
   type AttentionItem,
   attentionItems,
@@ -27,11 +29,14 @@ import type { WorkstreamsController } from './use-workstreams';
  */
 export function AgentIsland({
   controller,
+  agents,
   open,
   onOpenChange,
   onOpenQueue,
 }: {
   controller: WorkstreamsController;
+  /** Sessions other terminals are running (T220), read-only. */
+  agents: AgentsController;
   open: boolean;
   onOpenChange(open: boolean): void;
   /** Show the whole queue instead — more room than the sheet has. */
@@ -107,6 +112,9 @@ export function AgentIsland({
             ? 'No workstreams'
             : `${workstreams.length} workstream${workstreams.length === 1 ? '' : 's'}`}
         </span>
+        {agentsPillLabel(agents) && (
+          <span className="island__agents">{agentsPillLabel(agents)}</span>
+        )}
         {waiting > 0 && <span className="island__needs">{waiting} needs you</span>}
       </button>
 
@@ -154,6 +162,10 @@ export function AgentIsland({
           </div>
 
           <NewWorkstream controller={controller} />
+
+          {/* Below the user's own work, because it is not the user's own work:
+              these are sessions Gritty observes but does not own (T220). */}
+          <AgentsSection controller={agents} />
         </div>
       )}
     </div>

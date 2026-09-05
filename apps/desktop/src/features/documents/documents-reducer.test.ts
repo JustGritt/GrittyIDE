@@ -9,10 +9,12 @@ import { describe, expect, it } from 'vitest';
 import {
   activeTab,
   type DocumentsState,
+  type DocumentTab,
   displayText,
   documentsReducer,
   findTabByPath,
   initialDocumentsState,
+  isPreview,
   isUnsaved,
   pendingExternalState,
 } from './documents-reducer';
@@ -321,6 +323,155 @@ describe('documents reducer', () => {
     expect(
       documentsReducer(state, { type: 'reorder', documentId: 'zzz' as DocumentId, toIndex: 0 }),
     ).toBe(state);
+  });
+
+  // T-preview: a single click in the explorer opens a tab for a look; the next
+  // one replaces it. The rules that matter are about *not* replacing it.
+  describe('preview tabs', () => {
+    function preview(state: DocumentsState, id: string): DocumentsState {
+      return documentsReducer(state, {
+        type: 'opened',
+        content: content(id),
+        activate: true,
+        preview: true,
+      });
+    }
+
+    it('marks the tab it opened, and only that one', () => {
+      const state = preview(initialDocumentsState, 'a');
+      expect(isPreview(state, 'a' as DocumentId)).toBe(true);
+      expect(state.previewId).toBe('a');
+    });
+
+    it('moves the mark to the next preview, so at most one exists', () => {
+      const state = preview(preview(initialDocumentsState, 'a'), 'b');
+      expect(state.previewId).toBe('b');
+      expect(isPreview(state, 'a' as DocumentId)).toBe(false);
+      // The reducer does not close the old one — the hook does, once the core
+      // has confirmed the new document.
+      expect(state.order).toEqual(['a', 'b']);
+    });
+
+    it('opening without preview keeps the tab', () => {
+      const state = documentsReducer(preview(initialDocumentsState, 'a'), {
+        type: 'opened',
+        content: content('a'),
+        activate: true,
+      });
+      expect(state.previewId).toBeNull();
+    });
+
+    it('an ordinary open never marks a preview', () => {
+      const state = opened('a');
+      expect(state.previewId).toBeNull();
+    });
+
+    it('explicit promotion keeps it, and is harmless for any other tab', () => {
+      const state = preview(opened('a'), 'b');
+      const kept = documentsReducer(state, { type: 'promote', documentId: 'b' as DocumentId });
+      expect(kept.previewId).toBeNull();
+      expect(documentsReducer(kept, { type: 'promote', documentId: 'a' as DocumentId })).toBe(kept);
+    });
+
+    it('typing into a preview keeps it — the rule that protects unsaved work', () => {
+      const state = preview(initialDocumentsState, 'a');
+      const touched = documentsReducer(state, { type: 'touched', documentId: 'a' as DocumentId });
+      expect(touched.previewId).toBeNull();
+      expect(activeTab(touched)).not.toBeNull();
+      expect(isUnsaved(activeTab(touched) as DocumentTab)).toBe(true);
+    });
+
+    it('a draft that arrives without a touch keeps it too', () => {
+      const state = preview(initialDocumentsState, 'a');
+      const edited = documentsReducer(state, {
+        type: 'edited',
+        documentId: 'a' as DocumentId,
+        text: 'changed',
+      });
+      expect(edited.previewId).toBeNull();
+    });
+
+    it('an edit that matches the core leaves the preview alone', () => {
+      const state = preview(initialDocumentsState, 'a');
+      const edited = documentsReducer(state, {
+        type: 'edited',
+        documentId: 'a' as DocumentId,
+        text: 'hello',
+      });
+      expect(edited.previewId).toBe('a');
+    });
+
+    it('a touch the tab refuses does not keep it', () => {
+      // Read-only: there is no edit, so there is nothing to protect.
+      let state = documentsReducer(initialDocumentsState, {
+        type: 'opened',
+        content: content('a', 'hello', { readOnly: true }),
+        activate: true,
+        preview: true,
+      });
+      state = documentsReducer(state, { type: 'touched', documentId: 'a' as DocumentId });
+      expect(state.previewId).toBe('a');
+    });
+
+    it('arranging a tab keeps it', () => {
+      const state = preview(opened('a'), 'b');
+      const moved = documentsReducer(state, {
+        type: 'reorder',
+        documentId: 'b' as DocumentId,
+        toIndex: 0,
+      });
+      expect(moved.order).toEqual(['b', 'a']);
+      expect(moved.previewId).toBeNull();
+    });
+
+    it('closing the preview clears the mark, however it was closed', () => {
+      const closed = documentsReducer(preview(initialDocumentsState, 'a'), {
+        type: 'closed',
+        documentId: 'a' as DocumentId,
+      });
+      expect(closed.previewId).toBeNull();
+
+      const byCore = documentsReducer(preview(initialDocumentsState, 'a'), {
+        type: 'event',
+        event: event('DocumentClosed', {
+          documentId: 'a',
+          workspaceId: WS,
+          path: 'a.md',
+          reason: 'USER',
+          dirty: false,
+        }),
+      });
+      expect(byCore.previewId).toBeNull();
+    });
+
+    it('a re-preview of a kept tab does not demote it, whatever the order', () => {
+      // The double click fires its single click first, so three opens of one
+      // path race. Every interleaving must end "kept".
+      const orders: Array<Array<'preview' | 'keep'>> = [
+        ['preview', 'preview', 'keep'],
+        ['keep', 'preview', 'preview'],
+        ['preview', 'keep', 'preview'],
+      ];
+      for (const sequence of orders) {
+        let state = initialDocumentsState;
+        for (const step of sequence) {
+          state = documentsReducer(state, {
+            type: 'opened',
+            content: content('a'),
+            activate: true,
+            preview: step === 'preview',
+          });
+        }
+        expect(state.previewId, sequence.join(',')).toBeNull();
+        expect(state.order).toEqual(['a']);
+      }
+    });
+
+    it('closing some other tab leaves the preview marked', () => {
+      const state = preview(opened('a'), 'b');
+      const closed = documentsReducer(state, { type: 'closed', documentId: 'a' as DocumentId });
+      expect(closed.previewId).toBe('b');
+    });
   });
 
   it('finds an open tab by workspace path', () => {

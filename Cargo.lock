@@ -1191,9 +1191,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "gritty-agents"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "gritty-core"
 version = "0.1.0"
 dependencies = [
+ "gritty-agents",
  "gritty-persistence",
  "gritty-terminal",
  "gritty-workspace",

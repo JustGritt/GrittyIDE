@@ -32,6 +32,7 @@ export const COMMANDS = {
   'terminal.write': 'terminal_write',
   'terminal.resize': 'terminal_resize',
   'terminal.rename': 'terminal_rename',
+  'terminal.recolor': 'terminal_recolor',
   'terminal.kill': 'terminal_kill',
   'terminal.list': 'terminal_list',
   'terminal.profiles': 'terminal_profiles',
@@ -44,6 +45,8 @@ export const COMMANDS = {
   'decisions.raise': 'decisions_raise',
   'decisions.resolve': 'decisions_resolve',
   'decisions.dismiss': 'decisions_dismiss',
+  'agents.list': 'agents_list',
+  'agents.refresh': 'agents_refresh',
 } as const;
 
 export type CommandName = keyof typeof COMMANDS;

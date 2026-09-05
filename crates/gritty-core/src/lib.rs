@@ -26,7 +26,12 @@
 //!   snapshots, startup reconciliation, durable operation records.
 //! - [`workstream`]: the durable model of work (T200, Gate C): the workstream
 //!   state machine and the decisions that block it, over the same database.
+//! - [`agent_session`]: discovery of the coding-agent sessions already running
+//!   on this machine (T220), over the `gritty-agents` adapter. Read-only, and
+//!   not the agent run protocol (T300) — an observation, not something Gritty
+//!   owns.
 
+pub mod agent_session;
 pub mod document;
 pub mod event;
 pub mod file_drop;

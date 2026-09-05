@@ -17,6 +17,7 @@ gritty-core = { path = "crates/gritty-core" }
 gritty-workspace = { path = "crates/workspace" }
 gritty-persistence = { path = "crates/persistence" }
 gritty-terminal = { path = "crates/terminal" }
+gritty-agents = { path = "crates/agents" }
 tauri = { version = "2.11.5", features = [] }
 tauri-build = { version = "2.6.3", features = [] }
 serde = { version = "1.0.229", features = ["derive"] }

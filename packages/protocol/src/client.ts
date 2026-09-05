@@ -3,6 +3,7 @@ import { type CoreError, toCoreError } from './errors';
 import { type Diagnostic, EventHub, type Unsubscribe } from './events';
 import type { Transport } from './transport';
 import {
+  type AgentRoster,
   type CandidatesRequest,
   type CloseDocumentRequest,
   type CloseWorkspaceRequest,
@@ -21,6 +22,7 @@ import {
   type HealthReport,
   type KillTerminalRequest,
   type LastSession,
+  type ListAgentSessionsRequest,
   type ListDecisionsRequest,
   type ListDirectoryRequest,
   type ListDirectoryResponse,
@@ -35,6 +37,7 @@ import {
   type RaiseDecisionRequest,
   type RecentWorkspace,
   type RecentWorkspacesRequest,
+  type RecolorTerminalRequest,
   type RecoverSnapshotRequest,
   type RecoveryCandidate,
   type ReloadDocumentRequest,
@@ -189,6 +192,13 @@ export interface CoreClient {
      * name outlives the window that set it.
      */
     rename(request: RenameTerminalRequest): Promise<Terminal>;
+    /**
+     * Give a session a colour for grouping, or clear it by omitting `color`.
+     * Core state for the same reason the label is, and a closed set of hues
+     * rather than a free colour: the palette has a light ramp as well as a
+     * dark one (ADR-016).
+     */
+    recolor(request: RecolorTerminalRequest): Promise<Terminal>;
     kill(request: KillTerminalRequest): Promise<Terminal>;
     /** Every session, running and ended, in creation order. */
     list(): Promise<Terminal[]>;
@@ -235,6 +245,20 @@ export interface CoreClient {
     raise(request: RaiseDecisionRequest): Promise<Decision>;
     resolve(request: ResolveDecisionRequest): Promise<Decision>;
     dismiss(request: DismissDecisionRequest): Promise<Decision>;
+  };
+  /**
+   * Agent sessions running on this machine (T220).
+   *
+   * Read-only, and machine-wide: these are sessions other terminals own, so
+   * there is nothing here that starts, stops or answers one. `list` returns the
+   * roster the core last scanned (scanning once if it never has); `refresh`
+   * forces a rescan. The core also polls, and publishes `AgentSessionsChanged`
+   * whenever the roster actually differs — subscribe to that rather than
+   * calling `refresh` on a timer.
+   */
+  agents: {
+    list(request?: ListAgentSessionsRequest): Promise<AgentRoster>;
+    refresh(request?: ListAgentSessionsRequest): Promise<AgentRoster>;
   };
   subscribe<N extends EventName>(name: N, handler: (event: EventOf<N>) => void): Unsubscribe;
   subscribeAll(handler: (event: EventEnvelope) => void): Unsubscribe;
@@ -348,6 +372,7 @@ export function createCoreClient(
       write: (request) => command<void>('terminal.write', { request }),
       resize: (request) => command<Terminal>('terminal.resize', { request }),
       rename: (request) => command<Terminal>('terminal.rename', { request }),
+      recolor: (request) => command<Terminal>('terminal.recolor', { request }),
       kill: (request) => command<Terminal>('terminal.kill', { request }),
       list: () => command<Terminal[]>('terminal.list'),
       profiles: (request = { custom: [] }) =>
@@ -365,6 +390,10 @@ export function createCoreClient(
       raise: (request) => command<Decision>('decisions.raise', { request }),
       resolve: (request) => command<Decision>('decisions.resolve', { request }),
       dismiss: (request) => command<Decision>('decisions.dismiss', { request }),
+    },
+    agents: {
+      list: (request = {}) => command<AgentRoster>('agents.list', { request }),
+      refresh: (request = {}) => command<AgentRoster>('agents.refresh', { request }),
     },
     subscribe: (name, handler) => hub.subscribe(name, handler),
     subscribeAll: (handler) => hub.subscribeAll(handler),

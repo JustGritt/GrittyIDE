@@ -1,8 +1,10 @@
 import {
   type CoreError,
+  type RecolorTerminalRequest,
   type RenameTerminalRequest,
   type SpawnTerminalRequest,
   type Terminal,
+  type TerminalColor,
   type TerminalId,
   type TerminalProfile,
   toCoreError,
@@ -35,6 +37,11 @@ export function useTerminals(customShells: readonly string[] = []) {
   // start a terminal on the user's behalf (see `auto-start.ts`).
   const [adopted, setAdopted] = useState(false);
   const [profiled, setProfiled] = useState(false);
+  // Whether the core has answered *which workspace is open* — `null` is a real
+  // answer, so a flag rather than `workspaceId !== null`. Without it the dock's
+  // auto-start could race the answer and root the first shell in the home
+  // directory while a workspace was open.
+  const [located, setLocated] = useState(false);
   const bus = useMemo(createOutputBus, []);
   // Read inside the event handler, which is registered once.
   const busRef = useRef(bus);
@@ -56,10 +63,17 @@ export function useTerminals(customShells: readonly string[] = []) {
     let active = true;
     core.workspace.current().then(
       (workspace) => {
-        if (active) dispatch({ type: 'workspace', workspaceId: workspace?.id ?? null });
+        if (!active) return;
+        dispatch({ type: 'workspace', workspaceId: workspace?.id ?? null });
+        setLocated(true);
       },
       (cause: unknown) => {
-        if (active) setError(toCoreError(cause));
+        if (!active) return;
+        setError(toCoreError(cause));
+        // Settled, not successful — as below. A core that cannot say which
+        // workspace is open will not spawn into one either, and waiting
+        // forever is worse than failing visibly.
+        setLocated(true);
       },
     );
     // After a renderer reload the core still holds the sessions; adopt them
@@ -119,21 +133,44 @@ export function useTerminals(customShells: readonly string[] = []) {
    * omitting it lets the core resolve the user's login shell (T090). Without a
    * `workspaceId` the core starts it in the home directory (T095) — the
    * renderer never names a directory outside a workspace.
+   *
+   * `cwd` is workspace-relative and follows the document being edited (T098).
+   * A directory that has been deleted or renamed since the tab was opened
+   * falls back to the workspace root rather than failing a spawn the user
+   * cannot act on — the same call T095 makes for a shell profile that has gone
+   * stale. Only the fallback's failure is reported.
    */
-  const spawn = useCallback(async (workspaceId: WorkspaceId | null, shell?: string) => {
-    try {
+  const spawn = useCallback(
+    async (workspaceId: WorkspaceId | null, shell?: string, cwd?: string) => {
       const request: SpawnTerminalRequest = {};
       if (workspaceId !== null) request.workspaceId = workspaceId;
       if (shell !== undefined) request.shell = shell;
-      const terminal = await core.terminal.spawn(request);
-      dispatch({ type: 'opened', terminal });
-      setError(null);
-      return terminal;
-    } catch (cause: unknown) {
-      setError(toCoreError(cause));
-      return null;
-    }
-  }, []);
+      // A cwd without a workspace is `InvalidInput`; there would be nothing to
+      // resolve it against.
+      const rooted = workspaceId !== null && cwd !== undefined && cwd !== '';
+      try {
+        const terminal = await core.terminal.spawn(rooted ? { ...request, cwd } : request);
+        dispatch({ type: 'opened', terminal });
+        setError(null);
+        return terminal;
+      } catch (cause: unknown) {
+        if (!rooted) {
+          setError(toCoreError(cause));
+          return null;
+        }
+      }
+      try {
+        const terminal = await core.terminal.spawn(request);
+        dispatch({ type: 'opened', terminal });
+        setError(null);
+        return terminal;
+      } catch (cause: unknown) {
+        setError(toCoreError(cause));
+        return null;
+      }
+    },
+    [],
+  );
 
   /**
    * Close a tab: terminate the process tree, then forget the session. The
@@ -178,6 +215,21 @@ export function useTerminals(customShells: readonly string[] = []) {
     }
   }, []);
 
+  /**
+   * Colour a session for grouping, or clear it with `null`. Core state like the
+   * name, so it survives a renderer reload with the session it groups.
+   */
+  const recolor = useCallback(async (terminalId: TerminalId, color: TerminalColor | null) => {
+    try {
+      const request: RecolorTerminalRequest = { terminalId };
+      if (color !== null) request.color = color;
+      dispatch({ type: 'snapshot', terminal: await core.terminal.recolor(request) });
+      setError(null);
+    } catch (cause: unknown) {
+      setError(toCoreError(cause));
+    }
+  }, []);
+
   const activate = useCallback((terminalId: TerminalId) => {
     dispatch({ type: 'activate', terminalId });
   }, []);
@@ -199,8 +251,8 @@ export function useTerminals(customShells: readonly string[] = []) {
   return {
     terminals,
     profiles,
-    /** The core has answered both opening questions; see `auto-start.ts`. */
-    ready: adopted && profiled,
+    /** The core has answered every opening question; see `auto-start.ts`. */
+    ready: adopted && profiled && located,
     active: selectActive(state),
     workspaceId: state.workspaceId,
     bus,
@@ -209,6 +261,7 @@ export function useTerminals(customShells: readonly string[] = []) {
     close,
     kill,
     rename,
+    recolor,
     activate,
     write,
     resize,

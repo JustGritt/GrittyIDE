@@ -92,6 +92,11 @@ impl Intent {
             | CoreEvent::WorkstreamCreated(_)
             | CoreEvent::WorkstreamChanged(_)
             | CoreEvent::WorkstreamRemoved(_)
+            // The agent roster (T220) is an observation of other processes,
+            // rediscovered from scratch each launch. Persisting it would make
+            // Gritty claim on startup that sessions are running which may have
+            // ended while it was closed.
+            | CoreEvent::AgentSessionsChanged(_)
             | CoreEvent::DecisionRequested(_)
             | CoreEvent::DecisionResolved(_) => None,
         }

@@ -53,6 +53,7 @@ export function EditorPane({
   dispatchMode,
   session,
   onRequestClose,
+  onRequestCloseMany,
 }: {
   documents: DocumentsController;
   editor: EditorBinding;
@@ -62,6 +63,7 @@ export function EditorPane({
   dispatchMode: Dispatch<ViewModesAction>;
   session: SessionController;
   onRequestClose: (documentId: DocumentId) => void;
+  onRequestCloseMany: (documentIds: readonly DocumentId[]) => void;
 }) {
   const { state } = documents;
   const [workers, setWorkers] = useState(workerStatus.snapshot());
@@ -149,7 +151,9 @@ export function EditorPane({
         <TabStrip
           state={state}
           onActivate={documents.activate}
+          onPromote={documents.promoteTab}
           onClose={onRequestClose}
+          onCloseMany={onRequestCloseMany}
           onReorder={documents.reorder}
         />
         {isMarkdown && active && (
@@ -191,7 +195,7 @@ export function EditorPane({
 
       <div className="editor__surfaces">
         <section
-          ref={editor.containerRef}
+          ref={editor.attachContainer}
           className="editor__monaco"
           hidden={!showEditor}
           aria-label={active ? `Contents of ${active.document.path}` : 'Editor'}

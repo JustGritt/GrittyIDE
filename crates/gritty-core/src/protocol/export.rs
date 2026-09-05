@@ -10,6 +10,7 @@ use std::path::Path;
 use ts_rs::{Config, TS};
 
 use super::{CORE_EVENT_CHANNEL, PROTOCOL_VERSION};
+use crate::agent_session::wire::{AgentRoster, AgentSession, ListAgentSessionsRequest};
 use crate::document::{
     CloseDocumentRequest, DocumentContent, DocumentStatusRequest, OpenDocumentRequest,
     ReloadDocumentRequest, SaveDocumentRequest, UpdateDocumentRequest,
@@ -26,8 +27,9 @@ use crate::session::wire::{
 };
 use crate::shell::OpenExternalRequest;
 use crate::terminal::wire::{
-    KillTerminalRequest, ListProfilesRequest, RenameTerminalRequest, ResizeTerminalRequest,
-    SpawnTerminalRequest, Terminal, TerminalProfile, WriteTerminalRequest,
+    KillTerminalRequest, ListProfilesRequest, RecolorTerminalRequest, RenameTerminalRequest,
+    ResizeTerminalRequest, SpawnTerminalRequest, Terminal, TerminalColor, TerminalProfile,
+    WriteTerminalRequest,
 };
 use crate::workspace::{
     CloseWorkspaceRequest, ForgetWorkspaceRequest, ListDirectoryRequest, ListDirectoryResponse,
@@ -59,6 +61,9 @@ fn export_bindings() {
 
     let cfg = Config::new().with_out_dir(&out).with_large_int("number");
     HealthReport::export_all(&cfg).expect("export HealthReport");
+    AgentSession::export_all(&cfg).expect("export AgentSession");
+    AgentRoster::export_all(&cfg).expect("export AgentRoster");
+    ListAgentSessionsRequest::export_all(&cfg).expect("export ListAgentSessionsRequest");
     CoreError::export_all(&cfg).expect("export CoreError");
     Operation::export_all(&cfg).expect("export Operation");
     CoreEvent::export_all(&cfg).expect("export CoreEvent");
@@ -96,6 +101,8 @@ fn export_bindings() {
     ResizeTerminalRequest::export_all(&cfg).expect("export ResizeTerminalRequest");
     KillTerminalRequest::export_all(&cfg).expect("export KillTerminalRequest");
     RenameTerminalRequest::export_all(&cfg).expect("export RenameTerminalRequest");
+    RecolorTerminalRequest::export_all(&cfg).expect("export RecolorTerminalRequest");
+    TerminalColor::export_all(&cfg).expect("export TerminalColor");
     Workstream::export_all(&cfg).expect("export Workstream");
     ListWorkstreamsRequest::export_all(&cfg).expect("export ListWorkstreamsRequest");
     CreateWorkstreamRequest::export_all(&cfg).expect("export CreateWorkstreamRequest");

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { Splitter } from './components/splitter';
 import { boundsWithin } from './components/splitter-geometry';
 import { core } from './core/client';
+import { useAgents } from './features/agents/use-agents';
 import { activeTab } from './features/documents/documents-reducer';
 import { useDocuments } from './features/documents/use-documents';
 import { DropOverlay } from './features/drop/drop-overlay';
@@ -25,6 +26,7 @@ import { useSession } from './features/session/use-session';
 import { AppBar, type HealthState } from './features/shell/app-bar';
 import { type Accelerator, acceleratorForOs } from './features/shell/open-shortcuts';
 import { useOpenShortcuts } from './features/shell/use-open-shortcuts';
+import { cwdForDocument } from './features/terminal/terminal-cwd';
 import { TerminalPanel } from './features/terminal/terminal-panel';
 import { useTerminals } from './features/terminal/use-terminals';
 import { AttentionQueue } from './features/workstreams/attention-queue';
@@ -77,6 +79,8 @@ export function App() {
   // and the queue replaces the editor body; both read this one controller, so
   // answering a question in either clears it in the other.
   const workstreams = useWorkstreams(workspace);
+  // Machine-wide, so it takes no workspace and outlives changes of one.
+  const agents = useAgents();
   // What the previous window had open, for the launcher's resume rail (T051).
   // Asked for whenever no workspace is open, which is exactly when the
   // launcher is on screen — including after the user closes one mid-run.
@@ -194,6 +198,7 @@ export function App() {
           workspace ? (
             <AgentIsland
               controller={workstreams}
+              agents={agents}
               open={islandOpen}
               onOpenChange={setIslandOpen}
               onOpenQueue={() => {
@@ -219,7 +224,9 @@ export function App() {
           <aside className="shell__sidebar">
             <ExplorerPanel
               explorer={explorer}
-              onOpenFile={(workspaceId, path) => void documents.openFile(workspaceId, path)}
+              onOpenFile={(workspaceId, path, preview) =>
+                void documents.openFile(workspaceId, path, { preview })
+              }
             />
             {import.meta.env.DEV && <OperationsPanel />}
           </aside>
@@ -245,6 +252,7 @@ export function App() {
             dispatchMode={dispatchMode}
             session={session}
             onRequestClose={closeFlow.request}
+            onRequestCloseMany={closeFlow.requestMany}
           />
         </div>
       ) : session.state.phase === 'ready' ? (
@@ -285,29 +293,32 @@ export function App() {
             }
           />
         )}
-        <button
-          type="button"
-          className="shell__dock-toggle"
-          aria-expanded={terminalOpen}
-          onClick={() => setTerminalOpen((open) => !open)}
-        >
-          Terminal
-          {terminals.terminals.length > 0 && (
-            <span className="shell__dock-count">{terminals.terminals.length}</span>
-          )}
-        </button>
-        {/* Kept mounted while collapsed: unmounting would dispose every xterm
-            and lose the scrollback of running shells. */}
-        <div className="shell__dock-body" hidden={!terminalOpen}>
-          <TerminalPanel
-            terminals={terminals}
-            open={terminalOpen}
-            settings={layout.terminal}
-            onSettingsChange={(patch) =>
-              setLayout((current) => ({ ...current, terminal: { ...current.terminal, ...patch } }))
-            }
-          />
-        </div>
+        {/* One 32px row (T096, artboard 8a): the panel owns the label that used
+            to be the dock's toggle, so the sessions stay legible while it is
+            collapsed. Kept mounted throughout — unmounting would dispose every
+            xterm and lose the scrollback of running shells. */}
+        <TerminalPanel
+          terminals={terminals}
+          open={terminalOpen}
+          onOpenChange={setTerminalOpen}
+          workspace={workspace}
+          // A new terminal starts where you are working, not at the root
+          // (T098). Only for a document of the *open* workspace: a tab from
+          // another one has no path this workspace could resolve.
+          cwd={
+            active && workspace && active.document.workspaceId === workspace.id
+              ? cwdForDocument(active.document.path)
+              : undefined
+          }
+          // The island binds ⌥1…⌥9 to a decision's options while it is open;
+          // two live handlers would answer a question and switch a terminal on
+          // one keystroke.
+          chords={!islandOpen}
+          settings={layout.terminal}
+          onSettingsChange={(patch) =>
+            setLayout((current) => ({ ...current, terminal: { ...current.terminal, ...patch } }))
+          }
+        />
       </footer>
       {/* The last 26px of the window, below the dock: what is running, and what
           the contract knows about the active document (T048). */}
@@ -324,6 +335,7 @@ export function App() {
         <CloseDialog
           tab={closeFlow.tab}
           busy={closeFlow.busy}
+          queued={closeFlow.queued}
           onCancel={closeFlow.cancel}
           onDiscard={closeFlow.discard}
           onSave={closeFlow.save}

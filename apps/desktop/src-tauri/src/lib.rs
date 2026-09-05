@@ -197,6 +197,7 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::terminal_write,
             commands::terminal_resize,
             commands::terminal_rename,
+            commands::terminal_recolor,
             commands::terminal_kill,
             commands::terminal_list,
             commands::terminal_profiles,
@@ -210,6 +211,8 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::decisions_raise,
             commands::decisions_resolve,
             commands::decisions_dismiss,
+            commands::agents_list,
+            commands::agents_refresh,
         ])
 }
 

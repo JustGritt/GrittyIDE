@@ -33,6 +33,26 @@ pub enum TerminalStatus {
     Exited,
 }
 
+/// A colour the user gave a session, so groups of shells can be told apart at
+/// a glance (T098).
+///
+/// A closed set, not a free colour. The palette is CSS custom properties
+/// (ADR-016) with a light ramp as well as a dark one; an arbitrary value chosen
+/// against one of them would be unreadable in the other, and the core has no
+/// business holding a hex string it cannot reason about. These are the six ANSI
+/// hues the terminal already draws with, so a coloured pill and the output
+/// under it agree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum TerminalColor {
+    Red,
+    Green,
+    Yellow,
+    Blue,
+    Magenta,
+    Cyan,
+}
+
 /// A terminal session as the UI sees it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -58,6 +78,11 @@ pub struct Terminal {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub name: Option<String>,
+    /// A colour the user gave this session, for grouping. Absent until they
+    /// pick one, which is when the pill falls back to saying nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub color: Option<TerminalColor>,
     /// Process id of the shell while it runs; `None` once it has exited.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -179,6 +204,18 @@ pub struct RenameTerminalRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub name: Option<String>,
+}
+
+/// `terminal.recolor`: give a session a colour, or clear it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RecolorTerminalRequest {
+    pub terminal_id: TerminalId,
+    /// The new colour. Absent clears it, so the pill goes back to carrying no
+    /// colour rather than to some arbitrary default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub color: Option<TerminalColor>,
 }
 
 /// `terminal.kill`: terminate the session's process tree. Idempotent.

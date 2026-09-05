@@ -1,4 +1,4 @@
-# Terminal sessions (T090, T095)
+# Terminal sessions (T090, T095, T096, T098)
 
 How a keystroke reaches a shell and how its output comes back. Decisions and
 their rationale are in [ADR-015](../decisions/ADR-015-terminal-pty.md); this
@@ -7,7 +7,7 @@ document is the map.
 ## Layers
 
 ```
-apps/desktop/src/features/terminal   xterm view, tabs, output bus
+apps/desktop/src/features/terminal   xterm view, the dock's bar, output bus
         │  terminal.spawn/write/resize/kill/list, TerminalOutput, TerminalExited
 apps/desktop/src-tauri/commands.rs   adapters (parse, delegate, correlate)
         │
@@ -110,6 +110,52 @@ Renaming is manual. Detecting what a session is *running* — so a tab could
 label itself `claude` — is shell integration (OSC 133 and the process title),
 which is a T090 non-goal and a task of its own.
 
+## Colouring a session (T098)
+
+`terminal.recolor` gives a session one of six hues, or clears it. It is core
+state for the same reason the label is, and it is allowed on an ended session
+for the same reason too — an ended shell still sits in the group it belonged to.
+It emits no event: nothing outside the panel reacts to a colour.
+
+**The palette is closed.** `RED GREEN YELLOW BLUE MAGENTA CYAN`, and an unknown
+value is `InvalidInput` on the wire, not merely absent from the picker. A free
+colour would be a hex string the core cannot reason about, chosen against one of
+two ramps and unreadable in the other; the six are the ANSI tokens the terminal
+itself paints with (ADR-016), so a coloured pill and the output under it agree.
+
+**The colour is a bar down the pill's left edge, never the dot.** The dot says
+whether the shell is alive. A group of shells you coloured yellow must not stop
+telling you that one of them died, so what the session is *for* and whether it
+is *running* get one channel each.
+
+A colour dies with its session, because a `TerminalId` does. Keeping one across
+a restart would need a session that has an identity beyond its process, which is
+T095's deferred named profiles.
+
+## Where a new terminal starts (T098)
+
+`terminal.spawn` roots at the workspace root unless the caller names a
+workspace-relative `cwd` — which nothing did until now. The panel sends the
+folder of the **document being edited**, so someone in
+`crates/terminal/src/system.rs` gets a shell in `crates/terminal/src` instead of
+typing the path already on their screen. Nothing is open, or the active tab
+belongs to another workspace: the root, exactly as before.
+
+This does not weaken ADR-010. The renderer still names no directory — it names a
+workspace and a path *relative to it*, and the core resolves that against the
+root, refusing anything that escapes, before a PTY is allocated.
+
+A folder that has been deleted or renamed since the tab was opened falls back to
+the workspace root rather than failing a spawn the user cannot act on — the same
+call T095 makes for a shell profile that has gone stale. Hard rule 7 is not in
+play: nothing is being silently resolved *against the user's intent*, because
+the cwd is a convenience they did not ask for.
+
+The dock's auto-start waits for the workspace answer before starting its first
+shell. It did not before, and the race was invisible while every shell started
+at the root; now that the rooting depends on the answer, arriving early would
+put the first shell in the home directory with a workspace open.
+
 ## Choosing a shell (T095)
 
 `terminal.profiles` reports the shells the picker should offer. Discovery lives
@@ -164,14 +210,59 @@ terminal settings override the family and the size, and a change is applied to
 a live terminal in place — the grid is recomputed and the PTY told, so the
 shell stops wrapping at the old width, and the scrollback survives.
 
+## The dock (T096, design artboard 8a)
+
+The dock's chrome is **one 32px row**, and the panel owns it rather than the
+shell: the row has to stay visible while the body is hidden, and the body is
+what the disclosure hides. That is the whole reason the collapse moved out of
+`App.tsx`, and it has a second effect worth having — a collapsed dock still says
+which shells are running, which the count badge it replaced only approximated.
+
+A session is a **pill**: a dot, its label, where it is, and how it ended.
+`terminalLabel` (T047) supplies the label; the directory is the workspace's own
+name at its root, the workspace-relative path deeper in, and `~` for a home
+session. A session rooted in a workspace that is no longer open shows no
+directory at all — its name is not on the wire, and the tooltip already says it
+has a workspace root. Inventing a plausible one would be worse than saying
+nothing.
+
+**Terminate is the `✕` on the pill you are on**, and it means two things
+depending on what it is pointing at. On a running session it terminates, and the
+pill stays — reading how a shell ended is the entire reason the core keeps an
+ended session listed. On an ended one it removes the pill. Collapsing both into
+"kill and forget" would have made the exit status unreachable for exactly the
+sessions the user dismisses themselves; keeping two buttons would have kept the
+old defect, which was that the destructive control and the constructive one were
+the same quiet button. Removing a running session in one step is on the pill's
+context menu, where a destructive shortcut belongs.
+
+**`⌥1…⌥9`** select the *n*th session, from anywhere, including from inside a
+focused terminal — which takes refusing the chord twice.
+`attachCustomKeyEventHandler` stops xterm forwarding it to the shell; the
+panel's `preventDefault` stops the browser inserting the character macOS
+composed (`⌥1` is `¡`) into xterm's helper textarea. Neither alone silences it.
+The chord is off while the island is open, because `island.tsx` binds the same
+one to a decision's options and its own field guard deliberately lets xterm's
+textarea through; two live handlers would answer a question and switch a
+terminal on one keystroke.
+
+Which shell a new terminal starts is a property of the **button**, not of the
+session on screen, so the T095 picker is the caret half of a split "New
+terminal" control and appears only when more than one profile is startable. The
+settings are behind `⋯`, opening upward: the dock is the bottom of the window.
+
+Every colour comes from the ADR-016 tokens, so the light ramp followed without a
+second palette.
+
 ## What is deliberately not here
 
 - **No terminal buffer persistence.** Nothing a shell prints is written to the
   session database, and nothing is logged. Terminal content is user data and
   routinely contains secrets.
 - **No shell integration or splits.** T090 is a spike; these are product
-  features with their own tasks. A tab that names itself after the program it
-  is running needs OSC 133 and lives there.
+  features with their own tasks. Grouping output per command needs OSC 133 and
+  is specified as **T097** (draft ADR-017); a tab that names itself after the
+  program it is running is built on the same markers.
 - **No named profiles.** T095 lets the user pick a shell and add a path. A
   *named* profile with its own arguments, environment and working directory
   needs a document to persist it in, not a list of paths.

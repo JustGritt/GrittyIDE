@@ -31,9 +31,9 @@ use crate::protocol::ids::{CorrelationId, TerminalId};
 use crate::protocol::time::Timestamp;
 use crate::workspace::WorkspaceManager;
 use wire::{
-    KillTerminalRequest, ListProfilesRequest, RenameTerminalRequest, ResizeTerminalRequest,
-    SpawnTerminalRequest, Terminal, TerminalExitedPayload, TerminalOutputPayload, TerminalProfile,
-    TerminalStatus, WriteTerminalRequest,
+    KillTerminalRequest, ListProfilesRequest, RecolorTerminalRequest, RenameTerminalRequest,
+    ResizeTerminalRequest, SpawnTerminalRequest, Terminal, TerminalExitedPayload,
+    TerminalOutputPayload, TerminalProfile, TerminalStatus, WriteTerminalRequest,
 };
 
 /// Concurrent sessions allowed. Each one costs a shell, two threads and a
@@ -207,6 +207,7 @@ impl TerminalManager {
                 .map(|path| path.display().to_string())
                 .unwrap_or_else(|| "$SHELL".into()),
             name: None,
+            color: None,
             pid: session.pid(),
             status: TerminalStatus::Running,
             cols: size.cols,
@@ -324,6 +325,22 @@ impl TerminalManager {
             .get_mut(&request.terminal_id)
             .ok_or_else(|| unknown(&request.terminal_id))?;
         entry.terminal.name = name;
+        Ok(entry.terminal.clone())
+    }
+
+    /// `terminal.recolor`: give a session a colour, or clear it with `None`.
+    ///
+    /// Core state for the same reason the label is: `terminal.list` is what
+    /// rehydrates the panel after a renderer reload, so a colour kept only in
+    /// the renderer would vanish while the session it grouped kept running.
+    /// Allowed on an ended session, like renaming — an ended shell still sits
+    /// in the row it was grouped with.
+    pub fn recolor(&self, request: RecolorTerminalRequest) -> Result<Terminal, CoreError> {
+        let mut sessions = self.lock();
+        let entry = sessions
+            .get_mut(&request.terminal_id)
+            .ok_or_else(|| unknown(&request.terminal_id))?;
+        entry.terminal.color = request.color;
         Ok(entry.terminal.clone())
     }
 
@@ -1408,6 +1425,86 @@ mod tests {
             .rename(RenameTerminalRequest {
                 terminal_id: TerminalId::new(),
                 name: Some("nope".into()),
+            })
+            .expect_err("no such session");
+        assert_eq!(error.code, CoreErrorCode::NotFound);
+    }
+
+    #[tokio::test]
+    async fn a_session_starts_with_no_colour_and_keeps_the_one_it_is_given() {
+        let h = start();
+        let terminal = h.spawn();
+        assert_eq!(terminal.color, None, "a colour is chosen, never assumed");
+
+        let coloured = h
+            .manager
+            .recolor(RecolorTerminalRequest {
+                terminal_id: terminal.id.clone(),
+                color: Some(wire::TerminalColor::Blue),
+            })
+            .expect("recolor");
+        assert_eq!(coloured.color, Some(wire::TerminalColor::Blue));
+
+        // The snapshot `terminal.list` rehydrates from carries it, which is the
+        // whole reason the colour is core state rather than renderer state.
+        let listed = h.manager.list();
+        assert_eq!(listed[0].color, Some(wire::TerminalColor::Blue));
+    }
+
+    #[tokio::test]
+    async fn a_colour_can_be_cleared_back_to_none() {
+        let h = start();
+        let terminal = h.spawn();
+        h.manager
+            .recolor(RecolorTerminalRequest {
+                terminal_id: terminal.id.clone(),
+                color: Some(wire::TerminalColor::Magenta),
+            })
+            .expect("recolor");
+
+        let cleared = h
+            .manager
+            .recolor(RecolorTerminalRequest {
+                terminal_id: terminal.id,
+                color: None,
+            })
+            .expect("clearing is a recolor like any other");
+        assert_eq!(
+            cleared.color, None,
+            "clearing goes back to no colour, not to a default one"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_ended_session_can_still_be_coloured() {
+        // An ended shell still sits in the group it belonged to; refusing would
+        // be a rule with no purpose behind it, exactly as for renaming.
+        let h = start();
+        let terminal = h.spawn();
+        h.host.last().finish(TerminalExit {
+            code: Some(1),
+            signal: None,
+        });
+
+        let coloured = h
+            .manager
+            .recolor(RecolorTerminalRequest {
+                terminal_id: terminal.id,
+                color: Some(wire::TerminalColor::Red),
+            })
+            .expect("an ended session is still a session");
+        assert_eq!(coloured.status, TerminalStatus::Exited);
+        assert_eq!(coloured.color, Some(wire::TerminalColor::Red));
+    }
+
+    #[tokio::test]
+    async fn colouring_an_unknown_session_is_not_found() {
+        let h = start();
+        let error = h
+            .manager
+            .recolor(RecolorTerminalRequest {
+                terminal_id: TerminalId::new(),
+                color: Some(wire::TerminalColor::Cyan),
             })
             .expect_err("no such session");
         assert_eq!(error.code, CoreErrorCode::NotFound);

@@ -25,6 +25,14 @@ interface Engine {
 }
 
 export interface EditorBinding {
+  /**
+   * Ref for the pane's editor surface. A callback, not a ref object: the pane
+   * mounts and unmounts with the workspace and the attention queue, and the
+   * host has to follow that rather than be built once against whatever was on
+   * screen when the window opened.
+   */
+  attachContainer(element: HTMLElement | null): void;
+  /** The attached surface, for hit-testing focus; `null` while the pane is unmounted. */
   readonly containerRef: RefObject<HTMLElement | null>;
   /** Line endings of each open document as last received from the core. */
   readonly eols: Readonly<Record<string, Eol>>;
@@ -68,7 +76,15 @@ export function useEditorBinding(
   documents: DocumentsController,
   prefs: EditorPreferences,
 ): EditorBinding {
-  const containerRef = useRef<HTMLElement>(null);
+  const containerRef = useRef<HTMLElement | null>(null);
+  const [container, setContainer] = useState<HTMLElement | null>(null);
+  /**
+   * Monaco's own element, owned by this hook rather than by the pane. It is
+   * moved into whichever surface is on screen, so one editor — with its
+   * models, undo history, view states and unread keystrokes — outlives every
+   * mount and unmount of the pane.
+   */
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
   const [engine, setEngine] = useState<Engine | null>(null);
   const [eols, setEols] = useState<Record<string, Eol>>({});
   const applied = useRef(new Map<DocumentId, number>());
@@ -99,11 +115,17 @@ export function useEditorBinding(
     for (const listener of [...viewListeners.current]) listener();
   }, []);
 
+  const attachContainer = useCallback((element: HTMLElement | null) => {
+    containerRef.current = element;
+    setContainer(element);
+  }, []);
+
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
+    const surface = document.createElement('div');
+    surface.className = 'editor__monaco-surface';
+    surfaceRef.current = surface;
     const registry = new DocumentModelRegistry(setupMonaco());
-    const host = createEditorHost(container);
+    const host = createEditorHost(surface);
     host.onSave(() => {
       const activeId = documentsRef.current.state.activeId;
       if (activeId !== null) void documentsRef.current.save(activeId);
@@ -138,9 +160,22 @@ export function useEditorBinding(
       pendingViews.current.clear();
       host.dispose();
       registry.disposeAll();
+      surface.remove();
+      surfaceRef.current = null;
       setEngine(null);
     };
   }, [trackView]);
+
+  // Move the editor into the pane whenever one appears, and lay it out: the
+  // element was last measured detached (zero-sized), and `automaticLayout`
+  // alone would leave the first frame blank.
+  useEffect(() => {
+    const surface = surfaceRef.current;
+    if (!container || !surface || !engine) return;
+    container.appendChild(surface);
+    engine.host.layout();
+    return () => surface.remove();
+  }, [container, engine]);
 
   useEffect(() => {
     if (!engine) return;
@@ -286,6 +321,7 @@ export function useEditorBinding(
   const focus = useCallback(() => engine?.host.focus(), [engine]);
 
   return {
+    attachContainer,
     containerRef,
     eols,
     subscribeCursor,

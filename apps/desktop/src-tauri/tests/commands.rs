@@ -1287,6 +1287,37 @@ fn a_terminal_can_be_named_and_the_name_survives_a_relist() {
 }
 
 #[test]
+fn a_terminal_can_be_coloured_and_the_colour_survives_a_relist() {
+    let (harness, _dir, _workspace, terminal) = terminal_harness();
+
+    let coloured = harness
+        .terminal(
+            "terminal_recolor",
+            json!({ "terminalId": terminal["id"], "color": "BLUE" }),
+        )
+        .expect("recolor");
+    assert_eq!(coloured["color"], "BLUE");
+
+    // Core state, like the name and for the same reason: a renderer that
+    // reloads and re-lists gets the grouping back rather than losing it.
+    let listed = harness.invoke("terminal_list", json!({})).expect("list");
+    assert_eq!(listed[0]["color"], "BLUE");
+
+    let cleared = harness
+        .terminal("terminal_recolor", json!({ "terminalId": terminal["id"] }))
+        .expect("clearing is a recolor like any other");
+    assert!(cleared.get("color").is_none(), "{cleared}");
+
+    let error = harness
+        .terminal(
+            "terminal_recolor",
+            json!({ "terminalId": terminal["id"], "color": "TEAL" }),
+        )
+        .expect_err("the palette is closed");
+    assert_eq!(error["code"], "InvalidInput");
+}
+
+#[test]
 fn terminal_profiles_reports_what_the_host_can_start() {
     let harness = Harness::new();
 

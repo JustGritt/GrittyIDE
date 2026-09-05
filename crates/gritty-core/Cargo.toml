@@ -9,6 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+gritty-agents = { workspace = true }
 gritty-persistence = { workspace = true }
 gritty-terminal = { workspace = true }
 gritty-workspace = { workspace = true }

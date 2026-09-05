@@ -18,7 +18,9 @@ import { DEFAULT_TERMINAL_FONT_SIZE } from './terminal-view';
  * glyphs need a patched font.
  *
  * Mirrors the editor's preferences popover: a `<details>`, persisted with the
- * rest of the layout.
+ * rest of the layout. It is the bar's `⋯` (T096, artboard 8a) and opens
+ * *upward* — the dock is the bottom of the window, so a popover hanging below
+ * its summary would fall off the screen.
  */
 export function TerminalSettings({
   settings,
@@ -50,8 +52,10 @@ export function TerminalSettings({
   };
 
   return (
-    <details className="prefs">
-      <summary>Terminal settings</summary>
+    <details className="prefs prefs--up terminal-settings">
+      <summary aria-label="Terminal settings" title="Terminal settings">
+        ⋯
+      </summary>
       <div className="prefs__form">
         <fieldset className="terminal-settings__shells">
           <legend>Shells</legend>

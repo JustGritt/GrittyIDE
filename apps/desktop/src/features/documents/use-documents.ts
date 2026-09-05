@@ -13,6 +13,7 @@ import {
   documentsReducer,
   findTabByPath,
   initialDocumentsState,
+  isUnsaved,
 } from './documents-reducer';
 import { UpdateScheduler } from './update-scheduler';
 
@@ -29,6 +30,15 @@ export interface OpenFileOptions {
   readonly largeFileEditing?: boolean;
   /** Report a failure only through the result, not the pane's error banner (link clicks). */
   readonly quiet?: boolean;
+  /**
+   * Open it for a look: the tab replaces the last preview instead of joining
+   * the strip, until something keeps it (a double click, an edit, a reorder).
+   *
+   * Off by default, so every other way in — a drop, a restored session, a
+   * followed link — keeps its tab as before. Only the explorer's single click
+   * asks for this.
+   */
+  readonly preview?: boolean;
 }
 
 export type OpenFileResult =
@@ -74,10 +84,10 @@ export function useDocuments() {
   }, []);
 
   const opened = useCallback(
-    (content: DocumentContent, activate: boolean) => {
+    (content: DocumentContent, activate: boolean, preview = false) => {
       confirm(content);
       pending.current.delete(content.document.id);
-      dispatch({ type: 'opened', content, activate });
+      dispatch({ type: 'opened', content, activate, preview });
     },
     [confirm],
   );
@@ -261,28 +271,66 @@ export function useDocuments() {
     [scheduler],
   );
 
+  /**
+   * Retire the tab the last single click left behind.
+   *
+   * Only ever a clean one: a preview with unsaved work in it was already kept
+   * by the edit that dirtied it, so this is the second guard rather than the
+   * first. A refusal is not reported — the tab simply stays as an ordinary
+   * one, which is the safe outcome and costs the user nothing.
+   */
+  const retirePreview = useCallback(
+    async (documentId: DocumentId) => {
+      const tab = stateRef.current.tabs[documentId];
+      if (!tab || isUnsaved(tab)) return;
+      scheduler.cancel(documentId);
+      try {
+        await core.documents.close({ documentId });
+        forget(documentId);
+        dispatch({ type: 'closed', documentId });
+      } catch {
+        // Left open on purpose: losing the file the user just asked for would
+        // be a far worse failure than one extra tab.
+      }
+    },
+    [scheduler, forget],
+  );
+
   const openFile = useCallback(
     async (
       workspaceId: WorkspaceId,
       path: string,
       options: OpenFileOptions = {},
     ): Promise<OpenFileResult> => {
+      const preview = options.preview === true;
       if (!options.largeFileEditing) {
         // Reopening would return the live buffer and replace up to one
         // debounce interval of typing in the editor; activating is enough.
         const existing = findTabByPath(stateRef.current, workspaceId, path);
         if (existing) {
           dispatch({ type: 'activate', documentId: existing.document.id });
+          // Asked for any way other than a single click, it is kept — which is
+          // what makes a double click on an already-previewed file work, and
+          // what stops a single click demoting a tab the user chose to keep.
+          if (!preview) dispatch({ type: 'promote', documentId: existing.document.id });
           return { ok: true, documentId: existing.document.id };
         }
       }
+      // Read before the await: whatever was on preview when the click landed
+      // is what this open replaces. If it is edited while the file loads,
+      // `retirePreview` sees the unsaved tab and leaves it alone.
+      const replacing = preview ? stateRef.current.previewId : null;
       try {
         const request = options.largeFileEditing
           ? { workspaceId, path, largeFileEditing: true }
           : { workspaceId, path };
         const content = await core.documents.open(request);
-        opened(content, true);
+        opened(content, true, preview);
         if (!options.quiet) setError(null);
+        // After the new tab exists, so the editor never blinks through empty.
+        if (replacing !== null && replacing !== content.document.id) {
+          void retirePreview(replacing);
+        }
         return { ok: true, documentId: content.document.id };
       } catch (cause: unknown) {
         const error = toCoreError(cause);
@@ -290,7 +338,7 @@ export function useDocuments() {
         return { ok: false, error };
       }
     },
-    [opened],
+    [opened, retirePreview],
   );
 
   /** Replace the whole buffer (explicit line-ending normalization); the editor re-seeds its model. */
@@ -334,8 +382,9 @@ export function useDocuments() {
     [scheduler, reloaded],
   );
 
+  /** Resolves to whether the document was closed; a refusal stays on the tab. */
   const close = useCallback(
-    async (documentId: DocumentId, force = false) => {
+    async (documentId: DocumentId, force = false): Promise<boolean> => {
       if (force) {
         scheduler.cancel(documentId);
         pending.current.delete(documentId);
@@ -346,8 +395,10 @@ export function useDocuments() {
         await core.documents.close(force ? { documentId, force } : { documentId });
         forget(documentId);
         dispatch({ type: 'closed', documentId });
+        return true;
       } catch (cause: unknown) {
         dispatch({ type: 'closeFailed', documentId, error: toCoreError(cause) });
+        return false;
       }
     },
     [scheduler, forget],
@@ -364,6 +415,11 @@ export function useDocuments() {
 
   const activate = useCallback(
     (documentId: DocumentId) => dispatch({ type: 'activate', documentId }),
+    [],
+  );
+  /** Keep a preview tab: the double click on the tab itself. */
+  const promoteTab = useCallback(
+    (documentId: DocumentId) => dispatch({ type: 'promote', documentId }),
     [],
   );
   const reorder = useCallback(
@@ -395,6 +451,7 @@ export function useDocuments() {
     close,
     enableEditing,
     activate,
+    promoteTab,
     reorder,
     keepBuffer,
     checkStatus,

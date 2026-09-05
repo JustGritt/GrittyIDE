@@ -79,7 +79,7 @@ pub fn forget(database: &Database, root: &str) -> Result<(), PersistenceError> {
 /// Last component of the root, or the whole root for a drive/filesystem root.
 ///
 /// The same rule `Workspace::name` follows, on a path that is not open.
-fn display_name(root: &Path) -> String {
+pub(crate) fn display_name(root: &Path) -> String {
     root.file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| root.to_string_lossy().into_owned())
@@ -89,7 +89,7 @@ fn display_name(root: &Path) -> String {
 ///
 /// Presentation only, and never a path anything is opened by: the untouched
 /// `root` stays on the entry for that.
-fn shorten(root: &Path, home: Option<&Path>) -> String {
+pub(crate) fn shorten(root: &Path, home: Option<&Path>) -> String {
     let Some(home) = home else {
         return root.to_string_lossy().into_owned();
     };

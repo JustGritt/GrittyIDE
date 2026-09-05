@@ -21,6 +21,7 @@ use ts_rs::TS;
 
 use gritty_workspace::WorkspacePath;
 
+use crate::agent_session::wire::AgentRoster;
 use crate::document::{
     Document, DocumentChangeCause, DocumentClosedReason, ExternalModificationState,
 };
@@ -102,6 +103,10 @@ pub enum CoreEvent {
     DecisionRequested(DecisionRequestedPayload),
     /// It was answered or dismissed; the payload's `state` says which.
     DecisionResolved(DecisionResolvedPayload),
+    /// The roster of agent sessions running on this machine changed (T220).
+    /// Carries the whole roster and is emitted only when it actually differs
+    /// from the last one, never once per poll (rule 8).
+    AgentSessionsChanged(AgentRoster),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -218,6 +223,7 @@ impl CoreEvent {
             Self::WorkstreamRemoved(_) => "WorkstreamRemoved",
             Self::DecisionRequested(_) => "DecisionRequested",
             Self::DecisionResolved(_) => "DecisionResolved",
+            Self::AgentSessionsChanged(_) => "AgentSessionsChanged",
         }
     }
 
@@ -245,7 +251,8 @@ impl CoreEvent {
             | Self::WorkstreamChanged(_)
             | Self::WorkstreamRemoved(_)
             | Self::DecisionRequested(_)
-            | Self::DecisionResolved(_) => None,
+            | Self::DecisionResolved(_)
+            | Self::AgentSessionsChanged(_) => None,
         }
     }
 

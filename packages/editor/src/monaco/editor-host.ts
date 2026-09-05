@@ -38,6 +38,11 @@ export interface SelectionState {
 export interface EditorHost {
   show(model: monaco.editor.ITextModel | null, documentId: DocumentId | null): void;
   applyOptions(options: EditorOptions): void;
+  /**
+   * Re-measure the container. `automaticLayout` covers resizes of an attached
+   * element; this covers the editor being moved into a different one.
+   */
+  layout(): void;
   focus(): void;
   /** Cmd/Ctrl+S while the editor has focus. */
   onSave(callback: () => void): void;
@@ -84,6 +89,9 @@ export function createEditorHost(container: HTMLElement): EditorHost {
     },
     applyOptions(options) {
       editor.updateOptions(options);
+    },
+    layout() {
+      editor.layout();
     },
     focus() {
       editor.focus();

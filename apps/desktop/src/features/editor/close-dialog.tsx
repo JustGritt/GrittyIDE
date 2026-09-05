@@ -6,12 +6,15 @@ import { fileName } from './file-name';
 export function CloseDialog({
   tab,
   busy,
+  queued,
   onSave,
   onDiscard,
   onCancel,
 }: {
   tab: DocumentTab;
   busy: boolean;
+  /** Tabs waiting behind this one in a batch close; cancelling keeps them all. */
+  queued: number;
   onSave: () => void;
   onDiscard: () => void;
   onCancel: () => void;
@@ -39,6 +42,12 @@ export function CloseDialog({
           <code>{tab.document.path}</code> has unsaved changes. Save them, discard them, or keep the
           document open.
         </p>
+        {queued > 0 && (
+          <p className="dialog__queued">
+            {queued === 1 ? '1 more tab is' : `${queued} more tabs are`} queued behind it. Cancel
+            keeps this document and the rest of them open.
+          </p>
+        )}
         {tab.error && (
           <p className="dialog__error">
             Last error: {tab.error.code}: {tab.error.message}
