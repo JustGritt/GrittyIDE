@@ -27,6 +27,7 @@ const session: AgentSession = {
   id: 'session-1',
   provider: 'CLAUDE_CODE',
   activity: 'WORKING',
+  activitySource: 'TRANSCRIPT',
   evidence: 'BOTH',
   inWorkspace: true,
   title: `${HOSTILE} ${TRAVERSAL}`,
