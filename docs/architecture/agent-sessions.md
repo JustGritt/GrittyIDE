@@ -211,7 +211,65 @@ no I/O at all.
 T221 will put the hook state directory on this same loop, because a permission
 prompt reported six seconds late is not worth reporting.
 
-## Specified but not built (T221, T222, T232)
+## The rail (T231, T232)
+
+The roster and the timeline surface in a third region of the shell, to the right
+of the editor, with its own splitter: a list of sessions coloured by status, and
+beneath it the selected session's feed and the files it touched. Clicking a
+touched file opens it in the editor — the thing a terminal multiplexer
+structurally cannot do.
+
+T231 shipped the region and the list: the third child of `shell__body`, a
+right-anchored splitter driving `--agent-rail-width`, `agentRailWidth` and the
+collapsed flag in the layout blob, one row per session in the core's ranking,
+the five status labels below, and selection that opens exactly one timeline
+follower (`⌥G` toggles the rail; collapsing it closes the follower, because an
+invisible one is waste).
+
+T232 filled the body. Four things about it are load-bearing:
+
+- **The feed accumulates a delta, never a snapshot.** `AgentTimelineAppended`
+  carries only what was appended, so the renderer keys on `seq` and appends;
+  `openTimeline`'s answer is the base it appends to, and a consumer that missed
+  an event calls `agents.timeline` to resynchronise. Nothing assumes it has
+  ever been handed the whole timeline.
+- **`dropped` and `restarted` are drawn, not repaired.** Both render as an
+  explicit row at the head of the feed — the entries that are missing are always
+  the oldest ones. A restart clears what was held rather than joining two
+  transcripts. The core reports its own losses precisely so the UI does not have
+  to guess, and splicing around them would throw that away.
+- **A tool result attaches to its call by `toolUseId`**, so a result reads as
+  the outcome of something rather than as a floating line. A call with no result
+  yet reads as still running; a result whose call has fallen out of the ring
+  draws on its own. Subagent (`sidechain`) entries are marked and subordinate,
+  never hidden — T220 dropped them and listed that as a known limitation.
+- **Opening a touched file calls `documents.status` first.** External
+  modification is checked on demand until T070 exists, so a file the agent
+  rewrote a second ago would otherwise open from a stale buffer, or reuse an
+  open tab whose contents predate the write. Checking first turns it into the
+  ordinary external-change flow, and nothing is resolved silently (rule 7). A
+  file outside the open workspace carries no `WorkspacePath` at all, so it is
+  text and not a control — the protocol draws that line, not the renderer.
+
+Every string in the feed is a text node: no Markdown, no HTML, no link the view
+resolves, no path built by concatenation, no command anything runs. The core
+bounded each field before it crossed the protocol and the renderer's whole job
+is not to undo that (rule 13).
+
+It is deliberately **not** a tab in the document strip. Agent sessions and open
+files are different kinds of thing, and `SessionTab.path` is a required
+`WorkspacePath` in a non-nullable column, so a non-document tab would cost a
+wire change, a ts-rs regeneration and a migration. The rail's width lives in the
+UI-owned layout blob and costs none of that.
+
+The rail and the island read **one** `useAgents` controller, following T210's
+rule that two surfaces over one controller cannot disagree; the island's agents
+section reduces to a count and its most urgent row. The rail's five labels map
+onto the wire as Working=`WORKING`, Pending validation=`BLOCKED`, Done=`WAITING`,
+Idle=`IDLE`, Ended=`ENDED` — `WAITING` keeps its name because it means *the
+user's move*, and renaming the wire for a word is not worth the ripple.
+
+## Specified but not built (T221, T222)
 
 Everything above this line is implemented. Everything below is written down and
 not yet built; nothing here may be described as behaviour Gritty has.
@@ -255,33 +313,6 @@ without it the roster is exactly what T220 shipped.
 state or elapsed-time threshold may produce it, which satisfies rule 12 by
 construction. A new `activitySource` field (`PROCESS | TRANSCRIPT | HOOK`) says
 which source produced a verdict, so a row is attributable rather than magic.
-
-**The rail (T231, built; T232, not yet).** The roster and the timeline surface
-in a third region of the shell, to the right of the editor, with its own
-splitter: a list of sessions coloured by status, and beneath it the selected
-session's feed and the files it touched. Clicking a touched file opens it in the
-editor — the thing a terminal multiplexer structurally cannot do.
-
-T231 shipped the region and the list: the third child of `shell__body`, a
-right-anchored splitter driving `--agent-rail-width`, `agentRailWidth` and the
-collapsed flag in the layout blob, one row per session in the core's ranking,
-the five status labels below, and selection that opens exactly one timeline
-follower (`⌥G` toggles the rail; collapsing it closes the follower, because an
-invisible one is waste). The body under the list is a placeholder until T232
-draws the feed and the files touched.
-
-It is deliberately **not** a tab in the document strip. Agent sessions and open
-files are different kinds of thing, and `SessionTab.path` is a required
-`WorkspacePath` in a non-nullable column, so a non-document tab would cost a
-wire change, a ts-rs regeneration and a migration. The rail's width lives in the
-UI-owned layout blob and costs none of that.
-
-The rail and the island read **one** `useAgents` controller, following T210's
-rule that two surfaces over one controller cannot disagree; the island's agents
-section reduces to a count and its most urgent row. The rail's five labels map
-onto the wire as Working=`WORKING`, Pending validation=`BLOCKED`, Done=`WAITING`,
-Idle=`IDLE`, Ended=`ENDED` — `WAITING` keeps its name because it means *the
-user's move*, and renaming the wire for a word is not worth the ripple.
 
 **The rest.** T222 adds Codex. T223 notifies on entering `BLOCKED`/`WAITING`
 and links a session to a workstream — through a separate table, never a field

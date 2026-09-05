@@ -39,7 +39,7 @@ domain abstraction before its upstream contract exists.
 | [T224](T224-reveal-terminal.md) | Reveal the terminal a session is running in | 3 | T220 | not yet started |
 | [T230](T230-agent-timeline.md) | Agent timeline: what a session is actually doing | 3 | T020, T220 | review |
 | [T231](T231-agent-rail.md) | The agent rail: a dedicated region for running agents | 3 | T046, T060, T220, T230 | review |
-| [T232](T232-timeline-view.md) | The timeline view, and the files an agent touched | 3 | T030, T230, T231 | not yet started |
+| [T232](T232-timeline-view.md) | The timeline view, and the files an agent touched | 3 | T030, T230, T231 | review |
 | T300–T410 | Agent protocol, runs, orchestration | 4–5 | T200, T210 | not yet specified |
 
 ## Dependency graph (architecture addendum §2)
