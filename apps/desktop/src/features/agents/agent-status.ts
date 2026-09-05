@@ -1,4 +1,4 @@
-import type { AgentActivity, AgentProvider } from '@gritty/protocol';
+import type { AgentActivity, AgentActivitySource, AgentProvider } from '@gritty/protocol';
 
 /**
  * How the renderer says what an agent session is doing (T231 §8/§9).
@@ -36,6 +36,20 @@ const STATUSES: Record<AgentActivity, AgentStatus> = {
     tone: 'working',
     hint: 'A tool call is outstanding.',
   },
+  /**
+   * The fifth status of §8, and the one T231 wrote down before the core could
+   * produce it.
+   *
+   * `BLOCKED` needs hook evidence (T221, ADR-018): poll-only discovery cannot
+   * tell a pending permission prompt from a finished turn, so until the agent
+   * itself reported one there was nothing to draw. Now there is, and the label
+   * and colour that were waiting here are what it lands as.
+   */
+  BLOCKED: {
+    label: 'Pending validation',
+    tone: 'blocked',
+    hint: 'The agent is waiting for you to approve something.',
+  },
   WAITING: {
     label: 'Done',
     tone: 'done',
@@ -54,29 +68,11 @@ const STATUSES: Record<AgentActivity, AgentStatus> = {
 };
 
 /**
- * The fifth status of §8, which the core cannot produce yet.
- *
- * `BLOCKED` needs hook evidence (T221): poll-only discovery cannot tell a
- * pending permission prompt from a finished turn, so `AgentActivity` does not
- * carry the value and nothing here can display it today. It is written down
- * beside its four siblings so that the label and the colour land with the wire
- * value rather than a release after it — not so that the rail can guess.
- */
-const PENDING_VALIDATION: AgentStatus = {
-  label: 'Pending validation',
-  tone: 'blocked',
-  hint: 'The agent is waiting for you to approve something.',
-};
-
-/**
  * Widened for the lookup: the protocol is additive, so a newer core can send
  * an activity this build's union does not contain (`agents-reducer` makes the
  * same allowance for the same reason).
  */
-const LOOKUP: Readonly<Record<string, AgentStatus | undefined>> = {
-  ...STATUSES,
-  BLOCKED: PENDING_VALIDATION,
-};
+const LOOKUP: Readonly<Record<string, AgentStatus | undefined>> = STATUSES;
 
 /** The status to draw for an activity. Never blank, never invented. */
 export function agentStatus(activity: AgentActivity): AgentStatus {
@@ -89,6 +85,23 @@ export function agentStatus(activity: AgentActivity): AgentStatus {
       hint: 'Reported by a newer core than this build understands.',
     }
   );
+}
+
+/**
+ * Where a row's verdict came from, in the user's words (T221 §24).
+ *
+ * Three sources can disagree, so a row has to be able to say why it claims what
+ * it claims — otherwise "Pending validation" is magic, and the one status the
+ * user is meant to act on is the one they have least reason to trust.
+ */
+const SOURCES: Record<AgentActivitySource, string> = {
+  PROCESS: 'from the process table',
+  TRANSCRIPT: 'from the transcript',
+  HOOK: 'reported by the agent itself',
+};
+
+export function activitySourceLabel(source: AgentActivitySource): string {
+  return (SOURCES as Record<string, string | undefined>)[source] ?? 'from an unknown source';
 }
 
 /** Which CLI produced a session, in the user's words. */

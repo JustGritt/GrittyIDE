@@ -22,4 +22,15 @@ restarted: boolean,
  * Whether a transcript was readable at all. `false` with an empty timeline
  * means "nothing to read", not "the agent did nothing".
  */
-transcriptEvidence: boolean, };
+transcriptEvidence: boolean, 
+/**
+ * The permission prompt this session is stopped at, if any (T221).
+ *
+ * An [`AgentTimelineKind::PermissionPending`] entry, held **beside** the
+ * ring rather than in it, because it is a *state* and not something that
+ * happened: it appears when the hook reports `BLOCKED` and goes when the
+ * phase leaves it. An entry in the ring could only ever be appended, so a
+ * prompt that was answered would stay in the feed forever claiming to be
+ * waiting.
+ */
+pending?: AgentTimelineEntry, };

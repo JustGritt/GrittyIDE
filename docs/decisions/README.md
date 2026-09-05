@@ -23,7 +23,7 @@ requires updating the relevant ADR.
 | [ADR-015](ADR-015-terminal-pty.md) | Terminal sessions over a PTY: portable-pty, output batching, process-tree termination, shell and environment policy | Accepted |
 | [ADR-016](ADR-016-design-tokens.md) | Design tokens: CSS custom properties are the single source of truth; Monaco and xterm read them back | Accepted |
 | [ADR-017](ADR-017-terminal-command-blocks.md) | Terminal command blocks are a renderer-side view of xterm's scrollback | Proposed |
-| [ADR-018](ADR-018-agent-integration-bridge.md) | Gritty may install a hook into another tool's configuration, additively and with consent | Proposed |
+| [ADR-018](ADR-018-agent-integration-bridge.md) | Gritty may install a hook into another tool's configuration, additively and with consent | Accepted |
 
 Template:
 

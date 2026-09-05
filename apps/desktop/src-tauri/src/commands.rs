@@ -12,7 +12,9 @@ use std::sync::Once;
 use std::time::Instant;
 
 use gritty_core::agent_session::{
-    AgentRoster, AgentTimeline, AgentTimelineRequest, ListAgentSessionsRequest,
+    AgentIntegration, AgentIntegrationChange, AgentIntegrationChangeRequest,
+    AgentIntegrationRequest, AgentRoster, AgentTimeline, AgentTimelineRequest,
+    ListAgentSessionsRequest,
 };
 use gritty_core::document::{
     CloseDocumentRequest, Document, DocumentContent, DocumentStatusRequest, OpenDocumentRequest,
@@ -606,6 +608,64 @@ pub async fn agents_timeline(
     guard("agents.timeline", move |_| async move {
         let request: AgentTimelineRequest = parse_request(request)?;
         agents.timeline(&request.session_id).await
+    })
+    .await
+}
+
+/// `agents.integrationStatus`
+///
+/// Reads a provider's configuration and says whether Gritty's hook is in it
+/// (T221). Read-only; the two commands below are the only ones in the whole
+/// `agents.*` surface that write anything at all, and only into the one file
+/// ADR-018 allows.
+#[tauri::command]
+pub async fn agents_integration_status(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentIntegration, CoreError> {
+    let agents = core.agents.clone();
+    guard("agents.integrationStatus", move |_| async move {
+        let request: AgentIntegrationRequest = parse_request(request)?;
+        agents.integration_status(request.provider).await
+    })
+    .await
+}
+
+/// `agents.integrationInstall`
+///
+/// `apply: false` returns the change without making it — the file, the events,
+/// the entry and the backup path — so the UI shows the diff it is about to
+/// apply rather than a description of one (ADR-018 §3).
+#[tauri::command]
+pub async fn agents_integration_install(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentIntegrationChange, CoreError> {
+    let agents = core.agents.clone();
+    guard("agents.integrationInstall", move |_| async move {
+        let request: AgentIntegrationChangeRequest = parse_request(request)?;
+        agents
+            .integration_install(request.provider, request.apply)
+            .await
+    })
+    .await
+}
+
+/// `agents.integrationUninstall`
+///
+/// Removes exactly the entries whose command runs Gritty's binary, backing the
+/// file up first and leaving every other tool's entries alone.
+#[tauri::command]
+pub async fn agents_integration_uninstall(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentIntegrationChange, CoreError> {
+    let agents = core.agents.clone();
+    guard("agents.integrationUninstall", move |_| async move {
+        let request: AgentIntegrationChangeRequest = parse_request(request)?;
+        agents
+            .integration_uninstall(request.provider, request.apply)
+            .await
     })
     .await
 }

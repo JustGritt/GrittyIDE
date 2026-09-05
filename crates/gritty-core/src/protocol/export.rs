@@ -11,8 +11,9 @@ use ts_rs::{Config, TS};
 
 use super::{CORE_EVENT_CHANNEL, PROTOCOL_VERSION};
 use crate::agent_session::wire::{
-    AgentRoster, AgentSession, AgentTimeline, AgentTimelineAppendedPayload, AgentTimelineRequest,
-    ListAgentSessionsRequest,
+    AgentIntegration, AgentIntegrationChange, AgentIntegrationChangeRequest,
+    AgentIntegrationRequest, AgentRoster, AgentSession, AgentTimeline,
+    AgentTimelineAppendedPayload, AgentTimelineRequest, ListAgentSessionsRequest,
 };
 use crate::document::{
     CloseDocumentRequest, DocumentContent, DocumentStatusRequest, OpenDocumentRequest,
@@ -70,6 +71,10 @@ fn export_bindings() {
     AgentTimeline::export_all(&cfg).expect("export AgentTimeline");
     AgentTimelineRequest::export_all(&cfg).expect("export AgentTimelineRequest");
     AgentTimelineAppendedPayload::export_all(&cfg).expect("export AgentTimelineAppendedPayload");
+    AgentIntegration::export_all(&cfg).expect("export AgentIntegration");
+    AgentIntegrationRequest::export_all(&cfg).expect("export AgentIntegrationRequest");
+    AgentIntegrationChangeRequest::export_all(&cfg).expect("export AgentIntegrationChangeRequest");
+    AgentIntegrationChange::export_all(&cfg).expect("export AgentIntegrationChange");
     CoreError::export_all(&cfg).expect("export CoreError");
     Operation::export_all(&cfg).expect("export Operation");
     CoreEvent::export_all(&cfg).expect("export CoreEvent");

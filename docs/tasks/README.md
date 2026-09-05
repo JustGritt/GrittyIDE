@@ -33,7 +33,7 @@ domain abstraction before its upstream contract exists.
 | [T200](T200-workstream-model.md) | Workstream model + decisions (Gate C) | 3 | T010, T020, T060 | review |
 | [T210](T210-workstream-ui.md) | Workstream UI: the island and the attention queue | 3 | T200 | review |
 | [T220](T220-agent-session-discovery.md) | Agent session discovery: what is running, and on what | 3 | T010, T020, T210 | review |
-| [T221](T221-agent-hook-bridge.md) | Agent hook bridge: earning `BLOCKED` | 3 | T220, T230, ADR-018 | not yet started |
+| [T221](T221-agent-hook-bridge.md) | Agent hook bridge: earning `BLOCKED` | 3 | T220, T230, ADR-018 | review |
 | [T222](T222-agent-providers.md) | More providers: Codex first, then what can be verified | 3 | T220, T221 | not yet started |
 | [T223](T223-agent-attention.md) | Attention: notify when an agent needs you, and link it to the work | 3 | T200, T210, T220, T221 | not yet started |
 | [T224](T224-reveal-terminal.md) | Reveal the terminal a session is running in | 3 | T220 | not yet started |

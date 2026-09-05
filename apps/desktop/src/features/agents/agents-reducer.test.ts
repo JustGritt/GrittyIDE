@@ -14,6 +14,7 @@ function session(overrides: Partial<AgentSession> = {}): AgentSession {
     id: 'claude_code:s-1',
     provider: 'CLAUDE_CODE',
     activity: 'WORKING',
+    activitySource: 'TRANSCRIPT',
     evidence: 'BOTH',
     inWorkspace: true,
     ...overrides,

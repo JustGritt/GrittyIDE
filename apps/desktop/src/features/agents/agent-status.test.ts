@@ -1,13 +1,13 @@
-import type { AgentActivity } from '@gritty/protocol';
+import type { AgentActivity, AgentActivitySource } from '@gritty/protocol';
 import { describe, expect, it } from 'vitest';
-import { agentStatus, providerLabel } from './agent-status';
+import { activitySourceLabel, agentStatus, providerLabel } from './agent-status';
 
 /**
  * Every activity the wire can carry today. Typed, so adding a value to
  * `AgentActivity` fails this list to compile — which is the point: a status the
  * renderer has never heard of must not reach a user as a blank row.
  */
-const ACTIVITIES: readonly AgentActivity[] = ['WORKING', 'WAITING', 'IDLE', 'ENDED'];
+const ACTIVITIES: readonly AgentActivity[] = ['WORKING', 'BLOCKED', 'WAITING', 'IDLE', 'ENDED'];
 
 describe('agentStatus', () => {
   it('is total over AgentActivity', () => {
@@ -17,7 +17,7 @@ describe('agentStatus', () => {
       expect(status.tone).not.toBe('unknown');
       expect(status.hint).not.toBe('');
     }
-    // Four distinct words for four distinct states.
+    // One distinct word and one distinct tone per state.
     expect(new Set(ACTIVITIES.map((activity) => agentStatus(activity).label)).size).toBe(
       ACTIVITIES.length,
     );
@@ -35,11 +35,11 @@ describe('agentStatus', () => {
     expect(agentStatus('ENDED')).toMatchObject({ label: 'Ended', tone: 'ended' });
   });
 
-  it('has a label ready for BLOCKED, which no core can send yet', () => {
-    // T221 is what earns this value. Until it lands `AgentActivity` does not
-    // carry it, so nothing can render it — this only proves the label and the
-    // colour will be there on the day it does, rather than a blank row.
-    expect(agentStatus('BLOCKED' as AgentActivity)).toMatchObject({
+  it('draws BLOCKED as "Pending validation", the status T221 earned', () => {
+    // T231 wrote the label down before any core could send the value; T221's
+    // hook bridge is what makes it reachable, and this is the assertion that
+    // it now travels the whole way rather than sitting unused.
+    expect(agentStatus('BLOCKED')).toMatchObject({
       label: 'Pending validation',
       tone: 'blocked',
     });
@@ -51,6 +51,17 @@ describe('agentStatus', () => {
     const status = agentStatus('SUPERVISING' as AgentActivity);
     expect(status.label).toBe('SUPERVISING');
     expect(status.tone).toBe('unknown');
+  });
+});
+
+describe('activitySourceLabel', () => {
+  it('says where a verdict came from, so a BLOCKED row is attributable', () => {
+    const sources: readonly AgentActivitySource[] = ['PROCESS', 'TRANSCRIPT', 'HOOK'];
+    for (const source of sources) {
+      expect(activitySourceLabel(source)).not.toBe('');
+    }
+    expect(activitySourceLabel('HOOK')).toContain('agent itself');
+    expect(activitySourceLabel('ORACLE' as AgentActivitySource)).toContain('unknown');
   });
 });
 

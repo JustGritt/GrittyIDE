@@ -67,7 +67,14 @@ pub(super) struct OpenTimeline {
     entries: VecDeque<AgentTimelineEntry>,
     /// Folded but not yet delivered. Drained once per fast-loop tick, so a
     /// hundred records become one event rather than a hundred (rule 8).
-    pending: Vec<AgentTimelineEntry>,
+    undelivered: Vec<AgentTimelineEntry>,
+    /// The permission prompt the session is stopped at (T221), held beside the
+    /// ring rather than in it: it is a state that goes away, and a ring can
+    /// only ever append. Set from hook evidence and from nothing else.
+    permission: Option<AgentTimelineEntry>,
+    /// Whether [`Self::permission`] changed since the last batch — the one
+    /// thing that can make a tick emit with no entries appended.
+    permission_changed: bool,
     dropped_total: u32,
     pending_dropped: u32,
     restarted: bool,
@@ -88,7 +95,9 @@ impl OpenTimeline {
             cwd,
             root,
             entries: VecDeque::new(),
-            pending: Vec::new(),
+            undelivered: Vec::new(),
+            permission: None,
+            permission_changed: false,
             dropped_total: 0,
             pending_dropped: 0,
             restarted: false,
@@ -115,7 +124,7 @@ impl OpenTimeline {
             // Keeping the old entries would splice two unrelated stretches of
             // conversation into one.
             self.entries.clear();
-            self.pending.clear();
+            self.undelivered.clear();
             self.restarted = true;
             self.pending_restarted = true;
         }
@@ -125,7 +134,7 @@ impl OpenTimeline {
             self.next_seq = self.next_seq.saturating_add(1);
             let folded = fold(entry, seq, self.cwd.as_deref(), self.root.as_deref(), home);
             self.entries.push_back(folded.clone());
-            self.pending.push(folded);
+            self.undelivered.push(folded);
             if self.entries.len() > MAX_TIMELINE_ENTRIES {
                 self.entries.pop_front();
                 self.dropped_total = self.dropped_total.saturating_add(1);
@@ -136,9 +145,9 @@ impl OpenTimeline {
         // The delta is bounded too. A burst that overflowed the ring must not
         // then cross the protocol whole; what the client cannot have is already
         // counted above.
-        if self.pending.len() > MAX_TIMELINE_ENTRIES {
-            self.pending
-                .drain(..self.pending.len() - MAX_TIMELINE_ENTRIES);
+        if self.undelivered.len() > MAX_TIMELINE_ENTRIES {
+            self.undelivered
+                .drain(..self.undelivered.len() - MAX_TIMELINE_ENTRIES);
         }
     }
 
@@ -150,13 +159,32 @@ impl OpenTimeline {
     pub(super) fn take_batch(&mut self, session_id: &str) -> Option<AgentTimelineAppendedPayload> {
         let restarted = std::mem::take(&mut self.pending_restarted);
         let dropped = std::mem::take(&mut self.pending_dropped);
-        let entries = std::mem::take(&mut self.pending);
-        (!entries.is_empty() || dropped > 0 || restarted).then(|| AgentTimelineAppendedPayload {
-            session_id: session_id.to_owned(),
-            entries,
-            dropped,
-            restarted,
+        let permission_changed = std::mem::take(&mut self.permission_changed);
+        let entries = std::mem::take(&mut self.undelivered);
+        (!entries.is_empty() || dropped > 0 || restarted || permission_changed).then(|| {
+            AgentTimelineAppendedPayload {
+                session_id: session_id.to_owned(),
+                entries,
+                dropped,
+                restarted,
+                // The whole current value, not a delta: a consumer replaces it.
+                pending: self.permission.clone(),
+            }
         })
+    }
+
+    /// Record what the session is stopped at, or that it no longer is (T221).
+    ///
+    /// Returns whether anything changed, which is what keeps a hook that
+    /// rewrites the same phase three times a second from becoming three events
+    /// (rule 8).
+    pub(super) fn set_permission(&mut self, permission: Option<AgentTimelineEntry>) -> bool {
+        if self.permission == permission {
+            return false;
+        }
+        self.permission = permission;
+        self.permission_changed = true;
+        true
     }
 
     /// Everything the ring holds. The answer to `agents.openTimeline` and to
@@ -168,21 +196,57 @@ impl OpenTimeline {
             dropped: self.dropped_total,
             restarted: self.restarted,
             transcript_evidence: self.readable,
+            pending: self.permission.clone(),
         }
     }
 
     /// Drop an undelivered batch. Used after `openTimeline` answers, because
     /// the caller already has those entries in the response.
     pub(super) fn forget_pending(&mut self) {
-        self.pending.clear();
+        self.undelivered.clear();
         self.pending_dropped = 0;
         self.pending_restarted = false;
+        self.permission_changed = false;
     }
 
     #[cfg(test)]
     pub(super) fn len(&self) -> usize {
         self.entries.len()
     }
+}
+
+/// The permission prompt a session is stopped at, as a timeline entry (T221).
+///
+/// Produced from hook evidence and from nothing else — no transcript pattern
+/// may synthesise one, because a prompt and a running tool look identical in a
+/// transcript (rule 12).
+///
+/// `detail` comes from the *transcript's* outstanding tool call rather than
+/// from the state file, and only when the two name the same tool. The state
+/// file deliberately carries no tool input: a `Bash` command line or an `Edit`
+/// payload is exactly the kind of thing that holds a secret, and putting it in
+/// a file on disk to display it would be the wrong trade (rule 13). The
+/// transcript already has the core's bounded preview of the same call, so the
+/// row can say `Bash · cargo test` without the hook ever having written it.
+pub(super) fn permission_entry(
+    tool: Option<&str>,
+    detail: Option<&str>,
+    since_ms: i64,
+) -> Option<AgentTimelineEntry> {
+    // Blocked on *something* is still worth a status; blocked on a tool nobody
+    // named is not worth an entry that would have to invent its subject.
+    let tool = tool?;
+    Some(AgentTimelineEntry {
+        // Not a position in the ring: this entry is always the last thing in
+        // the feed, and it vanishes rather than being superseded.
+        seq: u64::MAX,
+        at: u64::try_from(since_ms).ok().map(Timestamp::from_millis),
+        sidechain: false,
+        kind: AgentTimelineKind::PermissionPending {
+            tool: bounded(tool, MAX_TOOL_DETAIL),
+            detail: detail.map(|detail| bounded(detail, MAX_TOOL_DETAIL)),
+        },
+    })
 }
 
 /// One adapter record to one domain entry.

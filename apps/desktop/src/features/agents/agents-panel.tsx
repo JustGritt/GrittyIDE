@@ -1,3 +1,4 @@
+import { AgentIntegrationSettings } from './agent-integration-settings';
 import { AGENT_RAIL_CHORD_HINT } from './agent-rail-chords';
 import { AgentStatusBadge } from './agent-status-badge';
 import { mostUrgent, runningCount, taskLine } from './agents-reducer';
@@ -30,6 +31,11 @@ export function AgentsSection({ controller }: { controller: AgentsController }) 
         <span className="agents__hint">
           The rail lists them all <kbd className="island__chord">{AGENT_RAIL_CHORD_HINT}</kbd>
         </span>
+        {/* The hook integration (T221) lives here, in settings, and not as a
+            control on a session row: it changes a file the user owns, and that
+            is a decision about the machine rather than about any one session
+            (ADR-018 §1). It reads nothing until it is opened. */}
+        <AgentIntegrationSettings />
       </div>
 
       {/* The envelope itself belongs to the rail, which is where the rescan

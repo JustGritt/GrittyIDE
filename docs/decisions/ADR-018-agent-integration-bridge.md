@@ -1,6 +1,6 @@
 # ADR-018: Gritty may install a hook into another tool's configuration, additively and with consent
 
-- **Status:** Proposed
+- **Status:** Accepted (implemented by T221)
 - **Date:** 2026-09-05
 
 ## Context
@@ -87,6 +87,13 @@ wrote the array it wished to see would silently disable that tool, and the user
 would discover it as *the other app stopped working*, with nothing pointing at
 Gritty. Agent CLIs run every matching hook, so appending costs the incumbent
 nothing.
+
+*Refined by T221.* "Identified by the absolute path of its own hook binary"
+means the path the entry's command **runs**, recognised by that binary's own
+file name — not equality with the path this build would install. Exact equality
+would stop recognising Gritty's own entry the moment the application moved, and
+an entry nobody recognises can be neither reported as broken (§7's uninstall
+obligation) nor removed. The name is Gritty's, so nothing else claims it.
 
 ### 3. Inspectable before, reversible after
 

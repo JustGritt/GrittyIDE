@@ -9,4 +9,16 @@ import type { AgentTimelineEntry } from "./AgentTimelineEntry";
  * unbounded forwarding rule 8 forbids. A consumer that missed an event calls
  * `agents.timeline` to resynchronise.
  */
-export type AgentTimelineAppendedPayload = { sessionId: string, entries: Array<AgentTimelineEntry>, dropped: number, restarted: boolean, };
+export type AgentTimelineAppendedPayload = { sessionId: string, entries: Array<AgentTimelineEntry>, dropped: number, restarted: boolean, 
+/**
+ * The current pending permission prompt, whole rather than as a delta
+ * (T221).
+ *
+ * It is a state, so every batch carries its current value and a consumer
+ * replaces rather than appends; `None` means the session is not stopped at
+ * a prompt. A batch is emitted when *this* changes even with no entries
+ * appended, because entering and leaving a prompt is exactly the change
+ * worth telling the rail about — and, as everywhere else, a tick that
+ * changes nothing emits nothing (rule 8).
+ */
+pending?: AgentTimelineEntry, };

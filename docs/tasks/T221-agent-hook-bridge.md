@@ -1,7 +1,7 @@
 # Task T221 — Agent hook bridge: earning `BLOCKED`
 
 - **Phase:** 3
-- **Status:** not yet started
+- **Status:** review
 - **Depends on:** T220 (agent session discovery), T230 (fast loop, timeline entries), ADR-018
 
 ## Objective
@@ -192,7 +192,8 @@ anything. A hook is a notification the agent emits; it is not a channel into it.
 20. Uninstall removes exactly the entries whose command path is Gritty's, and
     leaves the rest byte-identical modulo the re-emitted JSON's own formatting.
 21. Both write a timestamped backup of the prior file beside it first.
-22. Protocol version bumps MINOR (`2.7.0 → 2.8.0`): every change is additive.
+22. Protocol version bumps MINOR: every change is additive. (`2.8.0 → 2.9.0`
+    as implemented — `2.8.0` was consumed by T230's timeline contract.)
 
 ### The UI
 
@@ -285,4 +286,205 @@ pnpm check
 
 ## Completion report
 
-_(filled in by the implementing session)_
+### Summary
+
+`BLOCKED` is earned. The agent's own hook system now tells Gritty when a session
+stops at a permission prompt, a third evidence source reads that on T230's fast
+loop, and the derivation gains one row at a defined precedence. T231 wrote
+"Pending validation" down months before anything could send the value; this is
+what makes it reachable, and the renderer test asserts it travels the whole way
+rather than sitting unused.
+
+Four pieces:
+
+1. **`gritty-agent-hook`** — a new binary crate. Reads one JSON payload on
+   stdin, names a *phase*, writes one small state file atomically, exits `0` on
+   every path including a panic. It links no `gritty-core`, knows nothing of the
+   protocol, and takes the state directory on its command line so it carries no
+   platform knowledge about where Gritty's data lives.
+2. **`gritty-agents::hook`** — the format, the only writer and the only reader,
+   in one module so the two cannot drift. Bounded twice: by the hook so an
+   oversized field never reaches the disk, and again by the reader because a
+   file on disk is untrusted input a second time.
+3. **`gritty-agents::integration`** — the installer. The only thing in the
+   repository that edits a file Gritty does not own, and every rule in ADR-018
+   made executable: append-only, identified by its own binary, backed up first,
+   and a refusal with the parse error for anything it cannot read.
+4. **The derivation and the surfaces** — `AgentActivity::Blocked`,
+   `activitySource`, the hook combinations on `AgentEvidence`, the
+   `PermissionPending` timeline entry (whose first producer this is), three
+   integration commands, and a settings popover that shows the change before it
+   makes it.
+
+Protocol `2.8.0 → 2.9.0`. Every change is additive.
+
+### Files changed
+
+**New**
+
+- `crates/agent-hook/{Cargo.toml,src/lib.rs,src/main.rs}` — the hook binary,
+  with the logic in a library so nothing about it is tested by launching a
+  process.
+- `crates/agent-hook/tests/installed_command.rs` — the whole chain once, for
+  real: the command string the installer produced, run through `/bin/sh` with a
+  payload on stdin, read back by the core's reader.
+- `crates/agents/src/hook.rs` — the state file: phases, the write, the bounded
+  scan, the sweep.
+- `crates/agents/src/integration.rs` — status, install, uninstall.
+- `crates/agents/src/json.rs` — an order-preserving JSON model (see decisions).
+- `apps/desktop/src/features/agents/agent-integration.ts` and
+  `agent-integration-settings.tsx` (+ `agent-integration.test.ts`) — the
+  settings surface and its pure reducer.
+
+**Changed**
+
+- `crates/agents/src/lib.rs`, `crates/agents/Cargo.toml` — the new modules;
+  `gritty-workspace` for the atomic write, `serde` and `thiserror`.
+- `crates/gritty-core/src/agent_session/{mod,wire,timeline,tests}.rs` — the
+  third-way merge, the derivation, `activitySource`, the pending prompt beside
+  the ring, the integration commands.
+- `crates/gritty-core/src/protocol/{mod,export}.rs` — the version and the new
+  exported types.
+- `apps/desktop/src-tauri/src/{commands,core,lib}.rs` — three command adapters,
+  the hook binary resolver, the data directory reaching the reader.
+- `packages/protocol/src/{client,commands,types}.ts` + `agents-client.test.ts`.
+- `apps/desktop/src/features/agents/{agent-status.ts,agents-panel.tsx}` and the
+  two touched tests.
+- `Cargo.toml` — the `gritty-agent-hook` workspace member.
+- `docs/architecture/agent-sessions.md`, `docs/decisions/ADR-018…`,
+  `docs/decisions/README.md`, `docs/tasks/README.md`.
+
+### Tests actually executed
+
+```
+cargo test -p gritty-agents            94 passed, 0 failed
+cargo test -p gritty-agent-hook        13 passed + 1 integration test, 0 failed
+cargo test -p gritty-core             229 passed (lib) + 3 (crash_recovery), 0 failed
+cargo test --workspace                 all green
+cargo clippy --workspace --all-targets -- -D warnings   clean
+cargo fmt --all --check                clean
+pnpm lint / typecheck                  clean
+pnpm test                             424 tests, 59 files, 0 failed
+pnpm check                             green
+```
+
+Manual, by hand, against scratch directories only:
+
+- built `gritty-agent-hook` and ran it five ways — a good payload, malformed
+  stdin, empty stdin, no arguments, an unwritable state directory. **Exit `0`
+  every time.** The state file came out `-rw-------` with the tool name and the
+  working directory in it and no tool input.
+- `crates/agent-hook/tests/installed_command.rs` does the same thing as a test,
+  through a shell, from a path containing spaces, against a fixture config
+  carrying another tool on all fourteen events.
+
+**Not done, and not claimed:** the acceptance criterion that runs a real Claude
+Code session in another terminal and watches the island. This session has no
+screen access, so it could neither trigger a real permission prompt nor watch a
+row change. Everything it *does* claim was executed: the hook binary was run,
+the installed command line was run through a shell, and the derivation, the
+merge, the diff and the installer are covered by tests against fixtures.
+
+**No test in this task reads or writes a real `~/.claude`, `~/.codex` or
+application-data directory.** Every path is injected; the real
+`~/.claude/settings.json` was read once, to learn the shape the installer must
+not break, and never written.
+
+### Architectural decisions
+
+**An order-preserving JSON model instead of `serde_json`'s `preserve_order`.**
+ADR-018 §4 requires a re-emitted file to keep its key order, and
+`serde_json::Value` sorts. The feature flag that fixes this is *workspace-wide*:
+it swaps every `Map` for an `IndexMap`, which enlarges every `Value` in the tree
+— including the one inside `CoreError` — and pushes the core's whole
+`Result<_, CoreError>` surface past clippy's `result_large_err` threshold. A
+repository-wide representation change to append one line to one file is the
+wrong trade, so `crates/agents/src/json.rs` keeps the ordering in the one module
+that needs it, over a type nothing else sees. `MapAccess` yields entries in
+document order; all it does is keep them in a `Vec`.
+
+**The state file carries no tool input.** §4's field list is followed exactly:
+`{ version, sessionId, provider, phase, since, event, tool?, cwd? }`. A `Bash`
+command line or an `Edit` payload is the kind of thing that carries a secret,
+and writing one to disk to display it would be the wrong trade (rule 13). §15
+still gets its detail: `PermissionPending.detail` comes from the *transcript's*
+outstanding tool call, and only when the two name the same tool — they are
+describing one call, so pairing them is not a guess, while pairing a different
+call's input to this prompt would be.
+
+**The pending prompt is held beside the timeline ring, not in it.** §15 says the
+entry appears when the phase becomes `BLOCKED` and *goes when it leaves*. A ring
+can only append, so an answered prompt would sit in the feed forever claiming to
+be waiting. `AgentTimeline.pending` and `AgentTimelineAppendedPayload.pending`
+carry it whole rather than as a delta, and a batch is emitted when it changes
+even with no records appended — which is the one case where a fast-loop tick
+speaks without the transcript having moved.
+
+**The state directory travels on the installed command line.** The hook binary
+therefore contains no knowledge of where Gritty's application data lives on each
+platform, and `GRITTY_DATA_DIR` keeps working for free.
+
+**Gritty's entries are recognised by their binary's file name, not by path
+equality.** ADR-018 §2 has been refined in place with the reason: exact equality
+stops recognising Gritty's own entry the moment the application moves, and an
+entry nobody recognises can be neither reported as `BROKEN` nor removed.
+
+**The fast loop re-derives from the cached discovery.** A hook write costs no
+`ps` and no `lsof`; it re-runs the translation over the last scan's evidence and
+goes through the same publish, so a tick whose hook state changed without
+changing a derived value emits nothing (§16, verified explicitly).
+
+**`AgentEvidence` gains three variants and not a fourth.** There is no
+`HOOK_ONLY`, because a state file matching no process and no transcript creates
+no row — so the combination cannot occur.
+
+### Known limitations
+
+- **The hook binary is not bundled as a sidecar resource.** It is found by
+  `GRITTY_AGENT_HOOK` or as a sibling of the running executable, which covers
+  `cargo run`, `target/debug` and a macOS bundle's `MacOS/` directory. Wiring
+  `externalBin` into `tauri.conf.json` is a packaging change `pnpm check` does
+  not exercise, and claiming a bundling path without having run a bundle would
+  be exactly what rule 12 forbids. A build that cannot find its binary reports
+  `hookAvailable: false` and offers nothing, rather than writing an entry that
+  would be broken the moment it landed.
+- **Claude Code only.** T222 owns Codex; the installer is already shaped as "a
+  path, a parse and a set of event names", so adding one is one `HookTarget`.
+- **Unix only in practice.** The hook binary and the installer are
+  platform-independent and compile everywhere, but the end-to-end test runs the
+  installed command through `/bin/sh` and is `ignore`d elsewhere, and T220's
+  process probe was already Unix-only. Nothing here claims Windows works.
+- **`hookAvailable` checks that a file exists, not that it is executable.**
+  A non-executable binary would install and then fail silently, which the agent
+  tolerates and the status reports as `INSTALLED` rather than `BROKEN`.
+- **Registering on ten events means ten process launches per turn.** That is the
+  mechanism's cost, and it is what the incumbent on this machine already pays on
+  fourteen. It has not been measured against a long session.
+
+### Follow-up
+
+- Bundle `gritty-agent-hook` as a sidecar/resource so an installed application
+  finds it (and so an upgrade that moves the app repairs rather than breaks).
+- T222: `HookTarget` for Codex (`~/.codex/hooks.json`), which the reader and the
+  derivation already accommodate.
+- T223 can now notify on entering `BLOCKED`, which is the value it was waiting
+  for.
+- T232's timeline view should render `AgentTimeline.pending` — the entry exists
+  and is delivered, but nothing draws it yet.
+- Consider surfacing `activitySource` on the rail row; `activitySourceLabel` is
+  exported and tested but only the settings surface is wired today.
+
+### Remaining risks
+
+- Writing into a user's own configuration is a new failure surface, and the
+  worst case is a file nobody can recover. Three things stand between: the
+  refusal to touch anything that does not parse, the backup written before the
+  original, and the append-only edit verified against a fixture carrying another
+  tool on every event. None of them has been exercised against a real
+  `~/.claude/settings.json`.
+- The state directory is swept on the fast loop. Sweeping is a `remove_file` for
+  files past a six-hour cutoff, so it is rare — but it is a write on a 400 ms
+  loop, and a filesystem that made `read_dir` slow would make it a cost.
+- `since` is the hook's own clock. Two machines sharing a home directory over a
+  network would disagree about staleness; the comparison saturates at zero
+  rather than going negative, but it is still a clock nobody validated.

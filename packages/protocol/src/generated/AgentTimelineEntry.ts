@@ -10,6 +10,11 @@ export type AgentTimelineEntry = {
  * Strictly increasing per session, so a consumer appends rather than
  * reconciles. It is not a transcript offset and carries no meaning beyond
  * order.
+ *
+ * The one entry that is not in the ring — [`AgentTimeline::pending`] — is
+ * stamped `u64::MAX`, because it has no position in the sequence: it is
+ * always the last thing in the feed, and it disappears rather than being
+ * superseded.
  */
 seq: number, 
 /**

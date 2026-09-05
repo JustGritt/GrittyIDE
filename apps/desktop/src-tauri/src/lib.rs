@@ -216,6 +216,9 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::agents_open_timeline,
             commands::agents_close_timeline,
             commands::agents_timeline,
+            commands::agents_integration_status,
+            commands::agents_integration_install,
+            commands::agents_integration_uninstall,
         ])
 }
 

@@ -6,7 +6,14 @@ import type { EventMeta } from './generated/EventMeta';
 
 export type { Actor } from './generated/Actor';
 export type { AgentActivity } from './generated/AgentActivity';
+export type { AgentActivitySource } from './generated/AgentActivitySource';
 export type { AgentEvidence } from './generated/AgentEvidence';
+export type { AgentIntegration } from './generated/AgentIntegration';
+export type { AgentIntegrationChange } from './generated/AgentIntegrationChange';
+export type { AgentIntegrationChangeRequest } from './generated/AgentIntegrationChangeRequest';
+export type { AgentIntegrationEvent } from './generated/AgentIntegrationEvent';
+export type { AgentIntegrationRequest } from './generated/AgentIntegrationRequest';
+export type { AgentIntegrationStatus } from './generated/AgentIntegrationStatus';
 export type { AgentNoticeLevel } from './generated/AgentNoticeLevel';
 export type { AgentProvider } from './generated/AgentProvider';
 export type { AgentRoster } from './generated/AgentRoster';

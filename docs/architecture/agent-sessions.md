@@ -5,10 +5,15 @@ already running outside it, and — just as importantly — what it refuses to
 claim about them.
 
 This is **observability, not orchestration**. Gritty reads evidence the machine
-already produces. It starts nothing, stops nothing, answers nothing, approves
-nothing, and writes to no agent's configuration. Runs that Gritty *owns* are
-T300 and are a different type with a different lifecycle; nothing here may be
-mistaken for one.
+already produces. It starts nothing, stops nothing, answers nothing and approves
+nothing. Runs that Gritty *owns* are T300 and are a different type with a
+different lifecycle; nothing here may be mistaken for one.
+
+It writes to exactly one thing outside itself, and only when the user asks: one
+hook entry in an agent's own configuration (T221, ADR-018), which makes the
+agent *tell* Gritty when it stops at a permission prompt. That is still not
+control — a hook is a notification the agent emits, not a channel into it — and
+discovery is complete without it, which stays the default.
 
 ## The layers
 
@@ -61,14 +66,17 @@ Derived from evidence alone, in this order:
 | `WORKING` | live process, a `tool_use` with no matching `tool_result` |
 | `WAITING` | live process, nothing outstanding — the user's move |
 
+(T221 adds `BLOCKED` between `IDLE` and `WORKING`; see below.)
+
 A stale transcript outranks an outstanding tool call on purpose: a call with no
 result for half an hour is a session someone walked away from, not one that is
 working.
 
-There is **no `WAITING_FOR_APPROVAL`**. Poll-only discovery cannot distinguish a
-pending permission prompt from a finished turn — both are a live process with
-nothing outstanding. Only a hook integration could, and claiming the
-distinction without one would violate `AGENTS.md` rule 12.
+There is **no `WAITING_FOR_APPROVAL` from these two sources**. Poll-only
+discovery cannot distinguish a pending permission prompt from a finished turn —
+both are a live process with nothing outstanding — so claiming the distinction
+from them would violate `AGENTS.md` rule 12. `BLOCKED` exists, and T221's hook
+integration below is the only thing that can produce it.
 
 Likewise, an unreadable process table is not an empty one. Everything reads
 `ENDED`, and `AgentRoster.processEvidence` is `false` so the UI explains itself
@@ -208,16 +216,15 @@ turn's worth of records. A cold open of a 5 KB transcript costs ~85 µs, so the
 cost tracks the 256 KiB window and not the file. A tick with nothing open does
 no I/O at all.
 
-T221 will put the hook state directory on this same loop, because a permission
-prompt reported six seconds late is not worth reporting.
+T221 puts the hook state directory on this same loop, for the same reason: a
+permission prompt reported six seconds late is not worth reporting.
 
-## Specified but not built (T221, T222, T232)
+## The third source (T221)
 
-Everything above this line is implemented. Everything below is written down and
-not yet built; nothing here may be described as behaviour Gritty has.
-
-**A third evidence source (T221, ADR-018).** The `WAITING_FOR_APPROVAL` value
-this document refuses is earned by asking the agent instead of guessing:
+The `WAITING_FOR_APPROVAL` value this document used to refuse is earned by
+asking the agent instead of guessing at it. Every agent CLI in scope already
+fires a hook event precisely when it blocks on the user, so Gritty registers a
+small binary on it:
 
 ```
 agent process                         gritty (usually not running)
@@ -226,35 +233,112 @@ agent process                         gritty (usually not running)
 gritty-agent-hook  ──▶  <app-data>/agents/state/<session-id>.json
   (writes atomically, exits 0)   one small file, overwritten, never appended
                                           │
-                                          ▼  next poll tick
+                                          ▼  next fast-loop tick (~400 ms)
                              merged as a third source, joined on session id
 ```
 
-A file rather than a socket because Gritty is usually closed when a hook fires,
-and a hook must never stall the agent. Overwritten rather than appended because
-only the current phase is ever asked for, which removes rotation, truncation and
-age policy from the design.
+A **file** rather than a socket because Gritty is usually closed when a hook
+fires, and a hook must never stall the agent. **Overwritten** rather than
+appended because only the current phase is ever asked for, which removes
+rotation, truncation-tolerant parsing and an age policy from the design.
+**Atomic**, so the reader takes no lock and never sees half a file.
+
+The hook binary is deliberately the smallest thing in the repository: it reads
+one JSON payload on stdin, names a *phase* — `BLOCKED`, `ACTIVE`, `SETTLED`,
+`ENDED` — writes one file, and **exits `0` on every path**, including a payload
+that never arrives, a state directory it cannot write and a panic. A non-zero
+exit from a hook is the agent's problem, and Gritty must never be the reason
+another tool misbehaves. It links no `gritty-core`, knows nothing of the
+protocol, and does not decide what any phase *means*: the core does, which is
+the same adapter/domain split `ps` and the transcripts already go through.
+
+It also does not record the tool's *input*. A `Bash` command line or an `Edit`
+payload is exactly the kind of thing that carries a secret, and it is not needed:
+the transcript already has the core's bounded preview of the same call.
+
+**Read on the fast loop, not the discovery tick.** "Pending validation" arriving
+six seconds after the agent stopped defeats the value. The scan is a directory
+listing plus a stat and a few hundred bytes per file, bounded exactly as
+transcripts are (64 files, 6 hours, 8 KiB each), and files past the cutoff are
+swept. With nothing installed it is one failed `read_dir` and nothing else,
+which is what keeps the roster identical to T220's for anyone who never opted
+in. A tick whose hook state changed re-derives the roster from the **cached**
+discovery — no second `ps`, no second `lsof` — and still publishes only when a
+derived value actually differs.
 
 The derivation gains one row, at a defined precedence:
 
-| Value | Evidence |
-|---|---|
-| `ENDED` | no live process, or the process table was unreadable |
-| `IDLE` | live process, transcript quiet past the idle threshold |
-| **`BLOCKED`** | live process, hook phase `BLOCKED`, not stale |
-| `WORKING` | live process, a `tool_use` with no matching `tool_result` |
-| `WAITING` | live process, nothing outstanding |
+| Value | Evidence | `activitySource` |
+|---|---|---|
+| `ENDED` | no live process, or the process table was unreadable | `PROCESS` |
+| `IDLE` | live process, transcript quiet past the idle threshold | `TRANSCRIPT` |
+| **`BLOCKED`** | live process, hook phase `BLOCKED`, not stale | `HOOK` |
+| `WORKING` | live process, a `tool_use` with no matching `tool_result` | `TRANSCRIPT` |
+| `WAITING` | live process, nothing outstanding | `PROCESS` |
 
-`ENDED` still outranks `BLOCKED` — an agent killed at a prompt is gone, not
-blocked — and so does `IDLE`, for the reason already given above: a prompt
-nobody answered for half an hour is a session someone walked away from. The
-hook is *evidence, not authority*, which is what keeps the integration optional:
-without it the roster is exactly what T220 shipped.
+`ENDED` outranks `BLOCKED` — an agent killed at a prompt is gone, not blocked —
+and so does `IDLE`, for the reason already given above. A hook phase older than
+the idle threshold is discarded outright, so a state file cannot hold a row at
+`BLOCKED` forever even when its transcript is still moving. Hook state is
+*evidence, not authority*: it joins onto a session the other two sources already
+found, on **session id** (the one exact key; the process join falls back to the
+working directory), and a state file matching nothing creates no row.
 
 `BLOCKED` is only ever set from hook evidence. No transcript pattern, process
 state or elapsed-time threshold may produce it, which satisfies rule 12 by
-construction. A new `activitySource` field (`PROCESS | TRANSCRIPT | HOOK`) says
-which source produced a verdict, so a row is attributable rather than magic.
+construction, and `activitySource` says which of the three sources produced a
+verdict so a row is attributable rather than magic. `AgentEvidence` gains the
+hook combinations (`PROCESS_AND_HOOK`, `TRANSCRIPT_AND_HOOK`, `ALL`) — but no
+`HOOK_ONLY`, because that combination cannot occur.
+
+**What the prompt is about.** The state file's bounded `tool` field becomes a
+`PermissionPending` timeline entry, so a rail showing a blocked session names
+*what* is waiting rather than only that something is. Its `detail` comes from
+the transcript's outstanding tool call, and only when the two name the same
+tool: they are describing one call, so pairing them is not a guess, while
+pairing a different call's input to this prompt would be. The entry is held
+**beside** the ring rather than in it — it is a state that goes away, and a ring
+can only ever append, so an answered prompt would otherwise sit in the feed
+forever claiming to be waiting. A batch is emitted when it changes even with no
+records appended, and not otherwise.
+
+### Writing into another tool's configuration
+
+This is the only thing in the repository that edits a file Gritty does not own,
+and ADR-018 is what constrains it. Nothing is written without an explicit user
+action for that provider; the entry is **appended** to each event's existing
+array and no other tool's entry is replaced, reordered or removed; the exact
+change is shown before it is applied and the prior file is copied to a
+timestamped backup beside it; and a configuration that does not parse — or whose
+hook section has a shape the installer does not recognise — is **refused with
+the parse error**, never rewritten, never repaired, never replaced from a
+template. If the backup cannot be written the change is abandoned before the
+original is touched.
+
+Gritty's own entries are the ones whose command runs `gritty-agent-hook`, so
+uninstall needs no marker comment and an entry left pointing at a binary that
+moved is still recognisably Gritty's — which is what makes `BROKEN` reportable.
+A broken entry breaks nothing for the user, because the agent tolerates a hook
+that fails; the only symptom is that `BLOCKED` quietly stops appearing, and the
+status line is what says why.
+
+Key order survives because the file is parsed into an order-preserving JSON
+model local to the installer, not `serde_json::Value` (which sorts) and not
+`serde_json`'s `preserve_order` feature (which is workspace-wide, enlarges every
+`Value` in the tree, and would push `CoreError` past clippy's `result_large_err`
+threshold — a repository-wide representation change to append one line to one
+file). Indentation is two spaces, which is what these files already use.
+
+The state directory is under Gritty's own application data, never `/tmp`, and is
+created owner-only. The `agents.integrationStatus`, `agents.integrationInstall`
+and `agents.integrationUninstall` commands carry the command line and the events
+it lands on — never the configuration's contents, which would put whatever else
+lives in that file into an event payload for no gain.
+
+## Specified but not built (T222, T232)
+
+Everything above this line is implemented. Everything below is written down and
+not yet built; nothing here may be described as behaviour Gritty has.
 
 **The rail (T231, built; T232, not yet).** The roster and the timeline surface
 in a third region of the shell, to the right of the editor, with its own
