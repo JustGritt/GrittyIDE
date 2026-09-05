@@ -10,7 +10,10 @@ use std::path::Path;
 use ts_rs::{Config, TS};
 
 use super::{CORE_EVENT_CHANNEL, PROTOCOL_VERSION};
-use crate::agent_session::wire::{AgentRoster, AgentSession, ListAgentSessionsRequest};
+use crate::agent_session::wire::{
+    AgentRoster, AgentSession, AgentTimeline, AgentTimelineAppendedPayload, AgentTimelineRequest,
+    ListAgentSessionsRequest,
+};
 use crate::document::{
     CloseDocumentRequest, DocumentContent, DocumentStatusRequest, OpenDocumentRequest,
     ReloadDocumentRequest, SaveDocumentRequest, UpdateDocumentRequest,
@@ -64,6 +67,9 @@ fn export_bindings() {
     AgentSession::export_all(&cfg).expect("export AgentSession");
     AgentRoster::export_all(&cfg).expect("export AgentRoster");
     ListAgentSessionsRequest::export_all(&cfg).expect("export ListAgentSessionsRequest");
+    AgentTimeline::export_all(&cfg).expect("export AgentTimeline");
+    AgentTimelineRequest::export_all(&cfg).expect("export AgentTimelineRequest");
+    AgentTimelineAppendedPayload::export_all(&cfg).expect("export AgentTimelineAppendedPayload");
     CoreError::export_all(&cfg).expect("export CoreError");
     Operation::export_all(&cfg).expect("export Operation");
     CoreEvent::export_all(&cfg).expect("export CoreEvent");

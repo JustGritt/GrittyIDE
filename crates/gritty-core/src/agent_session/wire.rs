@@ -11,6 +11,7 @@
 //! by the adapter (rule 13). The renderer shows them as text and never as
 //! markup, a path it opens, or a command it runs.
 
+use gritty_workspace::WorkspacePath;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -165,4 +166,145 @@ pub struct AgentRoster {
     /// is transcript-only, so every session reads as `ENDED` and the UI should
     /// say why rather than claim nothing is running.
     pub process_evidence: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Timeline (T230 contract)
+//
+// The roster above answers *which* agents are running. These types answer what
+// one of them is doing, and they are the frozen surface T230 (the follower and
+// the domain) and T231/T232 (the rail) are both built against.
+//
+// The same rules apply as above, and more sharply: every string here came out
+// of an agent's transcript, so it is untrusted input that the core bounds
+// before it crosses this boundary (rule 13). Nothing here is provider-shaped —
+// the adapter translates Claude Code's records into these kinds, and a second
+// provider adds no variant (rule 4).
+// ---------------------------------------------------------------------------
+
+/// How much a [`AgentTimelineKind::Notice`] matters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AgentNoticeLevel {
+    Info,
+    Warning,
+    Error,
+}
+
+/// What a single timeline entry *is*.
+///
+/// Tagged the way [`crate::protocol::actor::Actor`] is, so an older client can
+/// show an unknown kind as text instead of failing to parse the batch it
+/// arrived in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AgentTimelineKind {
+    /// Something the user asked for.
+    UserPrompt { text: String },
+    /// Something the agent said.
+    AssistantText { text: String },
+    /// Reasoning the agent showed. Separate from `AssistantText` so the UI can
+    /// treat it as subordinate without parsing the text to guess.
+    Thinking { text: String },
+    /// A tool the agent invoked. `detail` is the core's bounded preview of the
+    /// input — display only, never re-run and never resolved as a path.
+    ToolCall {
+        #[serde(rename = "toolUseId")]
+        tool_use_id: Option<String>,
+        name: String,
+        detail: Option<String>,
+    },
+    /// How that call ended, paired to it by `toolUseId`.
+    ToolResult {
+        #[serde(rename = "toolUseId")]
+        tool_use_id: Option<String>,
+        ok: bool,
+        detail: Option<String>,
+    },
+    /// A file the agent wrote.
+    ///
+    /// `path` is present **only** when the file is inside the open workspace,
+    /// which is the whole point: it is what the renderer may open, and its
+    /// absence is what stops anything outside the root being opened from the
+    /// WebView (ADR-010). `display` is always safe to show and never to resolve.
+    FileTouched {
+        path: Option<WorkspacePath>,
+        display: String,
+    },
+    /// Something the run itself reported — a hook failure, a system notice.
+    Notice {
+        level: AgentNoticeLevel,
+        text: String,
+    },
+    /// The agent is stopped at a permission prompt, naming what it is waiting
+    /// on. Only ever produced from hook evidence (T221, ADR-018); no transcript
+    /// pattern may synthesise it, because a prompt and a running tool look
+    /// identical in a transcript (rule 12).
+    PermissionPending {
+        tool: String,
+        detail: Option<String>,
+    },
+}
+
+/// One entry, with the ordering the renderer appends by.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTimelineEntry {
+    /// Strictly increasing per session, so a consumer appends rather than
+    /// reconciles. It is not a transcript offset and carries no meaning beyond
+    /// order.
+    pub seq: u64,
+    /// When the underlying record was written, when it says. Absent rather than
+    /// invented: stamping an entry with the scan time would make a static
+    /// timeline look like it was changing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub at: Option<Timestamp>,
+    pub kind: AgentTimelineKind,
+    /// Subagent work. Marked rather than dropped — T220 dropped it and listed
+    /// that as a known limitation.
+    pub sidechain: bool,
+}
+
+/// `agents.openTimeline`, `agents.closeTimeline` and `agents.timeline` all
+/// address a session and nothing else.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTimelineRequest {
+    pub session_id: String,
+}
+
+/// The whole timeline a client holds: the response to `agents.openTimeline` and
+/// to `agents.timeline`, which is what rehydrates a renderer after a reload
+/// without reopening anything (the T010 convention).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTimeline {
+    pub session_id: String,
+    pub entries: Vec<AgentTimelineEntry>,
+    /// Entries discarded from the **oldest** end because the ring filled. The
+    /// terminal's rule: report the loss rather than hide it, so the UI can draw
+    /// a gap instead of splicing unrelated entries together.
+    pub dropped: u32,
+    /// The transcript was truncated or replaced under the follower, so this
+    /// view was reset rather than continued.
+    pub restarted: bool,
+    /// Whether a transcript was readable at all. `false` with an empty timeline
+    /// means "nothing to read", not "the agent did nothing".
+    pub transcript_evidence: bool,
+}
+
+/// Payload of `AgentTimelineAppended`: a **delta**, not a snapshot.
+///
+/// Unlike `AgentSessionsChanged`, which carries the whole roster because it is
+/// small, a timeline grows without bound and resending it per tick would be the
+/// unbounded forwarding rule 8 forbids. A consumer that missed an event calls
+/// `agents.timeline` to resynchronise.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTimelineAppendedPayload {
+    pub session_id: String,
+    pub entries: Vec<AgentTimelineEntry>,
+    pub dropped: u32,
+    pub restarted: bool,
 }

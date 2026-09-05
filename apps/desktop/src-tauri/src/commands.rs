@@ -11,7 +11,9 @@ use std::path::PathBuf;
 use std::sync::Once;
 use std::time::Instant;
 
-use gritty_core::agent_session::{AgentRoster, ListAgentSessionsRequest};
+use gritty_core::agent_session::{
+    AgentRoster, AgentTimeline, AgentTimelineRequest, ListAgentSessionsRequest,
+};
 use gritty_core::document::{
     CloseDocumentRequest, Document, DocumentContent, DocumentStatusRequest, OpenDocumentRequest,
     ReloadDocumentRequest, SaveDocumentRequest, UpdateDocumentRequest,
@@ -552,6 +554,58 @@ pub async fn agents_refresh(
     guard("agents.refresh", move |_| async move {
         let _request: ListAgentSessionsRequest = parse_request(request)?;
         Ok(agents.refresh().await)
+    })
+    .await
+}
+
+/// `agents.openTimeline`
+///
+/// Starts following a session's transcript and returns what is known so far
+/// (T230). Still read-only: following is a read, and nothing here can write to
+/// the session or answer it.
+#[tauri::command]
+pub async fn agents_open_timeline(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentTimeline, CoreError> {
+    let agents = core.agents.clone();
+    guard("agents.openTimeline", move |_| async move {
+        let request: AgentTimelineRequest = parse_request(request)?;
+        agents.open_timeline(&request.session_id).await
+    })
+    .await
+}
+
+/// `agents.closeTimeline`
+///
+/// Idempotent: a renderer that reloaded cannot know which timelines it left
+/// open, so closing one that is not open is not an error.
+#[tauri::command]
+pub async fn agents_close_timeline(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<(), CoreError> {
+    let agents = core.agents.clone();
+    guard("agents.closeTimeline", move |_| async move {
+        let request: AgentTimelineRequest = parse_request(request)?;
+        agents.close_timeline(&request.session_id).await
+    })
+    .await
+}
+
+/// `agents.timeline`
+///
+/// Re-reads an open timeline without opening one — how the renderer
+/// resynchronises after a reload or a missed event, rather than replaying.
+#[tauri::command]
+pub async fn agents_timeline(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentTimeline, CoreError> {
+    let agents = core.agents.clone();
+    guard("agents.timeline", move |_| async move {
+        let request: AgentTimelineRequest = parse_request(request)?;
+        agents.timeline(&request.session_id).await
     })
     .await
 }

@@ -39,13 +39,15 @@ use tokio_util::sync::CancellationToken;
 
 use crate::event::{CoreEvent, EventBus, EventOrigin};
 use crate::protocol::actor::Actor;
+use crate::protocol::error::CoreError;
 use crate::protocol::time::Timestamp;
 use crate::workspace::WorkspaceManager;
 use crate::workspace::recents::{display_name, shorten};
 
 pub use wire::{
-    AgentActivity, AgentEvidence, AgentProvider, AgentRoster, AgentSession, AgentToolCall,
-    ListAgentSessionsRequest,
+    AgentActivity, AgentEvidence, AgentNoticeLevel, AgentProvider, AgentRoster, AgentSession,
+    AgentTimeline, AgentTimelineAppendedPayload, AgentTimelineEntry, AgentTimelineKind,
+    AgentTimelineRequest, AgentToolCall, ListAgentSessionsRequest,
 };
 
 /// How often the roster is rescanned.
@@ -154,6 +156,69 @@ impl AgentSessionManager {
     /// Stops the poll loop. Called from the composition root's shutdown.
     pub fn shutdown(&self) {
         self.cancel.cancel();
+    }
+
+    // -----------------------------------------------------------------------
+    // Timeline (T230 contract surface)
+    //
+    // These three are the frozen shape the follower (T230) fills in and the
+    // rail (T231/T232) is written against. What is real here is the addressing
+    // and the error surface: a timeline is opened by session id, an unknown id
+    // is `NotFound`, and closing one is idempotent. What is not yet real is the
+    // content — until the follower lands, every timeline is empty with
+    // `transcriptEvidence: false`, which is exactly what "nothing was read"
+    // already means, so the renderer needs no separate not-implemented state.
+    // -----------------------------------------------------------------------
+
+    /// `agents.openTimeline`. Starts following the session's transcript and
+    /// returns what is known so far.
+    pub async fn open_timeline(&self, session_id: &str) -> Result<AgentTimeline, CoreError> {
+        self.require_session(session_id).await?;
+        Ok(Self::empty_timeline(session_id))
+    }
+
+    /// `agents.closeTimeline`. Stops following it. Idempotent: closing a
+    /// timeline that is not open is not an error, because a renderer that
+    /// reloaded has no way to know which it left open.
+    pub async fn close_timeline(&self, session_id: &str) -> Result<(), CoreError> {
+        self.require_session(session_id).await?;
+        Ok(())
+    }
+
+    /// `agents.timeline`. Re-reads an open timeline without opening one, which
+    /// is how a renderer resynchronises after a reload or a missed event — the
+    /// T010 convention of subscribing and then calling the domain's own read.
+    pub async fn timeline(&self, session_id: &str) -> Result<AgentTimeline, CoreError> {
+        self.require_session(session_id).await?;
+        Ok(Self::empty_timeline(session_id))
+    }
+
+    /// A session absent from the roster has no timeline. The roster is a
+    /// snapshot, so a row can vanish between a click and this call.
+    async fn require_session(&self, session_id: &str) -> Result<(), CoreError> {
+        if self
+            .list()
+            .await
+            .sessions
+            .iter()
+            .any(|s| s.id == session_id)
+        {
+            Ok(())
+        } else {
+            Err(CoreError::not_found(format!(
+                "agent session {session_id} is not in the roster"
+            )))
+        }
+    }
+
+    fn empty_timeline(session_id: &str) -> AgentTimeline {
+        AgentTimeline {
+            session_id: session_id.to_owned(),
+            entries: Vec::new(),
+            dropped: 0,
+            restarted: false,
+            transcript_evidence: false,
+        }
     }
 
     async fn poll(self: Arc<Self>) {

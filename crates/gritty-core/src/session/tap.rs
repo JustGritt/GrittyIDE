@@ -97,6 +97,12 @@ impl Intent {
             // Gritty claim on startup that sessions are running which may have
             // ended while it was closed.
             | CoreEvent::AgentSessionsChanged(_)
+            // A timeline (T230) is a bounded window onto a transcript the agent
+            // owns and keeps on disk. Persisting it would duplicate the record
+            // and, worse, put agent output — untrusted, routinely full of file
+            // contents — into Gritty's database, which ADR-015 already refused
+            // for terminal buffers on the same grounds.
+            | CoreEvent::AgentTimelineAppended(_)
             | CoreEvent::DecisionRequested(_)
             | CoreEvent::DecisionResolved(_) => None,
         }

@@ -4,6 +4,8 @@ import { type Diagnostic, EventHub, type Unsubscribe } from './events';
 import type { Transport } from './transport';
 import {
   type AgentRoster,
+  type AgentTimeline,
+  type AgentTimelineRequest,
   type CandidatesRequest,
   type CloseDocumentRequest,
   type CloseWorkspaceRequest,
@@ -259,6 +261,17 @@ export interface CoreClient {
   agents: {
     list(request?: ListAgentSessionsRequest): Promise<AgentRoster>;
     refresh(request?: ListAgentSessionsRequest): Promise<AgentRoster>;
+    /**
+     * Start following a session's transcript (T230). The core publishes
+     * `AgentTimelineAppended` deltas from here on — subscribe to that rather
+     * than polling `timeline`. `NotFound` when the session has left the roster,
+     * which it can do between a click and this call.
+     */
+    openTimeline(request: AgentTimelineRequest): Promise<AgentTimeline>;
+    /** Stop following it. Idempotent. */
+    closeTimeline(request: AgentTimelineRequest): Promise<void>;
+    /** Re-read an open timeline — how a reloaded renderer resynchronises. */
+    timeline(request: AgentTimelineRequest): Promise<AgentTimeline>;
   };
   subscribe<N extends EventName>(name: N, handler: (event: EventOf<N>) => void): Unsubscribe;
   subscribeAll(handler: (event: EventEnvelope) => void): Unsubscribe;
@@ -394,6 +407,9 @@ export function createCoreClient(
     agents: {
       list: (request = {}) => command<AgentRoster>('agents.list', { request }),
       refresh: (request = {}) => command<AgentRoster>('agents.refresh', { request }),
+      openTimeline: (request) => command<AgentTimeline>('agents.openTimeline', { request }),
+      closeTimeline: (request) => command<void>('agents.closeTimeline', { request }),
+      timeline: (request) => command<AgentTimeline>('agents.timeline', { request }),
     },
     subscribe: (name, handler) => hub.subscribe(name, handler),
     subscribeAll: (handler) => hub.subscribeAll(handler),

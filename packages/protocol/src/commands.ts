@@ -47,6 +47,9 @@ export const COMMANDS = {
   'decisions.dismiss': 'decisions_dismiss',
   'agents.list': 'agents_list',
   'agents.refresh': 'agents_refresh',
+  'agents.openTimeline': 'agents_open_timeline',
+  'agents.closeTimeline': 'agents_close_timeline',
+  'agents.timeline': 'agents_timeline',
 } as const;
 
 export type CommandName = keyof typeof COMMANDS;
