@@ -1,7 +1,7 @@
 # Task T230 — Agent timeline: what a session is actually doing
 
 - **Phase:** 3
-- **Status:** not yet started
+- **Status:** review
 - **Depends on:** T020 (workspace), T220 (agent session discovery)
 
 ## Objective
@@ -217,5 +217,206 @@ pnpm check
 
 ## Completion report
 
-_(filled in by the implementing session — including the measured fast-loop cost
-required by §14)_
+### Summary
+
+The follower and the domain behind the timeline commands. `gritty-agents` gained
+`follow(path, from_offset)` beside `scan()`, sharing the same parser, limits and
+reader; `gritty_core::agent_session` gained a bounded ring per open timeline, a
+fold onto the provider-neutral wire kinds, workspace-relative resolution of
+touched files, and a second loop that follows only what is open and emits one
+coalesced batch per tick — or nothing.
+
+The wire surface (`AgentTimelineEntry`, `AgentTimelineKind`, `AgentTimeline`,
+`AgentTimelineAppendedPayload`, the three commands, the event, `PROTOCOL_VERSION`
+2.8.0) was already landed before this session and was **not** changed: no type,
+field, tag or doc comment in `wire.rs` was touched, so `packages/protocol/src/generated`
+is byte-identical and the T231 session's UI kept building against it.
+
+### Files changed
+
+- `crates/agents/src/transcript.rs` — `follow` / `follow_with`, `FollowOptions`,
+  `Followed`, `FollowedEntry`, `FollowedRecord`, `NoticeLevel`, a strict
+  ISO-8601 → epoch-millis parser, and three refactors that keep one parser
+  rather than two: `read_tail` now sits on a shared `read_window` / `file_len`,
+  `clip` delegates to a new `clip_str` that only ever collapses a bounded
+  prefix, and the slash-command rule is a shared `is_command_echo`. `MAX_TITLE`,
+  `MAX_PREVIEW` and `MAX_TOOL_DETAIL` became `pub`, joined by `MAX_TRACKING_PATH`
+  and `MAX_NOTICE`, so the core bounds with the adapter's own limits.
+- `crates/agents/src/lib.rs` — re-exports for the follower.
+- `crates/gritty-core/src/agent_session/timeline.rs` — **new**: `OpenTimeline`
+  (the ring, the pending delta, `take_batch`, `snapshot`), the fold onto
+  `AgentTimelineKind`, `fold_file_touched`, `lexical_absolute`, `bounded`.
+- `crates/gritty-core/src/agent_session/mod.rs` — the real `open_timeline`,
+  `close_timeline` and `timeline`; the fast loop (`follow`, `follow_once`);
+  `FollowMetrics`; `TimelineSource` populated by every scan; `MAX_OPEN_TIMELINES`;
+  `DEFAULT_TIMELINE_INTERVAL`; `shutdown_and_join`; `domain_session_id` extracted
+  so the roster id and the timeline key cannot drift.
+- `crates/gritty-core/src/agent_session/tests.rs` — the manager-level T230 tests.
+- `docs/architecture/agent-sessions.md`, `docs/tasks/README.md`, this file.
+
+### Tests actually executed, with results
+
+```
+cargo test -p gritty-agents                              52 passed, 0 failed
+cargo test -p gritty-core                                209 + 3 passed, 0 failed
+cargo clippy --workspace --all-targets -- -D warnings    clean
+cargo fmt --all                                          applied
+```
+
+New tests, by the list this task asked for:
+
+- *follower* (`crates/agents/src/transcript.rs`): every record type to its own
+  entry; call/result paired by `tool_use_id`; `isSidechain` marked; a failed
+  result; timestamps read and never invented; a following call reads only what
+  was appended and does not move on an unchanged file; a partial final line held
+  back and parsed on the next call; a file shorter than the offset restarting; a
+  burst larger than one window reported as a gap; a malformed line skipped;
+  non-UTF-8 tolerated; an unreadable and an empty transcript; oversized fields
+  bounded; slash commands not reported as prompts; the timestamp parser's
+  accepted and rejected shapes; a **cold open on a fixture larger than twice the
+  window** proving only the tail is read.
+- *fold, paths, bounding, ring*
+  (`crates/gritty-core/src/agent_session/timeline.rs`): each record to its
+  provider-neutral kind; strictly increasing `seq`; sidechain marked; a file
+  inside the open root yielding a `WorkspacePath`; one outside it yielding
+  nothing openable; an absolute path inside the root; no workspace open; a
+  relative path with no working directory; a path climbing out of the root;
+  lexical normalisation; **every kind's strings clipped at the core's limits**;
+  the ring dropping oldest and reporting `dropped`; no batch when nothing
+  changed; fifty records in one batch; a restart resetting rather than splicing;
+  an unreadable transcript reported rather than treated as silence.
+- *lifecycle* (`crates/gritty-core/src/agent_session/tests.rs`): open returns
+  what the transcript already says; following delivers only what was appended as
+  one batch; an unchanged transcript emits nothing across three ticks; a
+  truncated transcript restarts; **closing stops the follower, asserted against
+  the loop's own `FollowMetrics.reads`**; opening twice is idempotent and starts
+  no second follower; an unknown session is `NotFound` on all three commands;
+  closing what was never open is fine; `agents.timeline` reads a session nobody
+  is following without starting one; a process-only session reports
+  `transcriptEvidence: false`; the open-timeline bound; `shutdown_and_join`
+  cancelling and joining both loops.
+
+**Not executed:** `pnpm check`. Another session had the JS tree mid-edit for
+T231 throughout, and this task changed no TypeScript and no generated type. The
+Rust half of `pnpm check` (`fmt --check`, `clippy -D warnings`, `cargo test`) was
+run directly and is green.
+
+**Manual:** the acceptance criterion "watch a real running session" was **not**
+performed — see Known limitations.
+
+### Measured fast-loop cost (§14)
+
+Release build, 400 MB synthetic transcript (400 KB/record-block, ~1.05 M
+records), Apple Silicon, warm page cache:
+
+| Call | Cost |
+|---|---|
+| cold open, 400 MB file | 1.4 – 3.4 ms (696 entries from the 256 KiB tail) |
+| cold open, 5 KB file | 57 – 90 µs |
+| tick, nothing appended | ~25 µs |
+| tick, 20 records appended | ~50 – 60 µs |
+
+So the cost tracks the *window*, not the file: a 400 MB transcript opens in
+single-digit milliseconds and is then followed for tens of microseconds a tick.
+At 400 ms that is well under a thousandth of a core for the one timeline the
+rail opens, which is what makes the second loop affordable. A tick with nothing
+open does no I/O at all and only bumps a counter.
+
+### Architectural decisions
+
+1. **The follower lives in `transcript.rs`, not a new module.** The record
+   vocabulary, `clip`, `tool_detail` and the reader are shared with `scan`
+   verbatim. A sibling module would have needed all of them `pub(crate)` and
+   would have been the first step towards two parsers that disagree.
+2. **`read_tail` was rebuilt on a shared `read_window`.** One place reads a
+   transcript, so the "never read a whole file" property has one place to hold.
+   Behaviour is unchanged; the existing T220 tests still pass untouched.
+3. **`clip` now collapses only a bounded prefix (4096 chars).** Whitespace
+   collapsing is a streaming transform, so the answer is identical for every
+   limit in use, but a megabyte tool result no longer costs a megabyte of work
+   per entry on a loop that runs twice a second.
+4. **The adapter has its own record enum (`FollowedRecord`); the core maps it
+   onto `AgentTimelineKind`.** Rule 4 and ADR-005: raw provider output never
+   becomes domain state, and a second provider adds a match arm rather than a
+   wire variant.
+5. **Path resolution is lexical, never physical.** A `stat` per touched file on
+   the fast loop buys nothing: the renderer cannot open the result without
+   `WorkspaceRoot::resolve` checking it physically again, and a path that climbs
+   out of its base is refused rather than clamped. `WorkspaceRoot::relativize`
+   is reused rather than reimplemented (rule 2).
+6. **The fast loop *is* the flusher.** The terminal needs a separate flusher
+   because its PTY reader must never block; here the reader is the tick, so one
+   tick produces at most one batch per session by construction. No new mechanism
+   was introduced (rule 8).
+7. **A "transcript missing" timeline carries no synthesised `Notice`.** The
+   failure table asks for "an empty timeline and a notice"; the notice is
+   `transcriptEvidence: false`, which the wire already documents as "nothing to
+   read, not the agent did nothing". Manufacturing a `Notice` entry would put a
+   line in the feed that no record produced, and `Notice` means *the run*
+   reported something.
+8. **`dropped` means two related things, deliberately.** On the snapshot it is
+   every entry evicted since the timeline opened; on a batch it is the entries
+   evicted since the previous batch, which is exactly what a consumer mirroring
+   the ring must trim from its own head. Both are documented in `timeline.rs`.
+9. **A restart clears the ring rather than counting the loss as `dropped`.**
+   `restarted` already says "your view was reset"; adding the cleared entries to
+   `dropped` would double-report one event.
+10. **`agents.timeline` on a session nobody is following performs one bounded
+    read** instead of answering with a confident empty timeline. It starts no
+    follower and keeps no state, so it stays a read.
+11. **`close_timeline` no longer requires the session for a timeline that is
+    open.** An open ring is freed unconditionally; only a close for a session
+    that is neither open nor in the roster is still `NotFound`, which keeps the
+    stub's contract while making the idempotence its doc comment promises real.
+12. **The fast loop's first tick is delayed by one interval** (`interval_at`),
+    unlike discovery's, which fires immediately: nothing is open at startup, so
+    an immediate tick would be a wakeup with no work in it.
+13. **An open timeline closes when the workspace changes.** Its `FileTouched`
+    entries were resolved against the old root and cannot be re-resolved without
+    re-reading; closing is what the failure table asks for and the honest move.
+14. **No new dependency.** The ISO-8601 timestamps are parsed by a strict
+    twenty-line function (Howard Hinnant's `days_from_civil`) rather than a date
+    crate, because exactly one format appears in these files and anything else
+    must yield "no time" rather than a guess.
+
+### Known limitations
+
+- **`MAX_OPEN_TIMELINES = 8` is new and enforced with `Conflict`.** T231 opens
+  exactly one, so nothing today can reach it, but a future surface that opens a
+  timeline per visible row will need to close as it scrolls.
+- **Sub-second bursts can be lost by the ring.** 500 entries is roughly a long
+  turn; an agent that writes more than that between two ticks reports the
+  overflow as `dropped` rather than growing.
+- **The manual acceptance check was not run.** This session has no way to open
+  the app's window and watch a live rail; the equivalent behaviour is covered by
+  `following_delivers_only_what_was_appended_as_one_batch` against a file being
+  appended to under a live follower. T231's session should confirm it in the
+  running app.
+- **The timestamp parser accepts UTC only.** Claude Code writes `…Z`; an offset
+  timestamp yields `at: None` rather than a wrong time. T222 should check what
+  Codex writes.
+- **`file-history-delta` is the only file evidence.** A tool call that edits a
+  file without producing one (or an agent configured without file history) shows
+  as a `ToolCall`, not a `FileTouched`.
+- **Sidechain entries are marked but not grouped.** They interleave with the
+  parent's flow in `seq` order; grouping them is a rendering decision for T232.
+- **The touched-file ordering is the transcript's**, so a file written twice
+  appears twice. Collapsing duplicates is a view concern (T232).
+
+### Follow-up tasks
+
+- **T232** should decide how `sidechain` and repeated `FileTouched` entries are
+  drawn, and whether the rail wants a de-duplicated "files touched" list beside
+  the feed.
+- **T221** puts the hook-state directory on this same fast loop and is the only
+  thing that may produce `AgentTimelineKind::PermissionPending`; the loop, the
+  metrics and the batching are already there for it.
+- **T222 (Codex)** needs a `FollowedRecord` mapping for its own record shapes and
+  must re-check the timestamp format; the fold and the ring are provider-neutral
+  already.
+- A renderer-visible signal for "your open timeline was closed because the
+  workspace changed" would be kinder than the current silent close. It needs a
+  wire addition, so it is deliberately not in this task.
+- `tool_detail`'s fallback still serialises an opaque tool input to JSON before
+  clipping it. It is bounded by the read window (1 MiB), so it is not a leak,
+  but a keys-only summary would be cheaper.

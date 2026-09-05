@@ -30,7 +30,10 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub use probe::{CommandRunner, ProcessEvidence, Provider, SystemCommandRunner};
-pub use transcript::{ScanOptions, ToolCall, TranscriptEvidence};
+pub use transcript::{
+    FollowOptions, Followed, FollowedEntry, FollowedRecord, NoticeLevel, ScanOptions, ToolCall,
+    TranscriptEvidence, follow, follow_with,
+};
 
 /// Which sources agreed that a session exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
