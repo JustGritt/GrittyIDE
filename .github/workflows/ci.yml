@@ -17,7 +17,7 @@ env:
 
 jobs:
   linux:
-    name: Linux (check + build)
+    name: Linux (check, build on main)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -52,14 +52,20 @@ jobs:
       - name: Generated protocol types are fresh (cargo test -p gritty-core rewrites them)
         run: pnpm check:generated
 
+      # The release build is ~30% of this job's minutes and it verifies nothing
+      # `pnpm check` has not already verified — clippy and the tests compile the
+      # same crates in debug. On a private repo those minutes are metered, so it
+      # runs on main, on manual dispatch, or on a pull request labelled
+      # `ci:build` (for a PR that touches the build itself).
       - name: Build desktop app (no bundling; packaging is Phase 7)
+        if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:build')
         run: pnpm tauri build --no-bundle
 
   macos:
     name: macOS (check + app bundle)
     runs-on: macos-15
     timeout-minutes: 45
-    # macOS minutes are expensive on a private repo: run on main, manual dispatch,
+    # macOS minutes cost 10x on a private repo: run on main, manual dispatch,
     # or pull requests labelled `ci:macos`. macOS is also verified locally.
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:macos')
     steps:
