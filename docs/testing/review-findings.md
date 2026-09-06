@@ -47,8 +47,10 @@ unreviewed commit alongside a fourth that has no ticket at all. Every "not
 executed" admission in the twelve was checked and every one of them is true.
 
 **Findings 1, 2 and 3 were fixed on 2026-09-06** and are stamped where they
-stand. Findings 4 to 7 are about history and paperwork rather than code, and
-are open.
+stand, as is the ticketing half of finding 4. What is left — the shape of
+`cb9e08a` itself, two missing "Tests executed" sections, files touched but not
+listed, and seven tasks with no manual-pass session — is history and paperwork
+rather than code, and is open.
 
 ---
 
@@ -157,6 +159,12 @@ table).
 
 ## 4. T096, T098 and T220 landed in one unreviewed commit carrying a fourth,
 unticketed feature
+
+> **Partly resolved 2026-09-06** — the unticketed feature is now **T041**
+> (`docs/tasks/T041-preview-tabs.md`), on the board at `review`, with
+> manual-pass steps 2.18a–2.18h. The rest of this finding stands: `cb9e08a` is
+> still an unreviewed commit carrying three tasks, and nothing separates their
+> diffs.
 
 **What the reports imply.** Three separate task files, three separate scopes,
 and T096 lists an acceptance criterion of its own: "Nothing in `crates/`,

@@ -18,6 +18,7 @@ the workflow below are hand-maintained.
 | [T020](T020-workspace-open-list.md) | Workspace open/list + fixtures | 0/1A | T010 | done |
 | [T030](T030-file-io-documents.md) | File I/O + document/buffer contract (Gate B) | 0/1A | T020 | done |
 | [T040](T040-monaco-shell.md) | Monaco shell | 0/1A | T030 | done |
+| [T041](T041-preview-tabs.md) | Preview tabs, and closing more than one at a time | 1A | T020, T030, T040 | review |
 | [T045](T045-drag-and-drop.md) | Drag and drop files/folders onto the window | 1A | T030, T040 | doing |
 | [T046](T046-resizable-panes.md) | Resizable panes, and a terminal on opening | 1A | T040, T060, T095 | done |
 | [T047](T047-terminal-names.md) | Naming terminal sessions | 1A | T090, T095 | done |
