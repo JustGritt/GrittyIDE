@@ -10,7 +10,7 @@ import type { WorkstreamId } from "./WorkstreamId";
  * A question that has to be answered before the work can go on.
  *
  * Raised by the user today; `raised_by` is an [`Actor`], so an agent run
- * (T330) raises the same thing without changing this shape.
+ * (T335) raises the same thing without changing this shape.
  */
 export type Decision = { id: DecisionId, workstreamId: WorkstreamId, question: string, 
 /**

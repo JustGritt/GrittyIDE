@@ -88,8 +88,11 @@ T000 Bootstrap
          ├─ T070 File watcher
          └─ T080 Search
 T060 Persistence, T090 Terminal, T100 Git, T110 Diagnostics → Phase 2 dogfood
-T200 Workstream model (Gate C) → T210 UI → T300 Agent protocol + fake agent (Gate D)
-  → T310 real agent, T320 context manifest, T330 decisions → T400 worktrees, T410 attention queue
+T200 Workstream model (Gate C) → T210 UI
+  ├─ T300 Agent protocol + fake agent (Gate D) → T305 capabilities → T310 real agent
+  │    → T315 live activity (built early by T220-T232), T320 context manifest, T335 decisions
+  └─ T325 Workspace ownership (observed) → T330 write interception, T400 worktrees,
+       T405 ownership-aware scheduling, T410 attention queue
 ```
 
 Freeze points: after Phase 0, the command/event/error envelopes, operation model,

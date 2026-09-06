@@ -37,6 +37,7 @@ pub mod event;
 pub mod file_drop;
 pub mod health;
 pub mod operation;
+pub mod ownership;
 pub mod protocol;
 pub mod session;
 pub mod shell;

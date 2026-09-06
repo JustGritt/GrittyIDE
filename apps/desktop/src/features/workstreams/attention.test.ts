@@ -1,4 +1,13 @@
-import type { Decision, DecisionId, Workstream, WorkstreamId } from '@gritty/protocol';
+import type {
+  ConflictId,
+  Decision,
+  DecisionId,
+  LeaseId,
+  OwnershipConflict,
+  OwnershipMap,
+  Workstream,
+  WorkstreamId,
+} from '@gritty/protocol';
 import { describe, expect, it } from 'vitest';
 import {
   attentionCount,
@@ -24,6 +33,26 @@ function workstream(id: string, patch: Partial<Workstream> = {}): Workstream {
   };
 }
 
+const NO_OWNERSHIP: OwnershipMap = { leases: [], conflicts: [] };
+
+function conflict(id: string, patch: Partial<OwnershipConflict> = {}): OwnershipConflict {
+  return {
+    id: id as ConflictId,
+    workspaceId: 'ws-1' as OwnershipConflict['workspaceId'],
+    requestedBy: 'b' as WorkstreamId,
+    ownedBy: 'a' as WorkstreamId,
+    holdingLeaseId: 'l-1' as LeaseId,
+    target: { type: 'FILE', path: 'src/api/router.ts' },
+    createdAt: 15,
+    state: 'WAITING',
+    ...patch,
+  };
+}
+
+function ownership(conflicts: OwnershipConflict[]): OwnershipMap {
+  return { leases: [], conflicts };
+}
+
 function decision(id: string, patch: Partial<Decision> = {}): Decision {
   return {
     id: id as DecisionId,
@@ -46,6 +75,7 @@ describe('attention items', () => {
         workstream('c', { state: 'IN_PROGRESS' }),
       ],
       [decision('d1', { raisedAt: 20 })],
+      NO_OWNERSHIP,
     );
     expect(items.map((item) => item.id)).toEqual(['review:b', 'question:d1']);
     expect(items[0]?.since).toBe(5);
@@ -57,29 +87,64 @@ describe('attention items', () => {
       decision('answered', { state: 'RESOLVED', chosen: 'core' }),
       decision('dropped', { state: 'DISMISSED' }),
     ];
-    const items = attentionItems([workstream('a')], decisions);
+    const items = attentionItems([workstream('a')], decisions, NO_OWNERSHIP);
     expect(items).toHaveLength(1);
-    expect(attentionCount([workstream('a')], decisions)).toBe(1);
+    expect(attentionCount([workstream('a')], decisions, NO_OWNERSHIP)).toBe(1);
   });
 
   it('drops a question whose workstream the renderer has not got', () => {
     // The core cascades decisions away with their workstream; this only guards
     // the window between two events.
-    expect(attentionItems([], [decision('orphan')])).toEqual([]);
+    expect(attentionItems([], [decision('orphan')], NO_OWNERSHIP)).toEqual([]);
   });
 
   it('breaks a tie on id so the order is stable across renders', () => {
     const items = attentionItems(
       [workstream('a'), workstream('b', { state: 'IN_REVIEW', updatedAt: 10 })],
       [decision('d1', { raisedAt: 10 })],
+      NO_OWNERSHIP,
     );
     expect(items.map((item) => item.id)).toEqual(['question:d1', 'review:b']);
+  });
+
+  it('lists an ownership refusal beside the questions, oldest first', () => {
+    const items = attentionItems(
+      [workstream('a'), workstream('b')],
+      [decision('d1', { raisedAt: 30 })],
+      ownership([conflict('c1', { createdAt: 15 })]),
+    );
+    expect(items.map((item) => item.id)).toEqual(['conflict:c1', 'question:d1']);
+    const [first] = items;
+    expect(first?.kind).toBe('conflict');
+    if (first?.kind === 'conflict') {
+      // The row is filed under the workstream that is *waiting*, and names the
+      // one in the way — which is the whole content of the refusal.
+      expect(first.workstream.id).toBe('b');
+      expect(first.owner.id).toBe('a');
+    }
+  });
+
+  it('ignores conflicts that are no longer waiting', () => {
+    const settled = ownership([
+      conflict('resolved', { state: 'RESOLVED' }),
+      conflict('cancelled', { state: 'CANCELLED' }),
+      conflict('overridden', { state: 'OVERRIDDEN' }),
+    ]);
+    expect(attentionItems([workstream('a'), workstream('b')], [], settled)).toEqual([]);
+  });
+
+  it('drops a conflict whose two sides the renderer has not both got', () => {
+    // Both cascade away with their workstream in the database; a row that
+    // cannot say who is in the way is not worth drawing.
+    const only = [workstream('b')];
+    expect(attentionItems(only, [], ownership([conflict('c1')]))).toEqual([]);
   });
 
   it('filters by kind without losing the order', () => {
     const items = attentionItems(
       [workstream('a'), workstream('b', { state: 'IN_REVIEW', updatedAt: 30 })],
       [decision('d1', { raisedAt: 10 }), decision('d2', { raisedAt: 20 })],
+      NO_OWNERSHIP,
     );
     expect(filterItems(items, 'all')).toHaveLength(3);
     expect(filterItems(items, 'question').map((item) => item.id)).toEqual([
@@ -87,6 +152,7 @@ describe('attention items', () => {
       'question:d2',
     ]);
     expect(filterItems(items, 'review').map((item) => item.id)).toEqual(['review:b']);
+    expect(filterItems(items, 'conflict')).toEqual([]);
   });
 });
 

@@ -688,3 +688,260 @@ pub mod decisions {
         Ok(changed > 0)
     }
 }
+
+/// `ownership_lease` and `ownership_conflict`: who may write where (T325).
+pub mod ownership {
+    use super::*;
+
+    pub const ACTIVE: &str = "ACTIVE";
+    pub const WAITING: &str = "WAITING";
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct LeaseRow {
+        pub id: String,
+        pub workspace_root: String,
+        pub workstream_id: String,
+        pub agent_run_id: Option<String>,
+        pub target_kind: String,
+        pub target_pattern: String,
+        pub mode: String,
+        pub note: Option<String>,
+        pub acquired_at: i64,
+        pub expires_at: Option<i64>,
+        pub state: String,
+        pub released_at: Option<i64>,
+    }
+
+    /// A lease plus the state of the workstream holding it, which is what
+    /// makes a lease stale. One query rather than a second lookup per row.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct HeldLease {
+        pub lease: LeaseRow,
+        pub holder_state: String,
+    }
+
+    const LEASE_COLUMNS: &str = "id, workspace_root, workstream_id, agent_run_id, target_kind, \
+         target_pattern, mode, note, acquired_at, expires_at, state, released_at";
+
+    fn lease_from_row(row: &Row<'_>) -> rusqlite::Result<LeaseRow> {
+        Ok(LeaseRow {
+            id: row.get(0)?,
+            workspace_root: row.get(1)?,
+            workstream_id: row.get(2)?,
+            agent_run_id: row.get(3)?,
+            target_kind: row.get(4)?,
+            target_pattern: row.get(5)?,
+            mode: row.get(6)?,
+            note: row.get(7)?,
+            acquired_at: row.get(8)?,
+            expires_at: row.get(9)?,
+            state: row.get(10)?,
+            released_at: row.get(11)?,
+        })
+    }
+
+    pub fn insert_lease(conn: &Connection, row: &LeaseRow) -> Result<()> {
+        conn.execute(
+            "INSERT INTO ownership_lease (id, workspace_root, workstream_id, agent_run_id,
+                 target_kind, target_pattern, mode, note, acquired_at, expires_at, state,
+                 released_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                row.id,
+                row.workspace_root,
+                row.workstream_id,
+                row.agent_run_id,
+                row.target_kind,
+                row.target_pattern,
+                row.mode,
+                row.note,
+                row.acquired_at,
+                row.expires_at,
+                row.state,
+                row.released_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_lease(conn: &Connection, id: &str) -> Result<Option<LeaseRow>> {
+        conn.query_row(
+            &format!("SELECT {LEASE_COLUMNS} FROM ownership_lease WHERE id = ?1"),
+            [id],
+            lease_from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// Every lease of this workspace that has not been released, oldest first,
+    /// each with its holder's state. Expiry is the caller's to apply: the
+    /// clock decides it, so the database must not have a stored opinion.
+    pub fn list_held(conn: &Connection, workspace_root: &str) -> Result<Vec<HeldLease>> {
+        let mut statement = conn.prepare(&format!(
+            "SELECT {}, w.state FROM ownership_lease l
+             JOIN workstream w ON w.id = l.workstream_id
+             WHERE l.workspace_root = ?1 AND l.state = '{ACTIVE}'
+             ORDER BY l.acquired_at ASC, l.id ASC",
+            LEASE_COLUMNS
+                .split(", ")
+                .map(|column| format!("l.{column}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))?;
+        let rows = statement.query_map([workspace_root], |row| {
+            Ok(HeldLease {
+                lease: lease_from_row(row)?,
+                holder_state: row.get(12)?,
+            })
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Release a lease that still holds. `false` when it is gone or was
+    /// already released, so the caller can tell those apart without a second
+    /// query.
+    pub fn release_lease(conn: &Connection, id: &str, now: i64) -> Result<bool> {
+        let changed = conn.execute(
+            &format!(
+                "UPDATE ownership_lease SET state = 'RELEASED', released_at = ?2
+                 WHERE id = ?1 AND state = '{ACTIVE}'"
+            ),
+            params![id, now],
+        )?;
+        Ok(changed > 0)
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct ConflictRow {
+        pub id: String,
+        pub workspace_root: String,
+        pub requested_by: String,
+        pub owned_by: String,
+        pub holding_lease_id: String,
+        pub target_kind: String,
+        pub target_pattern: String,
+        pub created_at: i64,
+        pub state: String,
+        pub resolved_at: Option<i64>,
+    }
+
+    const CONFLICT_COLUMNS: &str = "id, workspace_root, requested_by, owned_by, holding_lease_id, \
+         target_kind, target_pattern, created_at, state, resolved_at";
+
+    fn conflict_from_row(row: &Row<'_>) -> rusqlite::Result<ConflictRow> {
+        Ok(ConflictRow {
+            id: row.get(0)?,
+            workspace_root: row.get(1)?,
+            requested_by: row.get(2)?,
+            owned_by: row.get(3)?,
+            holding_lease_id: row.get(4)?,
+            target_kind: row.get(5)?,
+            target_pattern: row.get(6)?,
+            created_at: row.get(7)?,
+            state: row.get(8)?,
+            resolved_at: row.get(9)?,
+        })
+    }
+
+    pub fn insert_conflict(conn: &Connection, row: &ConflictRow) -> Result<()> {
+        conn.execute(
+            "INSERT INTO ownership_conflict (id, workspace_root, requested_by, owned_by,
+                 holding_lease_id, target_kind, target_pattern, created_at, state, resolved_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                row.id,
+                row.workspace_root,
+                row.requested_by,
+                row.owned_by,
+                row.holding_lease_id,
+                row.target_kind,
+                row.target_pattern,
+                row.created_at,
+                row.state,
+                row.resolved_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_conflict(conn: &Connection, id: &str) -> Result<Option<ConflictRow>> {
+        conn.query_row(
+            &format!("SELECT {CONFLICT_COLUMNS} FROM ownership_conflict WHERE id = ?1"),
+            [id],
+            conflict_from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// The same refusal, asked again. Returned so a repeated request reuses one
+    /// conflict instead of filling the queue with copies of one blocker.
+    pub fn waiting_conflict(
+        conn: &Connection,
+        requested_by: &str,
+        holding_lease_id: &str,
+        target_kind: &str,
+        target_pattern: &str,
+    ) -> Result<Option<ConflictRow>> {
+        conn.query_row(
+            &format!(
+                "SELECT {CONFLICT_COLUMNS} FROM ownership_conflict
+                 WHERE requested_by = ?1 AND holding_lease_id = ?2 AND target_kind = ?3
+                   AND target_pattern = ?4 AND state = '{WAITING}'"
+            ),
+            params![requested_by, holding_lease_id, target_kind, target_pattern],
+            conflict_from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// Newest first, every state, bounded by the caller.
+    pub fn list_conflicts(
+        conn: &Connection,
+        workspace_root: &str,
+        limit: i64,
+    ) -> Result<Vec<ConflictRow>> {
+        let mut statement = conn.prepare(&format!(
+            "SELECT {CONFLICT_COLUMNS} FROM ownership_conflict WHERE workspace_root = ?1
+             ORDER BY created_at DESC, id DESC LIMIT ?2"
+        ))?;
+        let rows = statement.query_map(params![workspace_root, limit], conflict_from_row)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Close one waiting conflict. `false` when it is gone or already closed.
+    pub fn close_conflict(conn: &Connection, id: &str, state: &str, now: i64) -> Result<bool> {
+        let changed = conn.execute(
+            &format!(
+                "UPDATE ownership_conflict SET state = ?2, resolved_at = ?3
+                 WHERE id = ?1 AND state = '{WAITING}'"
+            ),
+            params![id, state, now],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Close every conflict still waiting on this lease: the blocker is gone.
+    /// Returns how many, so the caller knows whether anything changed.
+    pub fn close_conflicts_for_lease(
+        conn: &Connection,
+        lease_id: &str,
+        state: &str,
+        now: i64,
+        except: Option<&str>,
+    ) -> Result<usize> {
+        let changed = conn.execute(
+            &format!(
+                "UPDATE ownership_conflict SET state = ?2, resolved_at = ?3
+                 WHERE holding_lease_id = ?1 AND state = '{WAITING}'
+                   AND (?4 IS NULL OR id <> ?4)"
+            ),
+            params![lease_id, state, now, except],
+        )?;
+        Ok(changed)
+    }
+}

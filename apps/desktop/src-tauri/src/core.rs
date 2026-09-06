@@ -15,6 +15,7 @@ use gritty_core::document::{DocumentLimits, DocumentManager};
 use gritty_core::event::{EventBus, EventEnvelope, EventSink, FanOutSink};
 use gritty_core::file_drop::FileDropService;
 use gritty_core::operation::OperationRegistry;
+use gritty_core::ownership::OwnershipManager;
 use gritty_core::session::{SessionService, SessionStore, SessionTap, TAP_CAPACITY, WriterConfig};
 use gritty_core::shell::{ExternalOpener, ShellService};
 use gritty_core::terminal::TerminalManager;
@@ -52,6 +53,7 @@ pub struct Core {
     pub session: Arc<SessionService>,
     pub terminals: Arc<TerminalManager>,
     pub workstreams: Arc<WorkstreamManager>,
+    pub ownership: Arc<OwnershipManager>,
     pub agents: Arc<AgentSessionManager>,
 }
 
@@ -125,6 +127,14 @@ impl Core {
             handle.clone(),
             events.clone(),
             workspaces.clone(),
+            workstream_db.clone(),
+        );
+        // Ownership shares the workstream database on purpose: a lease belongs
+        // to a workstream, and one migration chain keeps them consistent (T325).
+        let ownership = OwnershipManager::new(
+            handle.clone(),
+            events.clone(),
+            workspaces.clone(),
             workstream_db,
         );
         // Discovery of *other* agents on this machine (T220). Read-only, and
@@ -145,6 +155,7 @@ impl Core {
             session,
             terminals,
             workstreams,
+            ownership,
             agents,
         }
     }

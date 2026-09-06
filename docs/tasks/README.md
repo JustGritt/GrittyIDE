@@ -33,7 +33,17 @@ domain abstraction before its upstream contract exists.
 | [T200](T200-workstream-model.md) | Workstream model + decisions (Gate C) | 3 | T010, T020, T060 | review |
 | [T210](T210-workstream-ui.md) | Workstream UI: the island and the attention queue | 3 | T200 | review |
 | [T220](T220-agent-session-discovery.md) | Agent session discovery: what is running, and on what | 3 | T010, T020, T210 | review |
-| T300–T410 | Agent protocol, runs, orchestration | 4–5 | T200, T210 | not yet specified |
+| T300 | Agent event protocol + deterministic fake agent (Gate D) | 4 | T200, T210 | not yet specified |
+| T305 | Agent capability model | 4 | T300 | not yet specified |
+| T310 | First real adapter | 4 | T300, T305 | not yet specified |
+| T315 | Live agent activity | 4 | T310 | superseded by T220/T230/T231/T232 |
+| T320 | Context manifest | 4 | T300 | not yet specified |
+| [T325](T325-workspace-ownership.md) | Workspace ownership registry | 4 | T200, T210, ADR-019 | review |
+| T330 | Write interception (enforced ownership) | 4 | T325, ADR-018 amendment | not yet specified |
+| T335 | Decision interruption | 4 | T300, T200 | not yet specified |
+| T400 | Worktree isolation | 5 | T100, T325 | not yet specified |
+| T405 | Ownership-aware scheduler | 5 | T325, T300 | not yet specified |
+| T410 | Attention queue | 5 | T210, T325, T335 | not yet specified |
 
 ## Dependency graph (architecture addendum §2)
 
@@ -56,13 +66,25 @@ T200 Workstream model (done: state machine, decisions, persistence)
  └─ T210 Workstream UI
      ├─ T220 Agent session discovery (read-only; observes agents Gritty
      │        does not own, so it does not gate on T300)
-     └─ T300 Agent protocol + deterministic fake agent
-         ├─ T310 First real agent
-         ├─ T320 Context manifest
-         └─ T330 Decision interruption
-             ├─ T400 Worktree isolation
-             └─ T410 Attention queue
+     ├─ T300 Agent event protocol + deterministic fake agent (Gate D)
+     │    ├─ T305 Capability model
+     │    │    └─ T310 First real adapter
+     │    │         └─ T315 Live agent activity — already built by T220–T232
+     │    ├─ T320 Context manifest
+     │    └─ T335 Decision interruption
+     └─ T325 Workspace ownership registry (observed; holds a workstream's
+          │   claims, refuses a second one — it does not stop a write)
+          ├─ T326 Observed violations (also needs T223's session↔workstream link)
+          ├─ T330 Write interception (needs an ADR-018 amendment)
+          ├─ T400 Worktree isolation
+          ├─ T405 Ownership-aware scheduler
+          └─ T410 Attention queue
 ```
+
+The Phase 4–5 numbering follows `docs/plans/Gritty Agent Runtime
+Coordination.md` §36, adopted by ADR-019. **`T330` means write interception
+here**; decision interruption, which older documents call T330, is `T335`.
+Completion reports keep the number they were written with.
 
 ## Working a task
 

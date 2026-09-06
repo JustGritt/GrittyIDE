@@ -17,3 +17,6 @@ pub mod testing;
 pub use db::{DB_FILE_NAME, Database, Opened, now_ms};
 pub use error::PersistenceError;
 pub use migrations::{MIGRATIONS, Migration, MigrationReport, SCHEMA_VERSION};
+/// Re-exported so a caller can name the handle a `store` function takes
+/// without depending on `rusqlite` itself.
+pub use rusqlite::Connection;

@@ -27,6 +27,7 @@ use crate::document::{
 };
 use crate::file_drop::{DropHoverPayload, PathsDroppedPayload};
 use crate::operation::{Operation, OperationProgress};
+use crate::ownership::wire::OwnershipMap;
 use crate::protocol::actor::Actor;
 use crate::protocol::error::CoreError;
 use crate::protocol::ids::{CorrelationId, DocumentId, OperationId, WorkspaceId};
@@ -103,6 +104,11 @@ pub enum CoreEvent {
     DecisionRequested(DecisionRequestedPayload),
     /// It was answered or dismissed; the payload's `state` says which.
     DecisionResolved(DecisionResolvedPayload),
+    /// Who owns what in the workspace changed (T325): a lease granted,
+    /// released or overridden, or a request refused. Carries the whole map,
+    /// which is small and bounded, so a consumer that missed an event still
+    /// converges on the next one.
+    OwnershipChanged(OwnershipMap),
     /// The roster of agent sessions running on this machine changed (T220).
     /// Carries the whole roster and is emitted only when it actually differs
     /// from the last one, never once per poll (rule 8).
@@ -224,6 +230,7 @@ impl CoreEvent {
             Self::DecisionRequested(_) => "DecisionRequested",
             Self::DecisionResolved(_) => "DecisionResolved",
             Self::AgentSessionsChanged(_) => "AgentSessionsChanged",
+            Self::OwnershipChanged(_) => "OwnershipChanged",
         }
     }
 
@@ -252,7 +259,8 @@ impl CoreEvent {
             | Self::WorkstreamRemoved(_)
             | Self::DecisionRequested(_)
             | Self::DecisionResolved(_)
-            | Self::AgentSessionsChanged(_) => None,
+            | Self::AgentSessionsChanged(_)
+            | Self::OwnershipChanged(_) => None,
         }
     }
 

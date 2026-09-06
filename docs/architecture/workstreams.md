@@ -68,7 +68,7 @@ A question raised against a workstream, with optional structured options.
 | `state` | `OPEN`, `RESOLVED`, `DISMISSED` |
 | `chosen` | An option key, or free text when there were no options |
 | `rationale` | Optional prose, on either outcome |
-| `raisedBy` | `Actor`. `USER` today; `AGENT { runId }` once runs exist (T330) — the seam is already in the protocol |
+| `raisedBy` | `Actor`. `USER` today; `AGENT { runId }` once runs exist (T335) — the seam is already in the protocol |
 
 Rules that live in the core rather than in the UI:
 
@@ -143,7 +143,8 @@ shown as the error envelope rather than swallowed.
 
 The two surfaces show only what the domain can produce — work, its state, and
 the questions blocking it. Artboards 4a (run launcher) and 4c (conflict), and
-the queue's approval/conflict/failure filters, wait for T300 and T400.
+the queue's approval and failure filters, wait for T300. Its conflict filter
+arrived with ownership (T325, `ownership.md`).
 
 ## Deliberately not here
 

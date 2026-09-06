@@ -19,6 +19,11 @@ use gritty_core::document::{
 use gritty_core::health::ShellInfo;
 use gritty_core::operation::demo::{StartDemoRequest, start_demo};
 use gritty_core::operation::{CancelOperationRequest, Operation};
+use gritty_core::ownership::{
+    AcquireOwnershipRequest, CheckOwnershipRequest, ListOwnershipRequest, OwnershipAcquisition,
+    OwnershipCheck, OwnershipConflict, OwnershipMap, ReleaseOwnershipRequest,
+    ResolveConflictRequest,
+};
 use gritty_core::protocol::actor::Actor;
 use gritty_core::protocol::ids::CorrelationId;
 use gritty_core::session::{
@@ -685,6 +690,78 @@ pub async fn decisions_dismiss(
         let request: DismissDecisionRequest = parse_request(request)?;
         workstreams
             .dismiss_decision(request, Actor::User, correlation)
+            .await
+    })
+    .await
+}
+
+/// `ownership.list`
+#[tauri::command]
+pub async fn ownership_list(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<OwnershipMap, CoreError> {
+    let ownership = core.ownership.clone();
+    guard("ownership.list", move |correlation| async move {
+        let request: ListOwnershipRequest = parse_request(request)?;
+        ownership.list(request, correlation).await
+    })
+    .await
+}
+
+/// `ownership.acquire`
+#[tauri::command]
+pub async fn ownership_acquire(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<OwnershipAcquisition, CoreError> {
+    let ownership = core.ownership.clone();
+    guard("ownership.acquire", move |correlation| async move {
+        let request: AcquireOwnershipRequest = parse_request(request)?;
+        ownership.acquire(request, Actor::User, correlation).await
+    })
+    .await
+}
+
+/// `ownership.release`
+#[tauri::command]
+pub async fn ownership_release(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<(), CoreError> {
+    let ownership = core.ownership.clone();
+    guard("ownership.release", move |correlation| async move {
+        let request: ReleaseOwnershipRequest = parse_request(request)?;
+        ownership.release(request, Actor::User, correlation).await
+    })
+    .await
+}
+
+/// `ownership.check`
+#[tauri::command]
+pub async fn ownership_check(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<OwnershipCheck, CoreError> {
+    let ownership = core.ownership.clone();
+    guard("ownership.check", move |correlation| async move {
+        let request: CheckOwnershipRequest = parse_request(request)?;
+        ownership.check(request, correlation).await
+    })
+    .await
+}
+
+/// `ownership.resolve`
+#[tauri::command]
+pub async fn ownership_resolve(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<OwnershipConflict, CoreError> {
+    let ownership = core.ownership.clone();
+    guard("ownership.resolve", move |correlation| async move {
+        let request: ResolveConflictRequest = parse_request(request)?;
+        ownership
+            .resolve_conflict(request, Actor::User, correlation)
             .await
     })
     .await

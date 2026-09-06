@@ -2486,6 +2486,13 @@ textarea:focus-visible {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
+/* An ownership conflict wears the same wash as a question: both are somebody
+   waiting on a decision only the user can make. */
+.island__card--conflict {
+  background: var(--warn-wash);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 24%, transparent);
+}
+
 .island__card-head {
   display: flex;
   align-items: center;
@@ -2568,6 +2575,7 @@ textarea:focus-visible {
 }
 
 .island__row-state,
+.island__row-owns,
 .island__row-open {
   font-size: var(--text-meta);
   color: var(--fg-muted);
@@ -2576,6 +2584,10 @@ textarea:focus-visible {
 
 .island__row-open {
   color: var(--warn-text);
+}
+
+.island__row-owns {
+  font-variant-numeric: tabular-nums;
 }
 
 /* Only on hover or focus: a roster of five workstreams should read as five
@@ -2609,6 +2621,129 @@ textarea:focus-visible {
 
 .island__agents {
   color: var(--fg-muted);
+}
+
+.ownership {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  margin-top: var(--gap);
+  padding-top: var(--gap);
+  border-top: 1px solid var(--border);
+}
+
+.ownership__head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+.ownership__title {
+  font-weight: 600;
+}
+
+.ownership__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ownership__row {
+  display: flex;
+  gap: var(--gap-sm);
+  align-items: flex-start;
+  padding: 6px 2px;
+  border-radius: var(--radius-sm);
+}
+
+.ownership__row .island__dot {
+  margin-top: 5px;
+  flex: none;
+}
+
+.ownership__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ownership__line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
+}
+
+/* A claimed path is a path, so it reads in the code face — and it is a text
+   node, never a link: nothing here opens, runs or resolves it. */
+.ownership__target {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ownership__state {
+  font-size: var(--text-micro);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.ownership__row--stale .ownership__state {
+  color: var(--warn-text);
+}
+
+.ownership__row--expired {
+  opacity: 0.72;
+}
+
+.ownership__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+  font-size: var(--text-micro);
+  color: var(--fg-faint);
+}
+
+.ownership__claim {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--gap-sm);
+  padding-top: 2px;
+}
+
+.ownership__field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ownership__claim input {
+  flex: 1;
+  min-width: 140px;
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+}
+
+.ownership__refused {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: var(--text-micro);
+  color: var(--warn-text);
+}
+
+/* Says what this is and is not, where the claims are: a registry presented as
+   protection it does not provide would be worse than none. */
+.ownership__note {
+  margin: 0;
+  font-size: var(--text-micro);
+  line-height: 1.5;
+  color: var(--fg-faint);
 }
 
 .agents {
@@ -2817,6 +2952,11 @@ textarea:focus-visible {
 }
 
 .queue__row--question {
+  background: var(--warn-wash);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 20%, transparent);
+}
+
+.queue__row--conflict {
   background: var(--warn-wash);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 20%, transparent);
 }

@@ -95,7 +95,7 @@ impl DecisionState {
 /// A question that has to be answered before the work can go on.
 ///
 /// Raised by the user today; `raised_by` is an [`Actor`], so an agent run
-/// (T330) raises the same thing without changing this shape.
+/// (T335) raises the same thing without changing this shape.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct Decision {
