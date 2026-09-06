@@ -43,7 +43,11 @@ function entry(kind: AgentTimelineEntry['kind'], sidechain = false): AgentTimeli
   return { seq: seq++, kind, sidechain };
 }
 
-function render(entries: readonly AgentTimelineEntry[], overrides: Partial<AgentTimeline> = {}) {
+function render(
+  entries: readonly AgentTimelineEntry[],
+  overrides: Partial<AgentTimeline> = {},
+  onSession: Partial<AgentSession> = {},
+) {
   const timeline: AgentTimeline = {
     sessionId: session.id,
     entries: [...entries],
@@ -54,12 +58,16 @@ function render(entries: readonly AgentTimelineEntry[], overrides: Partial<Agent
   };
   return renderToStaticMarkup(
     createElement(AgentTimelinePanel, {
-      session,
+      session: { ...session, ...onSession },
       timeline,
       openingPath: null,
       canOpenFiles: true,
       onOpenFile: () => {
         throw new Error('nothing should open while rendering');
+      },
+      answering: null,
+      onAnswerPermission: () => {
+        throw new Error('nothing should be answered while rendering');
       },
     }),
   );
@@ -174,5 +182,103 @@ describe('the timeline renders agent output as text', () => {
     expect(future).toContain('Unrecognised');
     expect(future).not.toContain('<script');
     expect(future).toContain('alert(1)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The permission card (T335, artboard 12a)
+//
+// Two things, and the second is the one that matters. The first is the sweep
+// above, extended: an ask carries the agent's own tool input, which is the most
+// attacker-controlled string in the product. The second is that the card is
+// drawn *at all* — the review that sent T210, T221 and T232 back found the same
+// defect three times, a correct view model with no caller, and a view-model
+// test cannot catch it.
+// ---------------------------------------------------------------------------
+
+describe('a permission request is drawn, and drawn as text', () => {
+  const pending = {
+    askId: 'ask-1',
+    sessionId: session.id,
+    verb: 'WRITE_FILE',
+    target: `${TRAVERSAL}/${HOSTILE}`,
+    detail: HOSTILE,
+    diff: [`+${HOSTILE}`, `-${TRAVERSAL}`, ' context'] as string[],
+    added: 64,
+    removed: 11,
+    outsideRoot: true,
+    sensitive: false,
+    askedAt: 0,
+    suggestedScope: HOSTILE,
+  };
+
+  const markup = render([entry({ type: 'ASSISTANT_TEXT', text: 'working' })], {}, {
+    activity: 'BLOCKED',
+    pending,
+  } as Partial<AgentSession>);
+
+  it('is on the screen, with all three answers', () => {
+    expect(markup).toContain('needs permission');
+    expect(markup).toContain('Allow once');
+    expect(markup).toContain('for this run');
+    expect(markup).toContain('Deny');
+    // The keys the artboard prints beside them.
+    expect(markup).toContain('⌘⏎');
+    expect(markup).toContain('esc');
+  });
+
+  it('names the verb, the blast radius and the size of the change', () => {
+    expect(markup).toContain('write file');
+    expect(markup).toContain('outside its worktree');
+    expect(markup).toContain('+64 −11 · 1 file');
+  });
+
+  it('puts every attacker-controlled field in a text node', () => {
+    const tags = tagsOf(markup);
+    for (const tag of tags) {
+      expect(tag).not.toMatch(/^<\/?(script|img|iframe|object|embed|a)\b/i);
+      expect(tag).not.toMatch(/\son\w+=/i);
+      expect(tag).not.toMatch(/\ssrc=/i);
+      expect(tag).not.toMatch(/\shref=/i);
+    }
+    expect(markup).not.toContain('<script>');
+    // Present as escaped text, which is the point: the user has to be able to
+    // read the path they are being asked about, however hostile it looks.
+    expect(markup).toContain('&lt;script&gt;');
+  });
+
+  it('replaces the feed row rather than saying the same thing twice', () => {
+    const withRow = render([entry({ type: 'PERMISSION_PENDING', tool: 'Bash', detail: null })], {
+      pending: entry({ type: 'PERMISSION_PENDING', tool: 'Bash', detail: null }),
+    });
+    expect(withRow).toContain('agent-feed__row--permission');
+
+    const withCard = render(
+      [entry({ type: 'ASSISTANT_TEXT', text: 'working' })],
+      { pending: entry({ type: 'PERMISSION_PENDING', tool: 'Bash', detail: null }) },
+      { activity: 'BLOCKED', pending } as Partial<AgentSession>,
+    );
+    expect(withCard).toContain('needs permission');
+    expect(withCard).not.toContain('agent-feed__row--permission');
+  });
+
+  it('offers no middle answer when the core could not name a scope', () => {
+    // An unscoped standing grant is a blanket yes; the button is absent rather
+    // than present and meaning something narrower than it says.
+    const unscoped = render([], {}, {
+      activity: 'BLOCKED',
+      pending: { ...pending, suggestedScope: undefined, verb: 'OTHER' },
+    } as Partial<AgentSession>);
+    expect(unscoped).toContain('Allow once');
+    expect(unscoped).not.toContain('for this run');
+  });
+
+  it('says a redacted file was deliberately not looked at', () => {
+    const secret = render([], {}, {
+      activity: 'BLOCKED',
+      pending: { ...pending, diff: [], sensitive: true, target: '~/p/.env' },
+    } as Partial<AgentSession>);
+    expect(secret).toContain('~/p/.env');
+    expect(secret).toContain('contents are not shown');
   });
 });

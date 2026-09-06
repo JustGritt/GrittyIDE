@@ -66,7 +66,6 @@ waiting hook safe, and it is the reason this task is possible before T300.
 - `crates/agent-hook/**`, `crates/agents/**`
 - `crates/gritty-core/src/agent_session/**`, and
   `crates/gritty-core/src/protocol/export.rs` (the export list only)
-- `crates/persistence/**` (migration `0005` and its store module only)
 - `apps/desktop/src-tauri/src/{commands.rs,lib.rs}` (command adapters and the
   handler registry only)
 - `packages/protocol/src/{commands.ts,types.ts,client.ts}` and
@@ -102,6 +101,12 @@ think they were forgotten:
   agent rail.
 - **Enforcement.** Nothing here stops a write. A denied ask is honoured because
   the agent asked. Blocking a write nobody asked about is T330.
+- **Persisting a grant.** "Allow for this run" lives in memory and dies with
+  the session that earned it. A standing "yes" that survived a restart would be
+  authority nobody remembers granting and nothing on screen would say it
+  existed; losing it means being asked again, which is how this kind of state
+  should fail. `SCHEMA_VERSION` and migration `0005` were claimed while this was
+  being planned and have been released.
 - **Cross-workspace aggregation** — T410.
 - **A second provider.** Claude Code only. The verdict file, the marker and the
   bounded request are provider-neutral; the event name and reply shape live in
@@ -154,7 +159,7 @@ think they were forgotten:
 | User answers in the terminal first | The ask disappears without a verdict. Normal, not an error; the card and queue row go. |
 | Verdict written for an ask that has ended | Ignored on read; never resurrected. |
 | Session dies while an ask is open | Process evidence wins, as ADR-018 §7 already requires: the row reports `ENDED` and the ask is dropped. |
-| Database unavailable | Answering still reaches the agent; the grant is not recorded and the UI says so rather than claiming a standing rule it did not store. |
+| Gritty restarted mid-run | Standing grants are gone and the next ask reaches the user. Failing closed is the point. |
 | Two asks from one session | Only the newest is held. A ring would keep answered prompts claiming to be waiting — the reason `pending` sits beside the ring at all. |
 | Sensitive target (`.env`, `*.pem`, key material) | The ask names the path; the diff is omitted, not truncated. |
 
@@ -202,8 +207,9 @@ pnpm check
 GRITTY_LOG=debug pnpm dev
 ```
 
-Claim `PROTOCOL_VERSION 2.12.0`, `SCHEMA_VERSION 5` and migration
-`0005_agent_permissions.sql` in `docs/merge-queue.md` before spending them.
+Claim `PROTOCOL_VERSION 2.12.0` in `docs/merge-queue.md` before spending it.
+`SCHEMA_VERSION` and the migration numbers were claimed during planning and
+**released**: nothing here is persisted (see the non-goal below).
 
 ## Completion report
 

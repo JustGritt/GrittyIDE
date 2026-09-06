@@ -41,6 +41,9 @@ function agentsController(sessions: readonly AgentSession[]): AgentsController {
     clearError: () => {},
     busy: false,
     refresh: async () => {},
+    answerPermission: async () => {},
+    revokeGrant: async () => {},
+    answering: null,
   };
 }
 
