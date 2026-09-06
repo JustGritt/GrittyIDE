@@ -174,12 +174,10 @@ therefore unverified. It is the one thing left before this can be called done.
 - The roster's transition buttons appear on hover/focus. On a touch screen
   they would need a tap target; Gritty is desktop-only today.
 - Editing a title or goal after creation is not in the UI, though
-  `workstreams.update` exists. Same for `workstreams.remove` and
-  `decisions.raise` with structured options — the core supports both, the
-  island only raises free-form questions through the queue's absence of a form.
-  **Raising a question has no UI at all yet**: decisions can be answered and
-  dismissed, but the only way to create one is the command. That is the largest
-  gap and the first follow-up.
+  `workstreams.update` exists. Same for `workstreams.remove`.
+  ~~**Raising a question has no UI at all yet**~~ — closed by the fix pass
+  below: the roster and the queue both raise questions now, free-form or with
+  structured options.
 - `waitedFor` is computed at render, so a wait only refreshes when something
   else re-renders. A ticking clock was deliberately left out: a queue that
   updates every second invites watching instead of working.
@@ -188,9 +186,7 @@ therefore unverified. It is the one thing left before this can be called done.
 
 ### Follow-up tasks
 
-- **Raise a question from the UI** (a form in the island and in the queue,
-  including structured options). Needed before the island is genuinely usable
-  end to end.
+- ~~**Raise a question from the UI**~~ — done in the fix pass below, 2026-09-06.
 - **Edit title and goal**, and remove a workstream, from the roster.
 - **T410** turns the queue into the real cross-workspace attention surface and
   adds the filters that agent runs make meaningful.
@@ -204,3 +200,91 @@ therefore unverified. It is the one thing left before this can be called done.
 - ⌥A may collide with a future terminal shortcut (the artboard shows ⌥1…9 for
   attaching terminals, which is not implemented). Whoever adds that owns the
   conflict.
+
+---
+
+## Fix pass — 2026-09-06
+
+Sent back to `tofix` by `gritt` with finding 3 of `docs/testing/review-findings.md`
+attached: *nothing raises a decision, which is T210's own largest gap and why
+manual-pass 7.7 cannot be run.*
+
+### What was wrong
+
+`raise` was defined on the controller at `use-workstreams.ts:191` and exported
+at `:286`, and no component called it. Decisions could be answered and
+dismissed; the only way to *create* one was the command. So acceptance criterion
+2 — "a question raised on running work shows in the island within one event, and
+answering it resumes the work without a reload" — had no path through the UI at
+all, and manual-pass step 7.7 asked a reviewer to open the island "onto a
+decision with options" that nothing could put there. That step also indirectly
+gates a T096 failure-behavior item ("with the island open, ⌥1…9 answer its
+decision and never reach the dock"), so one missing form left a second task's
+behaviour unexercised.
+
+The original report named this accurately as its largest gap and first
+follow-up. Nothing tracked it, which is the actual lesson: a known gap that
+blocks an acceptance criterion belongs on the board, not only in a report.
+
+### What changed
+
+| File | What |
+|---|---|
+| `raise-question-model.ts` (+ test) | new — the pure half: option keys from labels, de-duplication, the caps that mirror the core's |
+| `raise-question.tsx` | new — the form, shared by both surfaces |
+| `raise-question-render.test.ts` | new — the form and the roster's affordance, rendered |
+| `island.tsx` | `RosterRow` gains an **Ask** toggle that reveals the form under the row |
+| `attention-queue.tsx` | the same form as a section of the detail rail |
+| `use-workstreams.ts` | `raise` returns the `Decision` instead of `void` |
+| `app.css` | the form, and `island__move--on` |
+| `docs/testing/phase-0-manual-pass.md` | 7.7a/7.7b raise the decision 7.7 needs; 7.7c is the field-focus case |
+
+Four decisions:
+
+1. **The roster is where a question is raised, not the queue alone.** The queue
+   lists what already *needs* you; the roster is the only surface that lists
+   every workstream, and the work you want to ask a question about is usually
+   work that is running fine. The queue gets the same form because answering one
+   question often raises the next and that is where the reader already is.
+2. **One field per option, with the key derived from the label.** `key` is what
+   `chosen` records and has to be stable, but making someone type it beside
+   every label is friction in a form whose point is to be quick. Two labels that
+   honestly slug the same ("Yes, do it" / "Yes! Do it.") get a suffix rather
+   than a refusal the user has to decode — the core rejects duplicate keys, and
+   bouncing that back as an error message would be worse than solving it.
+3. **Every field is an `<input>`, never a `<textarea>`.** `isTypingInField`
+   tests `tagName === 'INPUT'` and deliberately does *not* exclude Monaco's
+   hidden textarea, because ⌥A from the editor is the point of that shortcut. A
+   textarea in this form would let ⌥A and ⌥1…9 fire mid-sentence — the exact
+   collision decision 6 of the original report was written to avoid.
+4. **`raise` returns its `Decision`**, mirroring `acquire`. The form closes on
+   success and stays open beside the envelope on a refusal, rather than
+   inferring the outcome by watching `controller.error` — which would be a guess
+   about which command last failed.
+
+The client-side bounds (`MAX_QUESTION`, `MAX_OPTIONS`, `MAX_OPTION_LABEL`) are
+`maxLength` attributes and a disabled button, not validation. The core stays the
+authority; if the two ever disagree, the core wins and its message is what the
+user sees. Nothing is optimistic, per decision 2 of the original report.
+
+No new colour values (ADR-016): the form is built from the existing tokens.
+No core change, no protocol change, `packages/protocol/src/generated` untouched.
+
+### Tests actually executed
+
+- `pnpm vitest run apps/desktop/src/features/workstreams` — 7 files, 64 tests,
+  green (7 new in the model test, 7 in the render test).
+- `pnpm check` — see below; one run covers all three fixes in this pull request.
+
+The render test exists because a view-model test could not have caught this
+defect: `raise` was correct, exported and reachable. What was missing was a
+caller, and only rendering the component finds that.
+
+### Still not executed
+
+**The end-to-end walk in the running app.** This agent has no screen access on
+this machine, so raising a question, watching the row go to `BLOCKED`, answering
+it with ⌥1 and watching the work resume has not been performed. That walk is now
+manual-pass 7.7a–7.7c, which is the point of the fix: the step exists, can be
+run, and the T096 chord-arbitration behaviour it gates comes back into reach
+with it.

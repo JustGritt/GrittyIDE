@@ -46,6 +46,10 @@ suggestion, a runbook step that cannot be performed, three tasks landed in one
 unreviewed commit alongside a fourth that has no ticket at all. Every "not
 executed" admission in the twelve was checked and every one of them is true.
 
+**Findings 1, 2 and 3 were fixed on 2026-09-06** and are stamped where they
+stand. Findings 4 to 7 are about history and paperwork rather than code, and
+are open.
+
 ---
 
 # Discrepancies
@@ -53,6 +57,10 @@ executed" admission in the twelve was checked and every one of them is true.
 Ordered by how much each would change a reviewer's decision.
 
 ## 1. The permission prompt is delivered by the core and drawn by nothing
+
+> **Resolved 2026-09-06** — `T232: the feed draws the permission prompt it is
+> already sent`. `applyAppended` carries `pending` through and `timelineRows`
+> draws it as the last row. See T232's fix pass.
 
 **What the reports claim.** T232's summary: "Selecting a session now draws the
 files it touched and, under them, its feed — prompts, replies, thinking, tool
@@ -92,6 +100,10 @@ nothing draws it yet"); nothing else does, and no ticket carries it.
 
 ## 2. T221 §24 is not implemented, and its report describes the state wrongly
 
+> **Resolved 2026-09-06** — `T221: a row says where its verdict came from`. The
+> rail row draws `activitySourceLabel`, and the follow-up sentence is corrected.
+> See T221's fix pass.
+
 **What the report claims.** Under Follow-up: "Consider surfacing
 `activitySource` on the rail row; `activitySourceLabel` is exported and tested
 but **only the settings surface is wired today**."
@@ -116,6 +128,10 @@ label is on screen somewhere, and it is not.
 **Time to confirm.** Two minutes.
 
 ## 3. Manual-pass step 7.7 cannot be performed: nothing raises a decision
+
+> **Resolved 2026-09-06** — `T210: raise a question from the island and the
+> queue`. The roster and the queue both raise questions, and steps 7.7a–7.7c
+> put a decision on screen for 7.7. See T210's fix pass.
 
 **What the runbook asks.** `docs/testing/phase-0-manual-pass.md`, Session 7,
 step 7.7: "Open the island (⌥A) onto a decision with options, press ⌥1 | It

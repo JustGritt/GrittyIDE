@@ -317,7 +317,10 @@ a workspace, and leave a second window's worth of shells running.
 | 7.4 | Click into a terminal so it has focus, press ⌥2 | Switches to the second session. Nothing is printed and nothing reaches the shell |
 | 7.5 | Press ⌥7 with three sessions open | Nothing happens, and nothing is typed |
 | 7.6 | Start a rename (F2), press ⌥1 while typing | The character goes into the field; no session switch |
-| 7.7 | Open the island (⌥A) onto a decision with options, press ⌥1 | It answers the decision. The dock does not switch |
+| 7.7a | ⌥A, hover a roster row, press **Ask**, type a question, press **Add an option** twice and fill both, press **Ask** | The form folds away. The row shows "1 open question" and, if it was In progress, goes to Blocked — the core blocks running work on a question |
+| 7.7b | Look at the top of the sheet | The question is in the most-urgent slot with both options, each carrying its ⌥ number |
+| 7.7 | With the island open on that decision, press ⌥1 | It answers the decision. The dock does not switch |
+| 7.7c | Type into the question field and press ⌥1 while typing | The character goes into the field; no decision is answered and no session switches |
 | 7.8 | Press ✕ on a running pill | The shell dies, the pill stays, its dot turns red and it reads `exit N` |
 | 7.9 | Press ✕ again on that pill | The pill goes |
 | 7.10 | Right-click a running pill → Close | Gone in one step, no intermediate state |

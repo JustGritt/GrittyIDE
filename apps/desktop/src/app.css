@@ -2640,6 +2640,100 @@ textarea:focus-visible {
   opacity: 1;
 }
 
+/* A control whose own state is what makes it worth showing. The form this
+   opens is a sibling of the row, so once focus moves into it the row is
+   neither hovered nor `:focus-within` — and the button that says "Cancel"
+   would fade out from under the person still using it. */
+.island__move--on {
+  opacity: 1;
+}
+
+/* Asking a question against a piece of work (T210). Shared by the island's
+   roster and the queue's detail rail, so it is styled once and indented under
+   whichever row opened it. No new colour values: ADR-016 tokens only. */
+
+.raise {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  margin: 2px 0 var(--gap-sm) var(--gap-lg);
+  padding: var(--gap);
+  border-left: 2px solid var(--accent-fill);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  background: var(--ghost);
+}
+
+.raise__label {
+  font-size: var(--text-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.raise__question {
+  display: flex;
+  gap: var(--gap-sm);
+}
+
+.raise__question input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 9px;
+}
+
+.raise__options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.raise__option {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+.raise__option input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+}
+
+/* The number the island will answer this option with (⌥1…⌥9), shown while it
+   is being written rather than only once it is on screen. */
+.raise__chord {
+  flex: none;
+  min-width: 18px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  color: var(--fg-faint);
+}
+
+.raise__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+.raise__hint {
+  font-size: var(--text-micro);
+  color: var(--fg-faint);
+}
+
+.queue__detail-raise {
+  display: flex;
+  flex-direction: column;
+}
+
+/* In the queue the form is the section, not something opened under a row. */
+.queue__detail-raise .raise {
+  margin: 0;
+}
+
 .island__new {
   display: flex;
   gap: var(--gap-sm);

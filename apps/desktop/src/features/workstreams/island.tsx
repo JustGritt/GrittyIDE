@@ -15,6 +15,7 @@ import {
 } from './attention';
 import { ownsLabel, targetLabel } from './ownership';
 import { OwnershipSection } from './ownership-panel';
+import { RaiseQuestion } from './raise-question';
 import type { WorkstreamsController } from './use-workstreams';
 
 /**
@@ -397,45 +398,70 @@ function RosterRow({
   agents: AgentsController;
 }) {
   const linked = linkedRowLabel(controller, agents, workstream.id);
+  // Per row, and closed by default. The roster is the only surface that lists
+  // every workstream — the queue lists what already needs you — so this is
+  // where a question gets raised, but a form open on every row would bury the
+  // roster it belongs to.
+  const [asking, setAsking] = useState(false);
   return (
-    <div className="island__row">
-      <span
-        className={`island__dot island__dot--${stateTone(workstream.state)}`}
-        aria-hidden="true"
-      />
-      <span className="island__row-name" title={workstream.goal ?? undefined}>
-        {workstream.title}
-      </span>
-      <span className="island__row-state">{stateLabel(workstream.state)}</span>
-      {workstream.openDecisions > 0 && (
-        <span className="island__row-open">
-          {workstream.openDecisions} open{workstream.openDecisions === 1 ? ' question' : ''}
+    <>
+      <div className="island__row">
+        <span
+          className={`island__dot island__dot--${stateTone(workstream.state)}`}
+          aria-hidden="true"
+        />
+        <span className="island__row-name" title={workstream.goal ?? undefined}>
+          {workstream.title}
         </span>
-      )}
-      {ownsLabel(controller.ownership, workstream.id) && (
-        <span className="island__row-owns">{ownsLabel(controller.ownership, workstream.id)}</span>
-      )}
-      {/* What is working on it, live when it is in the roster and "not
+        <span className="island__row-state">{stateLabel(workstream.state)}</span>
+        {workstream.openDecisions > 0 && (
+          <span className="island__row-open">
+            {workstream.openDecisions} open{workstream.openDecisions === 1 ? ' question' : ''}
+          </span>
+        )}
+        {ownsLabel(controller.ownership, workstream.id) && (
+          <span className="island__row-owns">{ownsLabel(controller.ownership, workstream.id)}</span>
+        )}
+        {/* What is working on it, live when it is in the roster and "not
           running" when it is not — never dropped, because the link is what
           happened (T223 §12). */}
-      {linked && <span className="island__row-agents">{linked}</span>}
-      <span className="island__spacer" />
-      {/* Exactly the moves the core allows, straight from the wire: the
+        {linked && <span className="island__row-agents">{linked}</span>}
+        <span className="island__spacer" />
+        {/* Exactly the moves the core allows, straight from the wire: the
           renderer keeps no copy of the state machine (T200). */}
-      {workstream.allowedTransitions
-        .filter((to) => to !== 'ABANDONED' && to !== 'BLOCKED')
-        .map((to) => (
-          <button
-            key={to}
-            type="button"
-            className="island__move"
-            disabled={controller.busy}
-            onClick={() => void controller.transition(workstream.id, to)}
-          >
-            {transitionLabel(to)}
-          </button>
-        ))}
-    </div>
+        {/* Before the moves, because asking is what *stops* the work: raising a
+          question on running work blocks it, which the core does itself. */}
+        <button
+          type="button"
+          className={`island__move${asking ? ' island__move--on' : ''}`}
+          aria-expanded={asking}
+          disabled={controller.busy}
+          onClick={() => setAsking((open) => !open)}
+        >
+          {asking ? 'Cancel' : 'Ask'}
+        </button>
+        {workstream.allowedTransitions
+          .filter((to) => to !== 'ABANDONED' && to !== 'BLOCKED')
+          .map((to) => (
+            <button
+              key={to}
+              type="button"
+              className="island__move"
+              disabled={controller.busy}
+              onClick={() => void controller.transition(workstream.id, to)}
+            >
+              {transitionLabel(to)}
+            </button>
+          ))}
+      </div>
+      {asking && (
+        <RaiseQuestion
+          workstreamId={workstream.id}
+          controller={controller}
+          onDone={() => setAsking(false)}
+        />
+      )}
+    </>
   );
 }
 

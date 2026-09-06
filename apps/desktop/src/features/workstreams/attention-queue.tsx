@@ -15,6 +15,7 @@ import {
 } from './attention';
 import { DecisionCard } from './island';
 import { targetLabel } from './ownership';
+import { RaiseQuestion } from './raise-question';
 import type { WorkstreamsController } from './use-workstreams';
 
 /**
@@ -303,6 +304,12 @@ function QueueDetail({
             </button>
           ))}
         </div>
+      </div>
+
+      {/* The same form the island's roster draws (T210). Answering one question
+          often raises the next, and this is where the reader already is. */}
+      <div className="queue__detail-raise">
+        <RaiseQuestion workstreamId={item.workstream.id} controller={controller} />
       </div>
     </div>
   );
