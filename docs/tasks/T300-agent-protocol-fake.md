@@ -1,7 +1,7 @@
 # Task T300 — Agent runs are Gritty's own, and a deterministic fake proves the whole lifecycle (Gate D)
 
 - **Phase:** 4
-- **Status:** todo
+- **Status:** superseded
 - **Depends on:** T200 (workstream model, Gate C — a run attaches to a
   workstream and brings no task model of its own), T210 (island — the
   surface a run's state eventually has to reach)

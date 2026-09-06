@@ -1,7 +1,7 @@
 # Task T222 — More providers: Codex first, then what can be verified
 
 - **Phase:** 3
-- **Status:** todo
+- **Status:** superseded
 - **Depends on:** T220 (agent session discovery), T221 (hook bridge) for the integration half
 
 ## Objective

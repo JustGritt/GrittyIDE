@@ -37,22 +37,22 @@ the workflow below are hand-maintained.
 | ADR-001 | Confirm or reject Tauri | 0 | Phase 0 tests | todo |
 | MANUAL-PASS-COVERAGE | The manual pass covers every task sitting at review (review-findings finding 6) | 0 | T041, T045, T051, T210, T220, T221, T231, T232, T325 | review |
 | [T070](T070-file-watcher.md) | File watcher | 1A/2 | T020, T030, ADR-001 | todo |
-| [T080](T080-search.md) | Search | 2 | T020, T070, ADR-001 | todo |
-| [T100](T100-git-baseline.md) | Git baseline | 2 | T020, ADR-001 | todo |
+| [T080](T080-search.md) | Search: the walk, the match, the streamed result (the core half) | 2 | T020, T070, ADR-001 | todo |
+| [T100](T100-git-baseline.md) | Git baseline: gix status and typed diff (the core half) | 2 | T020, ADR-001 | todo |
 | [T110](T110-diagnostics.md) | Diagnostics | 2 | T060, T090, T220, T325, ADR-001 | todo |
 | [T200](T200-workstream-model.md) | Workstream model + decisions (Gate C) | 3 | T010, T020, T060 | done |
 | [T210](T210-workstream-ui.md) | Workstream UI: the island and the attention queue | 3 | T200 | review |
 | [T220](T220-agent-session-discovery.md) | Agent session discovery: what is running, and on what | 3 | T010, T020, T210 | done |
 | [T221](T221-agent-hook-bridge.md) | Agent hook bridge: earning `BLOCKED` | 3 | T220, T230, ADR-018 | review |
-| [T222](T222-agent-providers.md) | More providers: Codex first, then what can be verified | 3 | T220, T221 | todo |
+| [T222](T222-agent-providers.md) | More providers: Codex first, then what can be verified | 3 | T220, T221 | superseded |
 | [T223](T223-agent-attention.md) | Attention: notify when an agent needs you, and link it to the work | 3 | T200, T210, T220, T221 | done |
 | [T224](T224-reveal-terminal.md) | Reveal the terminal a session is running in | 3 | T220 | todo |
 | [T225](T225-hook-sidecar.md) | Bundle the agent hook as a sidecar | 3 | T221 | review |
 | [T230](T230-agent-timeline.md) | Agent timeline: what a session is actually doing | 3 | T020, T220 | done |
 | [T231](T231-agent-rail.md) | The agent rail: a dedicated region for running agents | 3 | T046, T060, T220, T230 | done |
 | [T232](T232-timeline-view.md) | The timeline view, and the files an agent touched | 3 | T030, T230, T231 | review |
-| [JSDOM-VITEST](JSDOM-VITEST-component-tests.md) | A jsdom vitest project, so a `.tsx` can be tested against a DOM | 3 | T096, T232 | review |
-| [T300](T300-agent-protocol-fake.md) | Agent event protocol + deterministic fake agent (Gate D) | 4 | T200, T210 | todo |
+| JSDOM-VITEST | A jsdom vitest project, so a `.tsx` can be tested against a DOM | 3 | T096, T232 | review |
+| [T300](T300-agent-protocol-fake.md) | Agent event protocol + deterministic fake agent (Gate D) | 4 | T200, T210 | superseded |
 | T305 | Agent capability model | 4 | T300 | unspec |
 | T310 | First real adapter | 4 | T300, T305 | unspec |
 | T315 | Live agent activity | 4 | T310 | superseded by T220/T230/T231/T232 |
@@ -64,10 +64,28 @@ the workflow below are hand-maintained.
 | T400 | Worktree isolation | 5 | T100, T325 | unspec |
 | T405 | Ownership-aware scheduler | 5 | T325, T300 | unspec |
 | T410 | Attention queue | 5 | T210, T325, T335 | unspec |
+| ADR-017 | Decide the terminal command-block contract (drafted, undecided) | 2 | – | todo |
+| ADR-018A | ADR-018 amendment: a hook that may refuse a write | 4 | T326 | todo |
+| ADR-021 | Persistence for a run Gritty owns | 4 | T300-C | todo |
+| ADR-022 | Search engine: in-process grep/ignore, or spawn ripgrep | 2 | – | review |
+| ADR-023 | Git library: gix, git2, or porcelain | 2 | – | review |
 | CI-COST | CI: self-hosted macOS runner, and stop burning metered minutes |  | – | review |
 | CI-LINUX-DARK | Linux CI is dark until the minute allowance resets (1 Oct) or a spending limit is set |  | – | blocked |
 | [CI-RUNNER-GC](CI-RUNNER-GC-disk-retention.md) | Self-hosted runner never cleans up: target/ and stale bundles grow unbounded on the dev Mac |  | – | review |
 | [EVENT-LISTEN-GAP](EVENT-LISTEN-GAP-startup-events.md) | An event emitted before the WebView is listening reaches nobody | 1 | T010 | review |
+| PLAN-FANOUT | Split the remaining work into fan-out-sized tickets, and the lanes to run them in |  | – | review |
+| PROTO-W2 | Wave 2 wire, in one PR: watcher, git, terminal blocks, diagnostics, violations | 2 | ADR-001, ADR-017, ADR-023 | todo |
+| PROTO-W3 | Wave 3 wire, in one PR: search | 2 | ADR-022 | todo |
+| T080-U | The search panel | 2 | PROTO-W3, T080 | todo |
+| T100-U | Git status and diff, in the shell | 2 | PROTO-W2, T100 | todo |
+| T222-CODEX | Codex, as one provider file | 3 | T222-SEAM | todo |
+| T222-SEAM | A provider registry, so providers stop being serial | 3 | T220 | unspec |
+| T233 | Agents in the left sidebar, or not (the 12a/12b divergence) | 3 | – | unspec |
+| T300-C | The run contract, alone (Gate D) | 4 | T200, T210 | todo |
+| T300-CMD | runs.* adapters, and the minimal surface | 4 | T300-C | todo |
+| T300-CORE | The run manager: supervision, cancellation, bounded events | 4 | T300-C | todo |
+| T300-FAKE | gritty-agent-fake: a scripted, deterministic adapter | 4 | T300-C | todo |
+| T400-R | Worktree create and remove | 5 | T100 | unspec |
 <!-- board:table end -->
 
 ## Dependency graph (architecture addendum §2)
