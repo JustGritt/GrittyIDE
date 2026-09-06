@@ -1,7 +1,7 @@
 # Task T221 — Agent hook bridge: earning `BLOCKED`
 
 - **Phase:** 3
-- **Status:** tofix
+- **Status:** review
 - **Depends on:** T220 (agent session discovery), T230 (fast loop, timeline entries), ADR-018
 
 ## Objective
