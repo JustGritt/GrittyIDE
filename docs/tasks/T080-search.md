@@ -122,11 +122,14 @@ files" — hard rule 10, written before this task existed.
    adapter before it is domain state; a library's native structs skip
    building that adapter. Packaging: a spawned process needs a located,
    bundled or system `rg` binary on a platform still one accepted OS deep
-   (ADR-002), an untested cross-platform claim hard rule 11 forbids. This
-   needs its own ADR before any crate code is written — take the next free
-   number at PR time, not now, the way `docs/merge-queue.md` claims a
-   migration number then rather than reserving one early, since sibling
-   lanes writing specs concurrently could race for the same one.
+   (ADR-002), an untested cross-platform claim hard rule 11 forbids.
+   **Decided: `docs/decisions/ADR-022-search-engine.md`** takes the
+   in-process option, on `grep-searcher` + `grep-regex` + `ignore` (not the
+   `grep` facade). Two constraints it adds that this spec did not have:
+   `ignore` is taken for its walker with **every gitignore source turned
+   off**, because Gritty's "ignored" is `IGNORED_DIRECTORY_NAMES` and must
+   stay one thing across the explorer, the watcher and search; and binary
+   detection stays T030's test, not `grep-searcher`'s.
 
 ### The command, the operation and the walk
 
