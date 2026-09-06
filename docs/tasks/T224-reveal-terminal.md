@@ -1,7 +1,7 @@
 # Task T224 — Reveal the terminal a session is running in
 
 - **Phase:** 3
-- **Status:** not yet started
+- **Status:** todo
 - **Depends on:** T220 (agent session discovery)
 
 ## Objective

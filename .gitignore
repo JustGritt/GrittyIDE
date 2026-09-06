@@ -21,6 +21,9 @@ coverage/
 # Local tool state
 .claude/settings.local.json
 HANDOFF.md
+AGENT-LEASES.md
+AGENT-BOARD.md
+__pycache__/
 
 # Generated fixtures (see fixtures/README.md)
 fixtures/large-repo/

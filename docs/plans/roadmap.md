@@ -3,6 +3,11 @@
 Phases and exit criteria from the project plan (§15) with the refined sequence
 from the architecture addendum (§13). Effort figures are indicative.
 
+This file is the *shape* of the work and goes stale between edits. For what any
+task's status actually is, and who is building it right now, read the board:
+`scripts/agent-board.py list`. Its committed projection is the table in
+`docs/tasks/README.md`; a status written here is prose, not a record.
+
 | Phase | Effort | Scope | Exit criterion |
 |---|---|---|---|
 | 0 — Architecture and runtime spike | 1–2 weeks | Tauri/WebView viability, Monaco, filesystem boundary, typed protocol, PTY, Markdown, persistence fundamentals, failure containment, Linux build, performance baseline | ADR-001 go/no-go with measurements (`phase-0-spike.md`) |

@@ -1,7 +1,7 @@
 # Task T045 — Drag and drop files and folders onto the window
 
 - **Phase:** 1A
-- **Status:** in-progress
+- **Status:** doing
 - **Depends on:** T020 (workspace), T030 (documents), T040 (editor shell)
 
 > The ID is an addition to the project plan's §17 numbering, not from it. It
