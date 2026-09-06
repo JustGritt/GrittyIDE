@@ -1630,24 +1630,37 @@ fn a_malformed_link_request_is_invalid_input_and_writes_nothing() {
 
 #[test]
 fn notifications_are_off_until_the_setting_is_turned_on_through_the_adapter() {
+    // The plugin is a macOS dependency, so `configure` registers it there and
+    // nowhere else. The contract is the same either way and is what this
+    // asserts: the setting reports what the platform can actually do, rather
+    // than a value baked in at the time the test was written.
+    const SUPPORTED: bool = cfg!(target_os = "macos");
+
     let harness = Harness::new();
-    // `configure` registers the notification plugin, so this build supports
-    // them — and still starts with them off. Nothing about launching the
-    // application arms them (T223 §2).
+    // Whatever the platform supports, the setting still starts off — nothing
+    // about launching the application arms it (T223 §2).
     let settings = harness
         .invoke("agents_notifications", json!({}))
         .expect("read");
-    assert_eq!(settings["supported"], true);
+    assert_eq!(settings["supported"], SUPPORTED);
     assert_eq!(settings["enabled"], false);
 
     let after = harness
         .session("agents_set_notifications", json!({ "enabled": true }))
         .expect("set");
-    // The desktop plugin answers `Granted` without a prompt of its own; the
-    // real permission is the operating system's, and it is asked for by the
-    // first notification rather than by this call. What is asserted here is
-    // that the setting follows the platform's answer instead of assuming one.
-    assert_eq!(after["enabled"], after["permission"] == "GRANTED");
+    if SUPPORTED {
+        // The desktop plugin answers `Granted` without a prompt of its own; the
+        // real permission is the operating system's, and it is asked for by the
+        // first notification rather than by this call. What is asserted here is
+        // that the setting follows the platform's answer instead of assuming one.
+        assert_eq!(after["enabled"], after["permission"] == "GRANTED");
+    } else {
+        // Absent rather than broken, which is the failure table's wording:
+        // asking for a notification Gritty cannot raise leaves the setting off
+        // and does not fail the command.
+        assert_eq!(after["enabled"], false);
+        assert_ne!(after["permission"], "GRANTED");
+    }
     assert_eq!(
         harness
             .invoke("agents_notifications", json!({}))
