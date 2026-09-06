@@ -17,9 +17,16 @@ export interface FakeTransport extends Transport {
   resolveListen(): void;
 }
 
-export function createFakeTransport(options: { deferListen?: boolean } = {}): FakeTransport {
+export function createFakeTransport(
+  options: {
+    deferListen?: boolean;
+    /** Reject this many `listen()` calls before the next one succeeds. */
+    failListen?: number;
+  } = {},
+): FakeTransport {
   const listeners = new Set<(payload: unknown) => void>();
   const pending: Array<() => void> = [];
+  let failuresLeft = options.failListen ?? 0;
   const transport: FakeTransport = {
     handlers: new Map(),
     calls: [],
@@ -33,6 +40,10 @@ export function createFakeTransport(options: { deferListen?: boolean } = {}): Fa
     },
     listen(_channel, handler): Promise<Unlisten> {
       transport.listenCalls += 1;
+      if (failuresLeft > 0) {
+        failuresLeft -= 1;
+        return Promise.reject(new Error('listen refused'));
+      }
       const register = (): Unlisten => {
         listeners.add(handler);
         return () => {

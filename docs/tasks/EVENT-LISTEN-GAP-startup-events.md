@@ -1,7 +1,7 @@
 # Task EVENT-LISTEN-GAP — An event emitted before the WebView is listening reaches nobody
 
 - **Phase:** 1
-- **Status:** todo
+- **Status:** review
 - **Depends on:** T010 (Gate A: the event envelope, `seq`, the transport
   contract)
 
@@ -161,4 +161,95 @@ cheaper ones were refused.
 
 ## Completion report
 
-_(unstarted)_
+**Summary.** The client now guarantees *ordering* rather than
+delivery-in-hindsight. `EventHub.start()` begins registration when the client is
+constructed, so it overlaps the compatibility probe instead of waiting for the
+first subscriber; `command()` awaits `EventHub.ready()` before sending, so an
+event a command causes cannot be emitted into a WebView that is not listening
+yet. `ready()` is bounded and fails open, a refused registration is retried with
+a bounded backoff, and the hub reports how many events preceded its listener.
+Design option **A**, not **C** — the reasoning is in the ADR amendment.
+
+**Files changed.**
+- `packages/protocol/src/events.ts` — `start()`, `ready()`, the one-shot budget
+  latch, `#retry()`, and the first-envelope report.
+- `packages/protocol/src/client.ts` — `hub.start()` at construction,
+  `await hub.ready()` in `command()`, `listenBudgetMs` on `CoreClientOptions`.
+- `packages/protocol/src/testing/fake-transport.ts` — `failListen`, so a
+  refused registration can be tested at all.
+- `packages/protocol/src/client.test.ts` — four new cases; one existing case
+  updated (see below).
+- `docs/decisions/ADR-009-core-protocol-conventions.md` — amended, not a new
+  ADR: this is that ADR's own revisit trigger firing.
+
+**Tests actually executed.**
+- `pnpm check` — **exit 0**: Biome + tsc over 247 files, **572 vitest tests in
+  72 files**, `cargo fmt --check`, `cargo clippy --workspace --all-targets -D
+  warnings`, `cargo test --workspace`, generated types fresh.
+- **Each new test was confirmed to fail without its mechanism**, which is the
+  point of the ticket's "fails before, passes after" criterion:
+  - removing `await hub.ready()` → *does not send a command until the listener
+    is registered* and *lets commands through when the channel never opens*
+    both fail (2 failed | 63 passed).
+  - removing `hub.start()` → *registers the listener before anything subscribes*
+    fails (1 failed | 64 passed).
+- One existing test changed: *reports sequence discontinuities and malformed
+  payloads* emits `seq 5` first, which is now also reported as preceding the
+  listener. The assertion gained that message rather than losing anything.
+
+**Architectural decisions.**
+- The ordering test injects a 60-second budget deliberately. With a short one it
+  would pass even with the gate deleted — the timer would let the command
+  through and the post-`resolveListen` assertion would still hold. Ordering is
+  the property, so nothing may rescue it but registration.
+- The first-envelope report says "core events preceded this listener", never
+  "lost". The core is built during Tauri's `setup`, before the window is shown,
+  so a healthy cold start always has events numbered before any WebView exists.
+  A warning that always fires is not inspectability — and arming this ADR's own
+  revisit trigger with noise would be worse than silence.
+- Retry happens on *rejection* only, never on budget expiry. Retrying a `listen`
+  that is merely slow would register twice, and two live listeners would append
+  every timeline delta and every byte of terminal output twice.
+
+**Known limitations.**
+- **The guarantee is narrower than "no event is lost", by design**, and the ADR
+  says so in those words. It does not cover events nothing asked for
+  (`AgentSessionsChanged`, `PersistenceStatusChanged`, T070's watcher), nor a
+  consumer that issues a command before its own `subscribe` — the hub buffers
+  nothing and delivers only to subscriptions live at dispatch. For the first
+  class, starting registration early is the only thing that helps, and it now
+  starts as early as the client exists.
+- **Startup cost is reasoned, not measured.** Registration overlaps a round trip
+  that already happens, so the expected delta is nil, but `first webview health`
+  has not been compared against the baselines in `docs/plans/phase-0-spike.md`.
+  That needs a relaunch of the app; it is the one verification item outstanding.
+- **The UI still cannot say "I am not receiving events."** The ticket asks for
+  it under Failure behavior. The capability exists — `CoreClientOptions.onDiagnostic`
+  — but where a dead channel should appear (status bar? session notice?) is a
+  design decision on a surface this ticket does not own, so it is recorded here
+  rather than invented.
+- The "subscribe before you ask" comments in `use-explorer.ts` and
+  `use-terminals.ts` still describe a real responsibility. What changed is that
+  it is now written down in ADR-009 instead of being folklore in two files.
+
+**Follow-ups.**
+1. `lastEventSeq` on `HealthReport`, from `EventBus::last_seq()`, would turn the
+   precedence report into proof of loss. It needs `core_health` to reach `Core`
+   state and `Core` to retain the bus — `apps/desktop/src-tauri/**`, outside
+   this ticket's scope, and a protocol MINOR with regenerated types.
+2. Make a detected gap *actionable*: one hub-level signal that the consumers
+   which already know how to re-ask (T070 §12 re-lists every loaded node on
+   `overflowed: true`) can act on. That generalises to reloads and to a
+   late-succeeding retry, far more cheaply than a replay ring.
+3. **T070 should not be started before reading this**: its §13 criterion — an
+   external edit *while unfocused* surfaces `MODIFIED_EXTERNALLY` within one
+   debounce window — has no re-ask path behind it, because
+   `use-documents.checkStatus()` runs only from the window-focus listener. The
+   explorer half survives a lost batch (it re-lists on mount, and a dropped
+   batch is indistinguishable from the `overflowed: true` one it already
+   handles); the documents half does not.
+
+**Risks.** Importing `apps/desktop/src/core/client.ts` now has a side effect:
+the module-level singleton registers a listener at import. Under jsdom that
+rejects, retries and gives up with a diagnostic — noisy in a component test, but
+nothing throws. The JSDOM-VITEST work happening in parallel was warned.
