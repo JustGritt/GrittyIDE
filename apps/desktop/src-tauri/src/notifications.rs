@@ -25,33 +25,77 @@
 //!   `notify_rust::Notification::show()` and drops the handle, so there is no
 //!   callback to focus the window from. T223 §6 is therefore not implemented,
 //!   and no code here pretends otherwise.
+//!
+//! **macOS only.** The plugin is a macOS dependency and is registered on macOS
+//! alone. Nobody has run a notification on any other platform, so carrying the
+//! dependency everywhere would claim support that was never verified (rule 11),
+//! and on Linux it pulls `notify-rust`, `zbus` and `dbus` into every test
+//! binary — enough to make `rust-lld` die linking them. Elsewhere the notifier
+//! answers `supported() == false`, which is exactly what T223's failure table
+//! asks for: "the setting is absent rather than broken". Bringing notifications
+//! to another platform is a task, not a build flag.
 
+#[cfg(target_os = "macos")]
 use tauri::plugin::PermissionState;
-use tauri::{AppHandle, Manager, Runtime};
-use tauri_plugin_notification::Notification;
+use tauri::{AppHandle, Runtime};
 
 use gritty_core::agent_session::attention::{
     AgentNotificationPermission, AttentionAlert, AttentionNotifier,
 };
 
+/// Registers the notification plugin where there is one. Separate from
+/// `configure` so the `cfg` lives beside the adapter it belongs to rather than
+/// in the middle of the builder chain.
+#[cfg(target_os = "macos")]
+pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+    builder.plugin(tauri_plugin_notification::init())
+}
+
+/// Registers nothing. The notifier reports itself unsupported and the setting
+/// is absent.
+#[cfg(not(target_os = "macos"))]
+pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+    builder
+}
+
 /// Raises notifications through `tauri-plugin-notification`.
+///
+/// The field is the app handle on macOS and nothing anywhere else, because
+/// there is no plugin to look up: keeping an unread handle would be a field
+/// that exists only to be ignored.
 pub struct PluginNotifier<R: Runtime> {
+    #[cfg(target_os = "macos")]
     app: AppHandle<R>,
+    #[cfg(not(target_os = "macos"))]
+    _runtime: std::marker::PhantomData<R>,
 }
 
 impl<R: Runtime> PluginNotifier<R> {
+    #[cfg(target_os = "macos")]
     pub fn new(app: AppHandle<R>) -> Self {
         Self { app }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn new(_app: AppHandle<R>) -> Self {
+        Self {
+            _runtime: std::marker::PhantomData,
+        }
     }
 
     /// The plugin's state, or `None` when it was never registered — which is
     /// what makes the setting *absent* rather than broken on a platform that
     /// does not carry it.
-    fn plugin(&self) -> Option<&Notification<R>> {
-        self.app.try_state::<Notification<R>>().map(|s| s.inner())
+    #[cfg(target_os = "macos")]
+    fn plugin(&self) -> Option<&tauri_plugin_notification::Notification<R>> {
+        use tauri::Manager;
+        self.app
+            .try_state::<tauri_plugin_notification::Notification<R>>()
+            .map(|s| s.inner())
     }
 }
 
+#[cfg(target_os = "macos")]
 impl<R: Runtime> AttentionNotifier for PluginNotifier<R> {
     fn supported(&self) -> bool {
         self.plugin().is_some()
@@ -97,9 +141,30 @@ impl<R: Runtime> AttentionNotifier for PluginNotifier<R> {
     }
 }
 
+/// Everywhere else: unsupported, permanently and honestly. The core reads
+/// `supported()` first and never offers the setting, so `show` is unreachable
+/// rather than silently swallowing an alert.
+#[cfg(not(target_os = "macos"))]
+impl<R: Runtime> AttentionNotifier for PluginNotifier<R> {
+    fn supported(&self) -> bool {
+        false
+    }
+
+    fn permission(&self) -> AgentNotificationPermission {
+        AgentNotificationPermission::Denied
+    }
+
+    fn request_permission(&self) -> AgentNotificationPermission {
+        AgentNotificationPermission::Denied
+    }
+
+    fn show(&self, _alert: &AttentionAlert) {}
+}
+
 /// Tauri's permission state onto the wire's. `PromptWithRationale` is Android
 /// only and reads as `PROMPT` here rather than as a fourth value nothing on
 /// desktop can produce.
+#[cfg(target_os = "macos")]
 fn to_domain(state: PermissionState) -> AgentNotificationPermission {
     match state {
         PermissionState::Granted => AgentNotificationPermission::Granted,
@@ -112,6 +177,7 @@ fn to_domain(state: PermissionState) -> AgentNotificationPermission {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn permission_states_map_onto_the_wire_without_inventing_a_fourth() {
         assert_eq!(
@@ -134,6 +200,8 @@ mod tests {
 
     /// A build whose plugin was never registered answers "not supported" and
     /// raises nothing, instead of panicking inside `NotificationExt::state`.
+    /// Runs on every platform: on macOS it proves the absent-plugin branch, and
+    /// elsewhere it is the only branch there is.
     #[test]
     fn without_the_plugin_nothing_is_supported_and_nothing_is_shown() {
         let app = tauri::test::mock_app();

@@ -401,6 +401,20 @@ table works against them.
 
 ### Known limitations
 
+- **macOS only, and the Linux build proves nothing about it.**
+  `tauri-plugin-notification` sits under
+  `[target.'cfg(target_os = "macos")'.dependencies]`; every other platform gets
+  a notifier that answers `supported() == false`, so the setting is absent
+  rather than broken — the failure table's own wording. Two reasons, and the
+  second is the one that forced it. Nobody has run a notification on any other
+  platform, so carrying the dependency everywhere would claim support that was
+  never verified (rule 11). And on Linux the plugin pulls `notify-rust`, `zbus`
+  and `dbus` into every test binary, which was enough to make `rust-lld` die
+  with `SIGBUS` linking `gritty-core`'s lib test and `gritty-desktop`'s
+  `commands` test — three CI runs, same two binaries, every time. Bringing
+  notifications to a second platform is a task, not a build flag, and it starts
+  from code Linux CI no longer compiles.
+
 - **Not executed — human manual check: the notification on screen.** No agent
   session on this machine has a screen. That a notification actually appears
   while the window is backgrounded, what it looks like, and whether macOS

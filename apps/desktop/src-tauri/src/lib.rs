@@ -161,13 +161,16 @@ pub fn run() {
 /// Tauri's mock runtime (which never runs `setup`; tests call [`attach_core`]
 /// themselves).
 pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+    let builder = builder.plugin(tauri_plugin_dialog::init());
+    // T223. Registered so the *core* can raise a notification from Rust;
+    // `capabilities/default.json` grants its `notify`, `requestPermission` and
+    // `isPermissionGranted` commands to nobody, so the WebView gains nothing
+    // from it. It is registered on macOS only — the target table in
+    // `Cargo.toml` says why, and `notifications.rs` says what the other
+    // platforms get instead, which is a notifier that reports itself
+    // unsupported.
+    let builder = notifications::register(builder);
     builder
-        .plugin(tauri_plugin_dialog::init())
-        // T223. Registered so the *core* can raise a notification from Rust;
-        // `capabilities/default.json` grants its `notify`,
-        // `requestPermission` and `isPermissionGranted` commands to nobody, so
-        // the WebView gains nothing from this line.
-        .plugin(tauri_plugin_notification::init())
         .plugin(navigation_guard())
         .on_window_event(|window, event| {
             window_state::on_window_event(window, event);
