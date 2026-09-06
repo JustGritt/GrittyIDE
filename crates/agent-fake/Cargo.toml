@@ -1,0 +1,26 @@
+[package]
+name = "gritty-agent-fake"
+description = "Gritty's deterministic fake agent: a caller-driven script that lives through a whole run lifecycle with no process, no network and no clock"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# Deliberately **no `gritty-core`**. `gritty-core` has to depend on this crate
+# for T300-CORE's manager to drive it, exactly as it already depends on
+# `gritty-agents` and `gritty-terminal`; a dependency back the other way would
+# be a cycle Cargo refuses. That is the mechanical reason the translation from
+# this crate's vocabulary into `AgentRunEvent` lives in `agent_run` and not
+# here (task §9), and the reason the fake cannot sanitise its own output.
+[dependencies]
+# T300-FAKE: a malformed script's rejection reason is an error type, and
+# `thiserror` is how every other adapter crate in this workspace spells one.
+thiserror = { workspace = true }
+# T300-FAKE: a rejected step and a dropped driver are logged once, by kind and
+# phase only — never by payload, which is untrusted adapter text (rule 13).
+tracing = { workspace = true }
+
+[lints]
+workspace = true

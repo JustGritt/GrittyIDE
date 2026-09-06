@@ -19,6 +19,11 @@ gritty-persistence = { path = "crates/persistence" }
 gritty-terminal = { path = "crates/terminal" }
 gritty-agents = { path = "crates/agents" }
 gritty-agent-hook = { path = "crates/agent-hook" }
+# T300-FAKE: the deterministic fake agent (Gate D). A path dependency, no new
+# third-party crate, and deliberately the only direction that works —
+# `gritty-core` depends on this so its run manager can drive it, exactly as it
+# depends on `gritty-agents` and `gritty-terminal`.
+gritty-agent-fake = { path = "crates/agent-fake" }
 gritty-git = { path = "crates/git" }
 tauri = { version = "2.11.5", features = [] }
 tauri-build = { version = "2.6.3", features = [] }
