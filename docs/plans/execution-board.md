@@ -19,14 +19,20 @@ is a snapshot; when they disagree, believe the board and fix this.
 
 | | |
 |---|---|
-| `main` | `cc69e79` — everything below has landed on it |
-| Protocol | **2.11.0** (on `main`) |
-| Schema | **4** (`0004_agent_links.sql`, on `main`) |
-| Open PRs | none. #20–#29 are merged and the queue is empty |
-| At `review`, merged but unreviewed | T041, T045, T210, T221, T225, T232 — six. Ten were reviewed and set `done` by PR #28 (T049, T051, T096, T098, T200, T220, T223, T230, T231, T325); T210, T221 and T232 came back through `tofix` in the same pass and were fixed by #29 |
-| `in-progress` | nothing implementation-side. `PHASE-0-TESTS` is holderless |
-| Specified, not started | T070, T080, T097, T100, T110, T222, T224, T300, T326 — Wave 1 wrote all six missing specs |
-| Not specified | T305, T310, T320, T330, T335, T400, T405, T410 |
+| `main` | `ecbfc67` — everything below has landed on it |
+| Protocol | **2.12.0** (on `main`, spent by T335). Next free: **2.13.0** |
+| Schema | **4** (`0004_agent_links.sql`, on `main`). Next free migration: **`0005`** |
+| Open PRs | #37 (`JSDOM-VITEST`). #29–#36 are merged |
+| At `review`, merged but unreviewed | **twelve** — T041, T045, T210, T221, T225, T232, T335, JSDOM-VITEST, MANUAL-PASS-COVERAGE, CI-COST, CI-RUNNER-GC, EVENT-LISTEN-GAP |
+| `in-progress` | `PHASE-0-TESTS` is holderless |
+| Specified, not started | T070, T080, T097, T100, T110, T224, T326, and the T222/T300 splits below |
+| Not specified | T305, T310, T320, T330, T400, T405, T410 |
+
+**The whole agent-observability surface is built and merged.** Discovery
+(T220), the timeline (T230), the rail (T231/T232), the hook bridge (T221), the
+sidecar (T225), notifications and the workstream link (T223), ownership (T325)
+and permissions (T335) are all on `main`. What is *not* built is a run Gritty
+owns — nothing starts, types into or cancels an agent — which is Lane O below.
 
 Everything below is downstream of two things that are not code — the third
 blocker is gone.
@@ -89,14 +95,33 @@ and its invalidation, so they are one lane in that order.
 ```
 crates/workspace/**
 crates/gritty-core/src/workspace/**
-apps/desktop/src/features/explorer/**
+apps/desktop/src/features/explorer/**   (T070)
 crates/search/**                        (T080, new)
-apps/desktop/src/features/search/**     (T080, new)
+crates/gritty-core/src/search/**        (T080, new)
 ```
 
-Reserved protocol minors: ~~2.11~~ → **2.12** (T070), **2.13** (T080). 2.11.0 was
-spent by T223 and `main` is already on it; `docs/merge-queue.md` is the record,
-and the numbers below shift with it rather than being renumbered here.
+Reserved protocol minors: spent by `PROTO-W2`/`PROTO-W3` now, not by the tasks.
+`docs/merge-queue.md` is the record.
+
+### Lane Wu — the search panel · T080-U
+
+```
+apps/desktop/src/features/search/**     (new)
+```
+
+### Lane C — the wire · PROTO-W2 → PROTO-W3 → T300-C
+
+The lane that owns the magnets, so no other lane has to. Its tickets are small,
+land first, and hold these paths for hours rather than days.
+
+```
+packages/protocol/src/**
+crates/gritty-core/src/protocol/**
+crates/gritty-core/src/event/**
+```
+
+One ticket at a time by construction — which is exactly the point, since
+`PROTOCOL_VERSION` is a single line two branches will both want.
 
 ### Lane G — git · T100 → T400
 
@@ -108,11 +133,15 @@ all. Both crates are new, so this lane collides with nothing.
 ```
 crates/git/**                           (new)
 crates/gritty-core/src/git/**           (new)
-apps/desktop/src/features/git/**        (new)
 ```
 
-Reserved protocol minors: **2.13** (T100), **2.14** (T400).
 T400 needs a migration (workstream ↔ worktree); see the numbering rule below.
+
+### Lane Gu — git in the shell · T100-U
+
+```
+apps/desktop/src/features/git/**        (new)
+```
 
 ### Lane T — terminal · T097
 
@@ -176,12 +205,25 @@ makes these two lanes disjoint. If a task in this lane finds itself editing
 
 ```
 crates/gritty-core/src/agent_run/**     (new)
-crates/agent-fake/**                    (new)
 crates/agents/adapters/**               (T310 — coordinate with Lane A first)
+```
+
+### Lane O2 — the fake adapter · T300-FAKE
+
+```
+crates/agent-fake/**                    (new)
+```
+
+### Lane O3 — runs in the shell · T300-CMD
+
+```
 apps/desktop/src/features/runs/**       (new)
 ```
 
-Reserved protocol minors: **2.20** (T300), **2.21** (T305), **2.22** (T310), **2.23** (T320).
+T300 is split three ways behind one contract because it is the largest spec in
+`docs/tasks/` (343 lines) and the three halves genuinely do not touch: a crate
+with no core dependency, a manager with no UI, and a panel that reads the wire.
+Once `T300-C` lands, all three start on the same day.
 
 ### Lane D — diagnostics · T110
 
@@ -205,39 +247,101 @@ No agent claims this lane and no agent may write ADR-001's verdict.
 
 ## Waves
 
+Revised 2026-09-06 (`PLAN-FANOUT`). The waves below split the four largest
+remaining tickets so that more than one agent can build one feature, and add
+the contract lane that makes the split safe.
+
+### The four rules the split rests on
+
+1. **One contract PR per wave, landed first.** The collisions that hurt are not
+   features, they are the magnets. Lane C batches every wire change a wave
+   needs into one ticket, bumps `PROTOCOL_VERSION` once and regenerates
+   `packages/protocol/src/generated` once. Every implementation ticket behind it
+   then has an empty intersection with the magnet list — which is what stops
+   the `#20`/`#21` failure mode from happening five times at once.
+2. **Split along the crate boundary, not the feature.** `crates/<adapter>`,
+   `crates/gritty-core/<domain>` and `apps/desktop/src/features/<x>` are three
+   directories the architecture already forbids reaching across, so they are a
+   free three-way split on any ticket large enough to need one. The `u` lanes
+   and `O2`/`O3` are exactly that split, written into `LANE_SCOPES`.
+3. **One worktree per agent**, for the reason below (`cargo test -p gritty-core`
+   is a build, and leases do not arbitrate builds).
+4. **One migration per wave, claimed late.** A `PROTOCOL_VERSION` gap is free; a
+   migration gap is not.
+
 ```
 Wave 0  ── done ───────────────────────────────────────────────────────────
         the lease system and the ticket board landed (3df11c4); #21, #22 merged
 
 Wave 1  ── done, except Lane H ────────────────────────────────────────────
-        six spec agents, one task file each        │  Alexis: manual pass
-        T070 T080 T100 T110 T300 T326 — all six    │  → ADR-001 verdict
-        written, plus T223 built and ten reviews   │  → six reviews left
-                                                    │    (T041 T045 T210
-                                                    │     T221 T225 T232)
+        six spec agents, one task file each; T223, T225, T335 built;
+        ten reviews landed with #28 and three tofix fixes with #29
 
-Wave 2  ── four lanes, once ADR-001 is recorded ───────────────────────────
-        W: T070      G: T100      T: T097      A: T326
-                                   (ADR-017 first)
+Wave H  ── Alexis, and nothing else is legitimately startable ─────────────
+        manual pass sessions 1–7 (~130 min) → ADR-001 verdict
+        then flip the twelve tickets sitting at review
+        (agents may draft ADR-017 / ADR-022 / ADR-023 in parallel — the only
+         work that does not add to the queue being cleared)
 
-Wave 3  ── the same four lanes, next task ─────────────────────────────────
-        W: T080      G: T400      T: —         A: T222    O: T300
+Wave 2  ── dogfood floor · 1 contract, then 6 lanes ───────────────────────
+        C : PROTO-W2                          ← lands first, alone
+        ────────────────────────────────────────────────────────────────
+        W : T070      G : T100     Gu: T100-U
+        T : T097      A : T326     D : T110
+        (T097 after ADR-017 · T100 after ADR-023 · T326 carries migration 0005)
 
-Wave 4  ── Gate D ─────────────────────────────────────────────────────────
-        O: T305 → T310 → T320    A: T224    D: T110
+Wave 3  ── coverage · 1 contract, then 4 lanes ────────────────────────────
+        C : PROTO-W3  →  T300-C               ← Gate D contract, reviewed alone
+        ────────────────────────────────────────────────────────────────
+        W : T080      Wu: T080-U
+        A : T222-SEAM → T222-CODEX → T224     (one lane, so it is sequential;
+                                               T224 depends only on T220)
+
+Wave 4  ── Gate D, three ways behind one contract ─────────────────────────
+        O : T300-CORE   O2: T300-FAKE   O3: T300-CMD
+        G : T400-R      H : ADR-021 (run persistence — due before T310)
 
 Wave 5  ── enforcement and supervision ────────────────────────────────────
-        T330 (ADR-018 amendment first)  T335  T405  T410
+        ADR-018A → T330 · T305 → T310 · T320 · T400 link · T405 · T410
 ```
 
-**Wave 1's agent half is finished, and Lane H is the whole of what is left
-before Wave 2.** T223 shipped inside it, the ten reviews landed with #28, and
-the three tasks that came back through `tofix` were fixed by #29. What did not
-happen is the manual pass, which is the only thing standing between here and a
-recorded ADR-001.
+### Wave 5, split but not ticketed
 
-**Run three or four lanes at once, not six.** The binding constraint is not the
-lease file or the machine; it is that one person reviews everything.
+Phase 5 is planned here and **deliberately absent from the board**: a row for
+work nobody can start is a row that goes stale, and `docs/tasks/README.md`'s own
+rule is that a task file waits for an owner. The intended split, for whoever
+opens the wave:
+
+| Ticket | Splits into | Behind |
+|---|---|---|
+| T305 | `T305-C` capability contract · `T305-R` enforcement, plus a fake that *lacks* things | T300-CORE |
+| T310 | `T310-SPAWN` process supervision · `T310-XLATE` provider stream → `AgentRunEvent` · `T310-PERSIST` | T305-R, ADR-021 |
+| T320 | `T320-C` contract · `T320-R` builder · `T320-U` | T300-C |
+| T330 | `T330-R` interception · `T330-U` the denial surface | ADR-018A |
+| T400 | `T400-R` (Wave 4) · `T400-LINK` + migration · `T400-U` | T100 |
+| T405, T410 | whole; they are the supervision layer and want everything above | — |
+
+Further providers behind `T222-SEAM` split the same way — one file and one
+registration line each — and earn a row when someone has an installation to
+verify one against, not before.
+
+### What is *not* on this plan
+
+**T233 — the Agents section in the left sidebar** (design artboards 12a/12b).
+`docs/tasks/T335-agent-permissions.md:99` recorded it as "unbuilt and
+unticketed"; it now has a row, at `unspec`, because an unticketed divergence
+from the design is invisible. It is a decision before it is work, and the
+recommendation is **do not build it**: `agents-panel.tsx:14` is explicit that
+the island keeps no roster of its own "so the two cannot report different
+counts", and a third surface reading the same roster is the duplication T231
+argued against when it chose a rail over a tab. The case for building it is a
+different one — a sidebar scoped to *this workspace's* agents against a rail
+that is machine-wide — and if that is wanted, the ticket says so and the row is
+there to carry it.
+
+**Run four to six lanes at once, not ten.** The rules above raise the ceiling on
+concurrent *edits*; they do nothing for the ceiling that actually binds, which
+is that one person reviews everything. Twelve tickets are already at review.
 
 ---
 

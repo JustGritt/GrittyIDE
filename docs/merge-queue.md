@@ -63,7 +63,14 @@ everything else, instead of each small one resolving against it.
 
 | PR | What | Order | Why / what the loser fixes |
 |---|---|---|---|
-| [#27](https://github.com/JustGritt/GrittyIDE/pull/27) | T223 attention + workstream link | 1 | **Spends `PROTOCOL_VERSION` 2.11.0, `SCHEMA_VERSION` 4 and migration `0004_agent_links.sql`.** Rebased onto #25 and #26; the one conflict this table predicted — this file — is resolved, and `docs/tasks/README.md` came through clean. Alone in the queue now. |
+| [#37](https://github.com/JustGritt/GrittyIDE/pull/37) | `JSDOM-VITEST` | 1 | Adds `docs/tasks/JSDOM-VITEST-component-tests.md`, so the index row gains a link. |
+| `PLAN-FANOUT` | Waves, lanes and the ticket splits | 2 | **Regenerates `docs/tasks/README.md` with 23 new rows**, and drops #37's link because the task file is not in this tree yet. Whichever lands second re-runs `scripts/agent-board.py render --index` and commits what it writes — never hand-merge that table. No code, no version, no migration. |
+
+**#27 landed on 2026-09-06**, spending `PROTOCOL_VERSION` 2.11.0,
+`SCHEMA_VERSION` 4 and migration `0004_agent_links.sql`; #31–#36 landed
+after it, and `t335-agent-permissions` spent 2.12.0. Their rows are deleted
+per the rule below. The next free values are **2.13.0**, **5** and
+**`0005`**.
 
 **#25 and #26 landed on 2026-09-06**, in the order this table gave them, and
 the collision it predicted is the one that happened: #25 and #27 both edited
@@ -83,14 +90,12 @@ file decides.
 
 | Thing | Value | Branch |
 |---|---|---|
-| `PROTOCOL_VERSION` | **2.11.0** | `t223-agent-attention` |
-| `SCHEMA_VERSION` | **4** | `t223-agent-attention` |
-| migration `0004` | `0004_agent_links.sql` | `t223-agent-attention` |
-| `PROTOCOL_VERSION` | **2.12.0** | `t335-agent-permissions` |
+| – | nothing claimed | – |
 
-`PROTOCOL_VERSION` **2.10.0**, `SCHEMA_VERSION` **3** and migration `0003` were
-#21's and are now on `main`. `t223-agent-attention` is spending 2.11.0, 4 and
-`0004`, so the next free values after it are **2.12.0**, **5** and **`0005`**.
+Everything through `PROTOCOL_VERSION` **2.12.0**, `SCHEMA_VERSION` **4** and
+migration `0004_agent_links.sql` is on `main`. The next free values are
+**2.13.0**, **5** and **`0005`** — `PROTO-W2` takes 2.13.0 and T326 takes
+`0005`, and both claim here immediately before opening their PR.
 The per-lane minors in `execution-board.md` are a planning hint and are already
 wrong: 2.11 was reserved there for T070 and T223 took it.
 

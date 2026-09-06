@@ -56,6 +56,13 @@ separate lane not integrated with here.
 
 ## Allowed scope
 
+> **Split by `PLAN-FANOUT` (2026-09-06).** This spec now covers two board
+> tickets: **T100** is everything below *except* `features/git/**`, and
+> **T100-U** (lane `Gu`) is that directory alone. Both build behind
+> `PROTO-W2`, which owns the wire and the magnets, so neither touches
+> `packages/protocol` or `PROTOCOL_VERSION`. The command adapters in
+> `src-tauri/src/commands.rs` stay with T100.
+
 ```
 crates/git/**                                (new — gritty-git)
 crates/gritty-core/src/git/**                (new)

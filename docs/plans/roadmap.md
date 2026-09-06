@@ -114,6 +114,7 @@ T400/T410 did, and ADR-019 adopts it:
 
 ```
 T300 Agent event protocol + deterministic fake agent   (Gate D)
+     ↳ split into T300-C · T300-FAKE · T300-CORE · T300-CMD (PLAN-FANOUT)
 T305 Agent capability model
 T310 First real adapter
 T315 Live agent activity        ← already built, by T220/T230/T231/T232
@@ -125,6 +126,12 @@ T400 Worktree isolation
 T405 Ownership-aware scheduler
 T410 Attention queue
 ```
+
+**The sequence above is unchanged; the granularity is not.** `PLAN-FANOUT`
+(2026-09-06) split T300 and T222 into per-crate tickets behind a wire contract,
+and added the lanes to build them in parallel — `docs/plans/execution-board.md`
+§ Waves is the record, and the task files carry a pointer at the top. Nothing
+here was resequenced: T300 is still Gate D and still gates T305/T310/T320.
 
 Two things this changes, and one it does not. **`T330` means write
 interception now**; decision interruption is `T335`, and live references were

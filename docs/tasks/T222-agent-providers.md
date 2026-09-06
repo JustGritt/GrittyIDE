@@ -1,10 +1,20 @@
 # Task T222 — More providers: Codex first, then what can be verified
 
 - **Phase:** 3
-- **Status:** todo
+- **Status:** superseded
 - **Depends on:** T220 (agent session discovery), T221 (hook bridge) for the integration half
 
 ## Objective
+
+> **Split by `PLAN-FANOUT` (2026-09-06).** T222 is `superseded` on the
+> board and this file is the spec for the two tickets that replaced it:
+> **T222-SEAM** extracts `provider_of_command` and the transcript readers
+> into `crates/agents/src/providers/<name>.rs` behind a registry, and
+> **T222-CODEX** adds Codex through it. The seam comes first because today
+> every provider lands in the same two files, which makes providers
+> strictly serial — the opposite of what "one variant, one arm, one
+> transcript reader" promised. A third provider earns its own row when
+> someone has an installation to verify it against.
 
 T220 shipped one provider and wrote the seam for more: *"One variant on
 `Provider`, one arm in `provider_of_command`, and a transcript reader for that

@@ -58,6 +58,13 @@ files" — hard rule 10, written before this task existed.
 
 ## Allowed scope
 
+> **Split by `PLAN-FANOUT` (2026-09-06).** This spec now covers two board
+> tickets: **T080** is everything below *except* `features/search/**`, and
+> **T080-U** (lane `Wu`) is that directory alone. Both build behind
+> `PROTO-W3`, which owns the wire and the magnets, so neither bumps
+> `PROTOCOL_VERSION` or hand-edits `src/generated`. The command adapter and
+> the `CoreEvent` variant stay with T080.
+
 - `crates/search/**` (new, `gritty-search`): the walk, ignore consultation,
   content/filename matching, batching.
 - `crates/gritty-core/src/search/**` (new): wire types, `SearchManager`,

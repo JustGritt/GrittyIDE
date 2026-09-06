@@ -69,17 +69,31 @@ ALIASES = {
 # multiple paths per bullet, prose carrying the real constraint, bare filenames
 # whose directory lives in the previous clause. Parsing those would claim a
 # precision they do not have.
+# A lane ending in `u` is the shell half of the lane above it, split off so the
+# Rust and the React halves of one feature can be built at the same time. The
+# split only works because a wire contract lands first (`C`): without it both
+# halves want `packages/protocol` and neither can start.
 LANE_SCOPES: dict[str, list[str]] = {
+    "C": [
+        "packages/protocol/src/**",
+        "crates/gritty-core/src/protocol/**",
+        "crates/gritty-core/src/event/**",
+    ],
     "W": [
         "crates/workspace/**",
         "crates/gritty-core/src/workspace/**",
         "apps/desktop/src/features/explorer/**",
         "crates/search/**",
+        "crates/gritty-core/src/search/**",
+    ],
+    "Wu": [
         "apps/desktop/src/features/search/**",
     ],
     "G": [
         "crates/git/**",
         "crates/gritty-core/src/git/**",
+    ],
+    "Gu": [
         "apps/desktop/src/features/git/**",
     ],
     "T": [
@@ -97,7 +111,11 @@ LANE_SCOPES: dict[str, list[str]] = {
     ],
     "O": [
         "crates/gritty-core/src/agent_run/**",
+    ],
+    "O2": [
         "crates/agent-fake/**",
+    ],
+    "O3": [
         "apps/desktop/src/features/runs/**",
     ],
     "D": [
