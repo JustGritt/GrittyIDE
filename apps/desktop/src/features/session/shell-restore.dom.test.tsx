@@ -211,7 +211,11 @@ beforeEach(() => {
   // red under a parallel `vitest run`.
   resetSessionRestore();
   seam.handlers.clear();
-  seam.listeners.clear();
+  // `seam.listeners` is deliberately NOT cleared. It holds the registration
+  // state of a client that lives as long as this module, not per-test state:
+  // since EVENT-LISTEN-GAP the hub registers once, when the client is
+  // constructed, instead of on the first `subscribe`. Clearing it here would
+  // discard a listener that nothing is going to register again.
 });
 
 afterEach(() => {
@@ -231,8 +235,12 @@ describe('the shell after a startup restore', () => {
     expect(container.querySelector('#launcher-title')).toBeNull();
     expect(container.querySelector('.launcher')).toBeNull();
     expect(ui.queryByText('No workspace open')).toBeNull();
-    // The shell really was listening — the event simply never carried the
-    // workspace, which is the situation the fix exists for.
+    // The channel really is open — this shell is not merely deaf, the event
+    // simply never carried the workspace, which is the situation the fix
+    // exists for. Note this proves the *client's* one listener is live rather
+    // than that any particular hook subscribed: the hub multiplexes every
+    // subscription onto a single transport listener, so this set never holds
+    // more than one however many hooks are mounted.
     expect(seam.listeners.size).toBeGreaterThan(0);
   });
 
