@@ -21,6 +21,7 @@ use ts_rs::TS;
 
 use gritty_workspace::WorkspacePath;
 
+use crate::agent_run::wire::{AgentRunChangedPayload, AgentRunEventAppendedPayload};
 use crate::agent_session::wire::{AgentRoster, AgentTimelineAppendedPayload};
 use crate::document::{
     Document, DocumentChangeCause, DocumentClosedReason, ExternalModificationState,
@@ -120,6 +121,23 @@ pub enum CoreEvent {
     /// the follower, never one event per record, and emitted only for a session
     /// whose timeline someone opened.
     AgentTimelineAppended(AgentTimelineAppendedPayload),
+    /// A run Gritty **owns** changed state or activity (T300).
+    ///
+    /// Not `AgentSessionsChanged`, and not about the same thing: that one
+    /// reports a roster of agents some other terminal started, this one reports
+    /// one run Gritty started and can cancel. Emitted on a state or activity
+    /// change only — never per event — and carrying the whole run, the way
+    /// `WorkstreamChanged` does: a run is small, and a consumer that missed one
+    /// still converges on the next.
+    AgentRunChanged(AgentRunChangedPayload),
+    /// New events were appended to a run's bounded ring (T300).
+    ///
+    /// A delta, not a snapshot, for `AgentTimelineAppended`'s reason: a run's
+    /// event stream grows without bound, so resending it would be the
+    /// unbounded forwarding rule 8 forbids. Batches are coalesced by the run
+    /// manager, never one event per call, and a consumer that missed one calls
+    /// `runs.events` to resynchronise.
+    AgentRunEventAppended(AgentRunEventAppendedPayload),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -238,6 +256,8 @@ impl CoreEvent {
             Self::DecisionResolved(_) => "DecisionResolved",
             Self::AgentSessionsChanged(_) => "AgentSessionsChanged",
             Self::AgentTimelineAppended(_) => "AgentTimelineAppended",
+            Self::AgentRunChanged(_) => "AgentRunChanged",
+            Self::AgentRunEventAppended(_) => "AgentRunEventAppended",
             Self::OwnershipChanged(_) => "OwnershipChanged",
         }
     }
@@ -269,6 +289,8 @@ impl CoreEvent {
             | Self::DecisionResolved(_)
             | Self::AgentSessionsChanged(_)
             | Self::AgentTimelineAppended(_)
+            | Self::AgentRunChanged(_)
+            | Self::AgentRunEventAppended(_)
             | Self::OwnershipChanged(_) => None,
         }
     }
@@ -581,6 +603,53 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(json["payload"]["reason"], "USER");
+    }
+
+    /// The two families T300 adds: one snapshot, one delta, both named on the
+    /// wire and neither of them an operation.
+    #[test]
+    fn agent_run_events_round_trip_and_are_not_operations() {
+        use crate::agent_run::wire::{
+            AgentRun, AgentRunChangedPayload, AgentRunEvent, AgentRunEventAppendedPayload,
+            AgentRunEventRecord, AgentRunProvider, AgentRunState,
+        };
+        use crate::protocol::ids::{AgentRunId, WorkstreamId};
+
+        let run = AgentRun {
+            id: AgentRunId::from_raw("run-1"),
+            workstream_id: WorkstreamId::from_raw("wst-1"),
+            workspace_id: WorkspaceId::from_raw("ws-1"),
+            provider: AgentRunProvider::Fake,
+            state: AgentRunState::Running,
+            activity: None,
+            started_at: Timestamp::from_millis(1),
+            updated_at: Timestamp::from_millis(2),
+            finished_at: None,
+            cancellation_requested: false,
+            correlation_id: CorrelationId::from_raw("corr-1"),
+            error: None,
+        };
+        let events = [
+            CoreEvent::AgentRunChanged(AgentRunChangedPayload { run }),
+            CoreEvent::AgentRunEventAppended(AgentRunEventAppendedPayload {
+                run_id: AgentRunId::from_raw("run-1"),
+                events: vec![AgentRunEventRecord::new(
+                    1,
+                    AgentRunId::from_raw("run-1"),
+                    Timestamp::from_millis(3),
+                    AgentRunEvent::RunStarted,
+                )],
+                dropped: 0,
+            }),
+        ];
+        for event in events {
+            let json = serde_json::to_value(&event).unwrap();
+            assert_eq!(json["name"], event.name());
+            assert_eq!(event.operation_id(), None);
+            assert_eq!(event.document_id(), None);
+            let back: CoreEvent = serde_json::from_value(json).unwrap();
+            assert_eq!(back, event);
+        }
     }
 
     #[test]

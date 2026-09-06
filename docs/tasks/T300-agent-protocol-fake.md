@@ -358,3 +358,154 @@ acceptable for a fake alone or already a gap worth an ADR before T310
 gives a real agent something worth losing; and record, as a follow-up
 rather than as scope quietly taken, the first surface a real run should
 get in the island once T310 exists.
+
+### T300-C — the run contract, alone (Gate D)
+
+Branch `t300-c-agent-run-contract`. Sections **1-7 only**; §§8-11 are
+T300-FAKE's, §§12-15 T300-CORE's, §16 onward T300-CMD's.
+
+**Summary.** `crates/gritty-core/src/agent_run/` now exists and contains the
+whole of what Gate D freezes and nothing more: the domain model, the ten-state
+machine with its transition table, the fourteen-variant normalized event
+vocabulary, the two `CoreEvent` families that deliver it, and the bounding that
+makes rule 13 true for all of it. There is no manager, no adapter, no command
+and no UI — deliberately, so that the two genuinely risky design calls (the
+state machine and the event vocabulary) are reviewable on their own while
+everything mechanical waits behind them.
+
+**Files changed**
+
+| File | What |
+|---|---|
+| `crates/gritty-core/src/agent_run/mod.rs` (new) | the module, and the `agent_session` boundary written down where it will be read |
+| `crates/gritty-core/src/agent_run/state.rs` (new) | `AgentRunState`, the transition table, 9 tests |
+| `crates/gritty-core/src/agent_run/wire.rs` (new) | every wire type, the bounds and `clip`, 17 tests |
+| `crates/gritty-core/src/{lib,event/mod,protocol/mod,protocol/export,session/tap}.rs` | wiring, `PROTOCOL_VERSION` 2.13.0, the exporter, the tap's exhaustive match |
+| `packages/protocol/src/types.ts`, `src/generated/**` | 12 re-exports; 10 new generated files plus `CoreEvent`/`version` |
+| `packages/protocol/src/runs-events.test.ts` (new) | 3 tests over the two event families |
+| `docs/architecture/agent-runs.md` (new) | the contract, and what it deliberately does not decide |
+
+**Tests actually executed.** `cargo test -p gritty-core` — 345 passed, 0
+failed (26 of them new). `pnpm check:rust` — every crate green on the second
+run; the first hit the known `gritty-terminal` flake
+`pty.rs::kill_terminates_the_whole_process_tree`, which passed alone
+immediately after (16/16). `pnpm lint`, `pnpm typecheck` — clean.
+`pnpm vitest run packages/protocol` — 18 files, all green including the new
+one. Two pre-existing TS failures are **not** this branch's and were confirmed
+so by stashing every change and reproducing them on `e8ada81`:
+`packages/editor/src/monaco/model-eol.dom.test.ts` (a 10 s `beforeAll` timeout
+importing Monaco, identical on the clean base) and
+`packages/markdown/src/render.test.ts` (a 2000 ms wall-clock budget, measured
+2037 / 2552 ms under five concurrent agent builds and passing when run alone).
+Neither package is touched here.
+
+**The `AgentRunEvent` variants shipped, and the renaming.** Fourteen:
+`RUN_STARTED`, `RUN_FINISHED`, `PROMPT_STARTED`, `PROMPT_FINISHED`,
+`FILE_READ`, `FILE_WRITE_REQUESTED`, `FILE_WRITTEN`, `COMMAND_STARTED`,
+`COMMAND_FINISHED`, `PERMISSION_REQUESTED`, `DECISION_REQUESTED`,
+`RUN_BLOCKED`, `RUN_RESUMED`, `RUN_FAILED`.
+
+**The renaming survived, and it should.** Plan §8's `SessionStarted`,
+`SessionStopped`, `AgentBlocked`, `AgentResumed` and `AgentFailed` became
+`RUN_STARTED`, `RUN_FINISHED`, `RUN_BLOCKED`, `RUN_RESUMED` and `RUN_FAILED`.
+The word *session* is already spoken for by `agent_session`, where it means the
+opposite thing — an agent Gritty did **not** start — and a protocol in which
+`SessionStarted` sometimes means "Gritty started it" and sometimes "something
+else did" is exactly the confusion the Lane A / Lane O split exists to prevent.
+The one substantive change beyond renaming is that `RUN_FINISHED` is the
+success ending only: cancellation is reported by the run's *state*, not by a
+fifteenth variant, because a cancelled run's ending is a fact about the run and
+not something the adapter reported.
+
+**Architectural decisions**
+
+1. **`AgentRunPath` is one type, not a repeated pair.** §4 named
+   `path: Option<WorkspacePath>` and §6 separately required
+   `FileTouched`'s rule (ADR-010). Five places need that rule, so it is one
+   struct — `{ path?: WorkspacePath, display: string }` — rather than a
+   two-field convention re-derived per call site. `path` present ⇔ inside the
+   workspace ⇔ openable by the renderer; `display` is always safe to show and
+   never to resolve.
+2. **Bounding is one call, `AgentRunEvent::bounded()`.** Named limits,
+   character-counted, idempotent, and tested by walking the serialized JSON of
+   every variant. Writing it as a method rather than as advice means
+   T300-CORE has exactly one seam to apply it at, and the test fails if a new
+   variant is added without a bounding arm.
+3. **A `CoreError`'s `message` is bounded too.** The first draft exempted it
+   as "core-built"; the vocabulary-wide test immediately proved that wrong,
+   since a failure message is routinely built *from* what an adapter said.
+   `details` is left alone — it is structured context the core builds itself.
+4. **Every non-terminal state reaches `FAILED`, `CANCELLED` and
+   `INTERRUPTED`.** That is what makes §11's orphan guarantee and the
+   "cancellable from any non-terminal state" criterion unconditional rather
+   than true-for-most-states. Progress transitions are otherwise narrow: a
+   stopped run resumes to `RUNNING` before it can stop on anything else.
+5. **Terminal states are dead ends**, unlike `WorkstreamState`'s, which each
+   keep one way back. The thing that was executing is gone; a second attempt is
+   a second run.
+6. **No `allowedTransitions` on `AgentRun`.** `Workstream` carries one because
+   a user drives those transitions; a run's are driven by its adapter, and
+   offering them to a UI would invite a command that must not exist.
+7. **`exitCode` is renamed by hand.** `rename_all` on a tagged enum renames
+   variants, not the fields inside them — the same trap `AgentTimelineKind`
+   already worked around. Caught by inspecting the generated TypeScript, and
+   now covered by a test that rejects any `snake_case` key in the vocabulary.
+
+**Known limitations**
+
+- **An `AgentRun` does not survive a Gritty restart**, and `session/tap.rs`
+  persists neither of its events. For a fake this is not merely acceptable, it
+  is *correct*: a row claiming on startup that a run is `RUNNING` when the
+  process driving it died with the app is precisely the orphan the state
+  machine exists to prevent, and failing closed is the right direction. It
+  becomes a real gap the moment T310 gives a run something worth losing — a
+  real provider's process, its transcript, half an hour of work — and ADR-021
+  (already on the board, Wave 4, "due before T310") is where that is decided.
+  This ticket does not pre-empt it; it names it.
+- **The contract ships without its commands.** `runs.*` (§16) is T300-CMD's,
+  so protocol 2.13.0 carries types and events only. The command surface the
+  next contract ticket needs is listed under follow-ups.
+- **`MAX_RUN_EVENTS` is stated, not enforced.** The constant is here because
+  `dropped` counts against it and that is a promise the protocol makes; the
+  ring that honours it is T300-CORE's.
+- **The fake's step vocabulary does not exist yet**, so the translation seam
+  §9 requires is specified (in `mod.rs` and `agent-runs.md`) but unbuilt.
+
+**Follow-ups** (recorded, not taken)
+
+- **The first surface a real run should get in the island.** T210's island
+  reports workstreams and T231's rail reports observed sessions; an owned run
+  is a third thing and has no designed home. The recommendation is *not* a
+  fourth surface: a run is attached to a workstream, so its state and activity
+  belong on that workstream's island row — a second line reading `RUNNING /
+  Editing src/auth/session.ts`, with `needs_attention()` feeding the same
+  "needs you" count the island already keeps. That keeps `agents-panel.tsx`'s
+  rule intact (one roster, one count) and gives T410 one queue to aggregate
+  rather than two. Worth a ticket of its own once T310 exists; T300-CMD's panel
+  is explicitly the throwaway version.
+- **The `runs.*` command surface for the next contract ticket**, verbatim from
+  §16 so it need not be re-derived: `runs.startFake` (workspaceId,
+  workstreamId, script preset) → `AgentRun`; `runs.cancel` (runId) →
+  `AgentRun`; `runs.list` (workspaceId) → `AgentRun[]`; `runs.events` (runId) →
+  `AgentRunEventLog`. `AgentRunEventLog` is already generated and exported, so
+  only the three request types and the client methods remain.
+- **`AGENTS.md`'s contract-gate diagram still reads "T300 Agent protocol +
+  fake agent (Gate D)".** T300 is superseded by four tickets. Left alone
+  deliberately: `AGENTS.md` is read by every concurrent session and editing it
+  mid-wave is disruptive. Worth one line when the wave closes.
+- **A `RUN_INTERRUPTED`-shaped question for T310.** `INTERRUPTED` is reachable
+  and meaningful, but no event announces it — the state change does. If a real
+  provider needs to say *why* it was interrupted, that is a variant, and it is
+  cheaper to add now than after a client depends on the count.
+
+**Risks**
+
+- The event vocabulary is frozen by this gate and three tickets start against
+  it the day it lands. A variant added later is additive and cheap; a variant
+  whose *shape* is wrong is not. The one most likely to move is
+  `PERMISSION_REQUESTED`, which reports `{ tool, detail }` today and will meet
+  T335's richer `AgentPermissionRequest` when runs learn to be answered.
+- `MAX_RUN_EVENTS = 512` and the seven string limits are this ticket's
+  judgement, unmeasured. They are named constants with tests, so moving them is
+  a one-line change, but T310 should check them against a real provider's
+  output rather than inherit them.
