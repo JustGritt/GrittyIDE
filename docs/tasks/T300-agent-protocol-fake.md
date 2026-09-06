@@ -254,7 +254,7 @@ and it stops rather than reaching."
 
 ### Commands and a minimal surface
 
-16. Five commands, `runs.*`: `startFake` (workstream id, a named
+16. Four commands, `runs.*`: `startFake` (workstream id, a named
     script/preset), `cancel`, `list` (by workspace), `events` (by run,
     rehydration per the T010 convention) — nothing starts a real
     provider, which does not exist yet. `startFake` requires the target
@@ -265,7 +265,7 @@ and it stops rather than reaching."
     A designed surface for owned runs in the island is unassigned;
     record that gap in the completion report rather than build past it
     (rule 14).
-18. Protocol version bumps MINOR (additive): one namespace, five
+18. Protocol version bumps MINOR (additive): one namespace, four
     commands, two events, no change to an existing shape.
 
 ## Security

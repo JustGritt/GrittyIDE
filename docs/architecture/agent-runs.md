@@ -4,7 +4,7 @@ How Gritty models an agent it **owns**: one it started, can cancel, and is
 answerable for.
 
 This document describes the **contract** that `T300-C` landed —
-`crates/gritty-core/src/agent_run/`, protocol 2.13.0. The supervisor
+`crates/gritty-core/src/agent_run/`, protocol 2.15.0. The supervisor
 (`T300-CORE`), the deterministic fake (`T300-FAKE`) and the `runs.*` commands
 and panel (`T300-CMD`) are built against it and are not described here except
 where the contract constrains them.
