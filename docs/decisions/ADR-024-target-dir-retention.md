@@ -1,7 +1,11 @@
 # ADR-024: One `target/` per checkout, swept by budget and age — not a shared `CARGO_TARGET_DIR`
 
-- **Status:** Accepted
+- **Status:** Proposed
 - **Date:** 2026-09-06
+- **Decided by:** nobody yet. Drafted by the agent that implemented
+  CI-RUNNER-GC; `docs/plans/execution-board.md` reserves every ADR verdict for
+  lane H, so this stays `Proposed` until Alexis records one, exactly as
+  ADR-017, ADR-022 and ADR-023 do.
 - **Motivated by:** CI-RUNNER-GC (`docs/tasks/CI-RUNNER-GC-disk-retention.md`),
   itself downstream of CI-COST (self-hosted `macos` runner is the dev Mac) and
   CI-LINUX-DARK (no fallback while it's blocked)
