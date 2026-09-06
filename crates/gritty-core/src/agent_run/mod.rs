@@ -57,8 +57,8 @@
 //! Tracing carries a run's id, state, provider and duration; never event text.
 
 pub mod manager;
-mod ring;
 pub mod request;
+mod ring;
 pub mod state;
 pub mod wire;
 
