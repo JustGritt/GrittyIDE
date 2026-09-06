@@ -1,7 +1,7 @@
 # Task T232 — The timeline view, and the files an agent touched
 
 - **Phase:** 3
-- **Status:** review
+- **Status:** tofix
 - **Depends on:** T030 (documents), T230 (timeline), T231 (rail)
 
 ## Objective

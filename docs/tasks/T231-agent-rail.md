@@ -1,7 +1,7 @@
 # Task T231 — The agent rail: a dedicated region for running agents
 
 - **Phase:** 3
-- **Status:** review
+- **Status:** done
 - **Depends on:** T046 (resizable panes), T060 (layout persistence), T220, T230
 
 ## Objective

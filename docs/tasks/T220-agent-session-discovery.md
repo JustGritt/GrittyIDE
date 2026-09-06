@@ -1,7 +1,7 @@
 # Task T220 — Agent session discovery: what is running, and on what
 
 - **Phase:** 3
-- **Status:** review
+- **Status:** done
 - **Depends on:** T010 (protocol), T020 (workspace), T210 (island)
 
 ## Objective

@@ -1,7 +1,7 @@
 # Task T098 — Organising terminal sessions: colours, and starting where you work
 
 - **Phase:** 0 / 2
-- **Status:** review
+- **Status:** done
 - **Depends on:** T047, T090, T095, T096
 
 ## Objective

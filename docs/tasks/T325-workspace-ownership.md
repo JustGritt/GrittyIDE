@@ -1,7 +1,7 @@
 # Task T325 — Workspace ownership registry
 
 - **Phase:** 4
-- **Status:** review
+- **Status:** done
 - **Depends on:** T010, T020, T060, T200, T210, ADR-019
 
 ## Objective

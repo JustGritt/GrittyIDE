@@ -1,7 +1,7 @@
 # Task T049 — Startup screen (design artboard 3a)
 
 - **Phase:** 0
-- **Status:** review
+- **Status:** done
 - **Depends on:** T020, T030, T048, T060, T095
 
 ## Objective
