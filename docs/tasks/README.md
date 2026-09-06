@@ -19,7 +19,7 @@ the workflow below are hand-maintained.
 | [T030](T030-file-io-documents.md) | File I/O + document/buffer contract (Gate B) | 0/1A | T020 | done |
 | [T040](T040-monaco-shell.md) | Monaco shell | 0/1A | T030 | done |
 | [T041](T041-preview-tabs.md) | Preview tabs, and closing more than one at a time | 1A | T020, T030, T040 | review |
-| [T045](T045-drag-and-drop.md) | Drag and drop files/folders onto the window | 1A | T030, T040 | doing |
+| [T045](T045-drag-and-drop.md) | Drag and drop files/folders onto the window | 1A | T030, T040 | review |
 | [T046](T046-resizable-panes.md) | Resizable panes, and a terminal on opening | 1A | T040, T060, T095 | done |
 | [T047](T047-terminal-names.md) | Naming terminal sessions | 1A | T090, T095 | done |
 | [T048](T048-ui-revamp.md) | Shell UI revamp from design artboard 2a | 0 | T020, T030, T040, T046, T050, T060, T090 | done |
@@ -32,8 +32,10 @@ the workflow below are hand-maintained.
 | [T096](T096-terminal-chrome.md) | Terminal chrome from design artboard 8a | 0/2 | T047, T048, T090, T095 | done |
 | [T097](T097-shell-integration-blocks.md) | Shell integration (OSC 133) and command blocks | 2 | T090, T095, T096 | todo |
 | [T098](T098-terminal-colours-and-rooting.md) | Terminal session colours, and starting where you work | 0/2 | T047, T090, T095, T096 | done |
+| PTY-FLAKE | `pty.rs::kill_terminates_the_whole_process_tree` is flaky under load | 2 | T090 | todo |
 | Phase 0 tests | `docs/plans/phase-0-spike.md` sections B–D | 0 | T060, T090 | doing |
 | ADR-001 | Confirm or reject Tauri | 0 | Phase 0 tests | todo |
+| MANUAL-PASS-COVERAGE | The manual pass covers every task sitting at review (review-findings finding 6) | 0 | T041, T045, T051, T210, T220, T221, T231, T232, T325 | review |
 | [T070](T070-file-watcher.md) | File watcher | 1A/2 | T020, T030, ADR-001 | todo |
 | [T080](T080-search.md) | Search | 2 | T020, T070, ADR-001 | todo |
 | [T100](T100-git-baseline.md) | Git baseline | 2 | T020, ADR-001 | todo |
@@ -45,9 +47,11 @@ the workflow below are hand-maintained.
 | [T222](T222-agent-providers.md) | More providers: Codex first, then what can be verified | 3 | T220, T221 | todo |
 | [T223](T223-agent-attention.md) | Attention: notify when an agent needs you, and link it to the work | 3 | T200, T210, T220, T221 | done |
 | [T224](T224-reveal-terminal.md) | Reveal the terminal a session is running in | 3 | T220 | todo |
+| [T225](T225-hook-sidecar.md) | Bundle the agent hook as a sidecar | 3 | T221 | review |
 | [T230](T230-agent-timeline.md) | Agent timeline: what a session is actually doing | 3 | T020, T220 | done |
 | [T231](T231-agent-rail.md) | The agent rail: a dedicated region for running agents | 3 | T046, T060, T220, T230 | done |
 | [T232](T232-timeline-view.md) | The timeline view, and the files an agent touched | 3 | T030, T230, T231 | review |
+| JSDOM-VITEST | A jsdom vitest project, so a `.tsx` can be tested against a DOM | 3 | T096, T232 | todo |
 | [T300](T300-agent-protocol-fake.md) | Agent event protocol + deterministic fake agent (Gate D) | 4 | T200, T210 | todo |
 | T305 | Agent capability model | 4 | T300 | unspec |
 | T310 | First real adapter | 4 | T300, T305 | unspec |

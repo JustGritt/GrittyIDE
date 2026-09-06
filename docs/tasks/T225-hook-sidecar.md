@@ -1,7 +1,7 @@
 # Task T225 — Bundle the agent hook as a sidecar
 
 - **Phase:** 3
-- **Status:** todo
+- **Status:** review
 - **Depends on:** T221 (hook bridge — the binary, the installer and
   `resolve_hook_binary`, all of which already exist)
 
@@ -94,8 +94,10 @@ which is where Tauri places an `externalBin`. That fallback was written for
 
 - `ls Gritty.app/Contents/MacOS/` lists `gritty-agent-hook` **and**
   `gritty-desktop`. This is observed, not inferred from the config.
-- The packaged binary launched with `GRITTY_LOG=debug` logs the hook path and
-  the integration status surface reports it as available.
+- The packaged binary launched with `GRITTY_LOG=debug` does **not** log
+  `no agent hook binary`. The success path logs nothing, so this criterion is
+  deliberately negative; the positive one — the integration surface reporting
+  the hook as available — needs the UI and is manual-pass step 6.8.
 - `git status` is clean after a build — nothing generated is tracked.
 - `pnpm check` is unaffected: this task adds no test-visible behaviour and no
   Rust code.
@@ -152,7 +154,7 @@ bundled binary lands exactly where it looks.
 | `ls Gritty.app/Contents/MacOS/` | **`gritty-agent-hook` (1 361 360 B) beside `gritty-desktop`** — triple stripped, as predicted but not assumed |
 | launch the bundled binary, `GRITTY_LOG=debug` | 29 log lines, migrations 1–4, roster of 11 discovered sessions. **No `no agent hook binary` line** |
 | `git status` after the build | clean; the staged binary is ignored by `.gitignore:7` |
-| `pnpm check` | green (see the branch's final run) |
+| `pnpm check` | exit 0 — 240 files by Biome, 69 test files / 531 tests, clippy and `cargo test --workspace` clean, generated types unchanged |
 
 **On the evidence for `hookAvailable`.** The strongest available non-GUI
 evidence is negative and is stated as such: `resolve_hook_binary` logs
