@@ -12,16 +12,17 @@ import {
   waitedFor,
 } from './attention';
 import { DecisionCard } from './island';
+import { targetLabel } from './ownership';
 import type { WorkstreamsController } from './use-workstreams';
 
 /**
  * The attention queue (T210, artboard 4b): everything waiting on you, oldest
  * first, with the selected item in full on the right.
  *
- * The artboard's five filters are three here — All, Questions, Reviews.
- * Approvals, conflicts and failures belong to agent runs and worktrees
- * (T300/T400); a tab that can never have anything in it teaches the user to
- * distrust the counts, so they arrive with the things they count.
+ * The artboard's five filters are four here — All, Questions, Reviews,
+ * Conflicts. Conflicts arrived with ownership (T325); approvals and failures
+ * belong to agent runs (T300) and are still absent, because a tab that can
+ * never have anything in it teaches the user to distrust the counts.
  *
  * The island and this view show the same items, so answering in one clears the
  * other: both render the core's decisions rather than a copy.
@@ -33,8 +34,8 @@ export function AttentionQueue({
   controller: WorkstreamsController;
   onClose(): void;
 }) {
-  const { workstreams, decisions } = controller;
-  const items = attentionItems(workstreams, decisions);
+  const { workstreams, decisions, ownership } = controller;
+  const items = attentionItems(workstreams, decisions, ownership);
   const [filter, setFilter] = useState<AttentionFilter>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const visible = filterItems(items, filter);
@@ -46,16 +47,17 @@ export function AttentionQueue({
     if (selected && selected.id !== selectedId) setSelectedId(selected.id);
   }, [selected, selectedId]);
 
-  const counts = {
+  const counts: Record<AttentionFilter, number> = {
     all: items.length,
     question: items.filter((item) => item.kind === 'question').length,
     review: items.filter((item) => item.kind === 'review').length,
+    conflict: items.filter((item) => item.kind === 'conflict').length,
   };
 
   return (
     <section className="queue" aria-label="Attention queue">
       <div className="queue__bar">
-        {(['all', 'question', 'review'] as const).map((key) => (
+        {(['all', 'question', 'review', 'conflict'] as const).map((key) => (
           <button
             key={key}
             type="button"
@@ -119,9 +121,7 @@ export function AttentionQueue({
           {countLabel(items.length)} · {blockedLabel(workstreams)}
         </span>
         <span className="queue__spacer" />
-        <span className="queue__meta">
-          Approvals, conflicts and failures arrive with agent runs
-        </span>
+        <span className="queue__meta">Approvals and failures arrive with agent runs</span>
       </div>
     </section>
   );
@@ -131,6 +131,20 @@ const FILTER_LABEL: Record<AttentionFilter, string> = {
   all: 'All',
   question: 'Questions',
   review: 'Reviews',
+  conflict: 'Conflicts',
+};
+
+/** What each kind is called in a row, and which dot it wears. */
+const KIND_LABEL: Record<AttentionItem['kind'], string> = {
+  question: 'Question',
+  review: 'Review',
+  conflict: 'Ownership',
+};
+
+const KIND_TONE: Record<AttentionItem['kind'], string> = {
+  question: 'blocked',
+  review: 'waiting',
+  conflict: 'blocked',
 };
 
 function QueueRow({
@@ -151,22 +165,26 @@ function QueueRow({
       onClick={onSelect}
     >
       <span className="queue__row-head">
-        <span
-          className={`island__dot island__dot--${item.kind === 'question' ? 'blocked' : 'waiting'}`}
-          aria-hidden="true"
-        />
-        <span className="label">{item.kind === 'question' ? 'Question' : 'Review'}</span>
+        <span className={`island__dot island__dot--${KIND_TONE[item.kind]}`} aria-hidden="true" />
+        <span className="label">{KIND_LABEL[item.kind]}</span>
         <span className="queue__row-name">{item.workstream.title}</span>
         <span className="queue__spacer" />
         <span className="queue__meta">waiting {waitedFor(item.since, now)}</span>
       </span>
-      <span className="queue__row-body">
-        {item.kind === 'question'
-          ? item.decision.question
-          : 'Finished and handed back for your review.'}
-      </span>
+      <span className="queue__row-body">{rowBody(item)}</span>
     </button>
   );
+}
+
+function rowBody(item: AttentionItem): string {
+  switch (item.kind) {
+    case 'question':
+      return item.decision.question;
+    case 'review':
+      return 'Finished and handed back for your review.';
+    case 'conflict':
+      return `Wants ${targetLabel(item.conflict.target)}, owned by ${item.owner.title}.`;
+  }
 }
 
 function QueueDetail({
@@ -179,7 +197,7 @@ function QueueDetail({
   return (
     <div className="queue__detail-body">
       <div className="queue__detail-head">
-        <span className="label">Selected · {item.kind === 'question' ? 'question' : 'review'}</span>
+        <span className="label">Selected · {KIND_LABEL[item.kind].toLowerCase()}</span>
         <span className="queue__spacer" />
         <span
           className={`island__dot island__dot--${stateTone(item.workstream.state)}`}
@@ -188,7 +206,9 @@ function QueueDetail({
         <span className="queue__meta">{stateLabel(item.workstream.state)}</span>
       </div>
 
-      {item.kind === 'question' ? (
+      {item.kind === 'conflict' ? (
+        <ConflictCard item={item} controller={controller} />
+      ) : item.kind === 'question' ? (
         <DecisionCard
           decision={item.decision}
           workstream={item.workstream}
@@ -236,6 +256,14 @@ function QueueDetail({
             <dd>{describeActor(item.decision.raisedBy.type)}</dd>
           </>
         )}
+        {item.kind === 'conflict' && (
+          <>
+            <dt>Wants</dt>
+            <dd>{targetLabel(item.conflict.target)}</dd>
+            <dt>Owned by</dt>
+            <dd>{item.owner.title}</dd>
+          </>
+        )}
       </dl>
 
       <div className="queue__detail-moves">
@@ -253,6 +281,57 @@ function QueueDetail({
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * A refusal, and the two ways out of it (T325).
+ *
+ * There is no "grant it to me" button. Releasing the holder's claim is a
+ * separate act from taking the ground, so that an override is never a silent
+ * transfer — the requester asks again, and that second ask goes through the
+ * same check as the first.
+ */
+function ConflictCard({
+  item,
+  controller,
+}: {
+  item: Extract<AttentionItem, { kind: 'conflict' }>;
+  controller: WorkstreamsController;
+}) {
+  return (
+    <div className="island__card island__card--conflict">
+      <div className="island__card-body">
+        {item.workstream.title} wants to modify {targetLabel(item.conflict.target)}.
+      </div>
+      <dl className="queue__facts">
+        <dt>Currently owned by</dt>
+        <dd>{item.owner.title}</dd>
+        <dt>State</dt>
+        <dd>{stateLabel(item.owner.state)}</dd>
+      </dl>
+      <div className="island__card-actions">
+        <button
+          type="button"
+          disabled={controller.busy}
+          onClick={() => void controller.resolveConflict(item.conflict.id, 'CANCEL')}
+        >
+          Withdraw the request
+        </button>
+        <span className="queue__spacer" />
+        <button
+          type="button"
+          className="btn--bare"
+          disabled={controller.busy}
+          onClick={() => void controller.resolveConflict(item.conflict.id, 'OVERRIDE')}
+        >
+          Release {item.owner.title}'s claim
+        </button>
+      </div>
+      <p className="queue__meta">
+        Releasing it does not hand the ground over: {item.workstream.title} has to claim it again.
+      </p>
     </div>
   );
 }

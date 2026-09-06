@@ -3,6 +3,7 @@ import { type CoreError, toCoreError } from './errors';
 import { type Diagnostic, EventHub, type Unsubscribe } from './events';
 import type { Transport } from './transport';
 import {
+  type AcquireOwnershipRequest,
   type AgentIntegration,
   type AgentIntegrationChange,
   type AgentIntegrationChangeRequest,
@@ -11,6 +12,7 @@ import {
   type AgentTimeline,
   type AgentTimelineRequest,
   type CandidatesRequest,
+  type CheckOwnershipRequest,
   type CloseDocumentRequest,
   type CloseWorkspaceRequest,
   CORE_EVENT_CHANNEL,
@@ -32,6 +34,7 @@ import {
   type ListDecisionsRequest,
   type ListDirectoryRequest,
   type ListDirectoryResponse,
+  type ListOwnershipRequest,
   type ListProfilesRequest,
   type ListWorkstreamsRequest,
   type OpenDocumentRequest,
@@ -39,6 +42,10 @@ import {
   type OpenWorkspaceRequest,
   type Operation,
   type OperationId,
+  type OwnershipAcquisition,
+  type OwnershipCheck,
+  type OwnershipConflict,
+  type OwnershipMap,
   PROTOCOL_VERSION,
   type RaiseDecisionRequest,
   type RecentWorkspace,
@@ -46,10 +53,12 @@ import {
   type RecolorTerminalRequest,
   type RecoverSnapshotRequest,
   type RecoveryCandidate,
+  type ReleaseOwnershipRequest,
   type ReloadDocumentRequest,
   type RemoveWorkstreamRequest,
   type RenameTerminalRequest,
   type ResizeTerminalRequest,
+  type ResolveConflictRequest,
   type ResolveDecisionRequest,
   type SaveDocumentRequest,
   type SessionRestoreResponse,
@@ -253,6 +262,28 @@ export interface CoreClient {
     dismiss(request: DismissDecisionRequest): Promise<Decision>;
   };
   /**
+   * Workspace ownership (T325): which workstream may write where.
+   *
+   * Logical leases, not operating-system locks — an agent would not respect
+   * one of those, a directory or a glob cannot be locked at all, and a lock is
+   * neither visible nor attributable to a piece of work. `acquire` answers
+   * `GRANTED` or `CONFLICTED`, never both and never silently: a refusal
+   * carries the conflict that explains it, which is the same row the attention
+   * queue shows. Overlap is decided in the core, so no glob matcher is written
+   * twice.
+   *
+   * This is **observed** ownership. Nothing here stops a write from happening;
+   * it records who claimed what and refuses a second claim. Every mutation
+   * publishes `OwnershipChanged` with the whole map.
+   */
+  ownership: {
+    list(request: ListOwnershipRequest): Promise<OwnershipMap>;
+    acquire(request: AcquireOwnershipRequest): Promise<OwnershipAcquisition>;
+    release(request: ReleaseOwnershipRequest): Promise<void>;
+    check(request: CheckOwnershipRequest): Promise<OwnershipCheck>;
+    resolve(request: ResolveConflictRequest): Promise<OwnershipConflict>;
+  };
+  /**
    * Agent sessions running on this machine (T220).
    *
    * Read-only, and machine-wide: these are sessions other terminals own, so
@@ -431,6 +462,13 @@ export function createCoreClient(
       raise: (request) => command<Decision>('decisions.raise', { request }),
       resolve: (request) => command<Decision>('decisions.resolve', { request }),
       dismiss: (request) => command<Decision>('decisions.dismiss', { request }),
+    },
+    ownership: {
+      list: (request) => command<OwnershipMap>('ownership.list', { request }),
+      acquire: (request) => command<OwnershipAcquisition>('ownership.acquire', { request }),
+      release: (request) => command<void>('ownership.release', { request }),
+      check: (request) => command<OwnershipCheck>('ownership.check', { request }),
+      resolve: (request) => command<OwnershipConflict>('ownership.resolve', { request }),
     },
     agents: {
       list: (request = {}) => command<AgentRoster>('agents.list', { request }),

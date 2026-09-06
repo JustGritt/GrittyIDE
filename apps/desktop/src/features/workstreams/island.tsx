@@ -12,6 +12,8 @@ import {
   transitionLabel,
   waitedFor,
 } from './attention';
+import { ownsLabel, targetLabel } from './ownership';
+import { OwnershipSection } from './ownership-panel';
 import type { WorkstreamsController } from './use-workstreams';
 
 /**
@@ -23,9 +25,9 @@ import type { WorkstreamsController } from './use-workstreams';
  * tab strip down, and it closes the moment focus goes back to the editor —
  * which is the whole bargain: always visible, never in the way.
  *
- * What it shows is what the domain can honestly produce (T200): work, its
- * state, and the questions blocking it. There are no approvals, conflicts or
- * failures here, because there are no agent runs yet (T300/T400).
+ * What it shows is what the domain can honestly produce: work, its state, the
+ * questions blocking it (T200) and who owns which files (T325). There are no
+ * approvals or failures here, because there are no agent runs yet (T300).
  */
 export function AgentIsland({
   controller,
@@ -42,8 +44,8 @@ export function AgentIsland({
   /** Show the whole queue instead — more room than the sheet has. */
   onOpenQueue(): void;
 }) {
-  const { workstreams, decisions } = controller;
-  const items = attentionItems(workstreams, decisions);
+  const { workstreams, decisions, ownership } = controller;
+  const items = attentionItems(workstreams, decisions, ownership);
   const sheet = useRef<HTMLDivElement | null>(null);
   const island = useRef<HTMLDivElement | null>(null);
   const labelId = useId();
@@ -163,6 +165,10 @@ export function AgentIsland({
 
           <NewWorkstream controller={controller} />
 
+          {/* Who may write where (T325). Under the roster, because a claim is
+              made on behalf of a workstream that is already in it. */}
+          <OwnershipSection controller={controller} />
+
           {/* Below the user's own work, because it is not the user's own work:
               these are sessions Gritty observes but does not own (T220). */}
           <AgentsSection controller={agents} />
@@ -180,6 +186,42 @@ function IslandAttention({
   item: AttentionItem;
   controller: WorkstreamsController;
 }) {
+  if (item.kind === 'conflict') {
+    return (
+      <div className="island__card island__card--conflict">
+        <div className="island__card-head">
+          <span className="island__dot island__dot--blocked" aria-hidden="true" />
+          <span className="label">Ownership conflict</span>
+          <span className="island__name">{item.workstream.title}</span>
+          <span className="island__spacer" />
+          <span className="island__meta">waiting {waitedFor(item.since, Date.now())}</span>
+        </div>
+        <div className="island__card-body">
+          wants to modify {targetLabel(item.conflict.target)}, owned by {item.owner.title}
+        </div>
+        <div className="island__card-actions">
+          <button
+            type="button"
+            disabled={controller.busy}
+            onClick={() => void controller.resolveConflict(item.conflict.id, 'CANCEL')}
+          >
+            Withdraw
+          </button>
+          <span className="island__spacer" />
+          {/* Never silent: taking a lease off its holder is a click with a
+              name on it, and the event carries who made it. */}
+          <button
+            type="button"
+            className="btn--bare"
+            disabled={controller.busy}
+            onClick={() => void controller.resolveConflict(item.conflict.id, 'OVERRIDE')}
+          >
+            Release {item.owner.title}'s claim
+          </button>
+        </div>
+      </div>
+    );
+  }
   if (item.kind === 'review') {
     return (
       <div className="island__card island__card--review">
@@ -354,6 +396,9 @@ function RosterRow({
         <span className="island__row-open">
           {workstream.openDecisions} open{workstream.openDecisions === 1 ? ' question' : ''}
         </span>
+      )}
+      {ownsLabel(controller.ownership, workstream.id) && (
+        <span className="island__row-owns">{ownsLabel(controller.ownership, workstream.id)}</span>
       )}
       <span className="island__spacer" />
       {/* Exactly the moves the core allows, straight from the wire: the

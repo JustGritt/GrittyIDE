@@ -105,6 +105,19 @@ string_id! {
 }
 
 string_id! {
+    /// Identifies a write-ownership lease over part of the workspace (T325).
+    /// Persisted, like [`WorkstreamId`]: a lease outlives the process that
+    /// granted it, which is what makes stale-lease recovery a real problem.
+    LeaseId => "string & { readonly __brand: 'LeaseId' }"
+}
+
+string_id! {
+    /// Identifies a refused ownership request (T325). Persisted, so a blocker
+    /// is still in the attention queue after a restart.
+    ConflictId => "string & { readonly __brand: 'ConflictId' }"
+}
+
+string_id! {
     /// Ties a command invocation, its operation, its events and its errors together.
     CorrelationId => "string & { readonly __brand: 'CorrelationId' }"
 }

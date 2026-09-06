@@ -43,7 +43,7 @@ observability starts paying into the domain instead of sitting beside it.
 
 ## Allowed scope
 
-- `crates/persistence/src/migrations/0003_agent_links.sql` (new),
+- `crates/persistence/src/migrations/0004_agent_links.sql` (new),
   `crates/persistence/src/{migrations.rs,store.rs}`
 - `crates/gritty-core/src/{workstream,agent_session}/**`
 - `crates/gritty-core/src/protocol/{mod.rs,export.rs}`
@@ -112,7 +112,7 @@ observability starts paying into the domain instead of sitting beside it.
 8. A new table, not a column:
 
    ```sql
-   -- 0003_agent_links.sql, SCHEMA_VERSION 2 -> 3
+   -- 0004_agent_links.sql, SCHEMA_VERSION 3 -> 4
    CREATE TABLE workstream_agent_link (
      workstream_id  TEXT NOT NULL REFERENCES workstream(id) ON DELETE CASCADE,
      provider       TEXT NOT NULL,
@@ -182,7 +182,7 @@ observability starts paying into the domain instead of sitting beside it.
 | Same session linked to two workstreams | Allowed; the primary key is the triple. The UI shows both |
 | Duplicate link | Primary key makes it a no-op that reports so |
 | No database | Every link command fails `Io`, as T200 requires. Notifications still work — they need no persistence |
-| Migration 0003 fails | The runner leaves the database at version 2 (DDL is transactional); links are unavailable and the rest of the app is unaffected |
+| Migration 0004 fails | The runner leaves the database at version 3 (DDL is transactional); links are unavailable and the rest of the app is unaffected |
 
 ## Acceptance criteria
 
@@ -206,7 +206,7 @@ observability starts paying into the domain instead of sitting beside it.
   global cap hold; focused window suppresses.
 - **Unit (Rust):** link CRUD, cascade on workstream delete, duplicate link,
   link to an id not in the roster, several sessions on one workstream.
-- **Unit (Rust):** migration 0003 from a fresh database and from a populated
+- **Unit (Rust):** migration 0004 from a fresh database and from a populated
   schema-2 database, per `docs/architecture/persistence.md`.
 - **Unit (Rust):** `Workstream`'s serialised shape is byte-identical to before.
 - **Unit (TS):** the client methods; the island reducer's rendering of a link

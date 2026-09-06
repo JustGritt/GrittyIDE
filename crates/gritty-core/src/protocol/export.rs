@@ -24,6 +24,10 @@ use crate::health::HealthReport;
 use crate::operation::Operation;
 use crate::operation::demo::StartDemoRequest;
 use crate::operation::registry::CancelOperationRequest;
+use crate::ownership::wire::{
+    AcquireOwnershipRequest, CheckOwnershipRequest, ListOwnershipRequest, OwnershipAcquisition,
+    OwnershipCheck, OwnershipMap, ReleaseOwnershipRequest, ResolveConflictRequest,
+};
 use crate::protocol::error::CoreError;
 use crate::session::wire::{
     CandidatesRequest, DiscardSnapshotRequest, LastSession, RecoverSnapshotRequest,
@@ -125,6 +129,14 @@ fn export_bindings() {
     RaiseDecisionRequest::export_all(&cfg).expect("export RaiseDecisionRequest");
     ResolveDecisionRequest::export_all(&cfg).expect("export ResolveDecisionRequest");
     DismissDecisionRequest::export_all(&cfg).expect("export DismissDecisionRequest");
+    OwnershipMap::export_all(&cfg).expect("export OwnershipMap");
+    OwnershipAcquisition::export_all(&cfg).expect("export OwnershipAcquisition");
+    OwnershipCheck::export_all(&cfg).expect("export OwnershipCheck");
+    ListOwnershipRequest::export_all(&cfg).expect("export ListOwnershipRequest");
+    AcquireOwnershipRequest::export_all(&cfg).expect("export AcquireOwnershipRequest");
+    ReleaseOwnershipRequest::export_all(&cfg).expect("export ReleaseOwnershipRequest");
+    CheckOwnershipRequest::export_all(&cfg).expect("export CheckOwnershipRequest");
+    ResolveConflictRequest::export_all(&cfg).expect("export ResolveConflictRequest");
 
     let version = format!(
         "{HEADER}export const PROTOCOL_VERSION = \"{PROTOCOL_VERSION}\";\n\

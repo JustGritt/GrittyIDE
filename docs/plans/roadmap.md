@@ -64,6 +64,38 @@ refuses worktree isolation, task graphs, approval policies and durable event
 history. That refusal list is Phases 3–5 here. Gritty should not rebuild the
 multiplexer; it should be the layer Herdr says it will not be.
 
+## Phases 4–5, renumbered (ADR-019)
+
+`docs/plans/Gritty Agent Runtime Coordination.md` §36 sequences the
+orchestration work more finely than the plan's original T300/T310/T320/T330/
+T400/T410 did, and ADR-019 adopts it:
+
+```
+T300 Agent event protocol + deterministic fake agent   (Gate D)
+T305 Agent capability model
+T310 First real adapter
+T315 Live agent activity        ← already built, by T220/T230/T231/T232
+T320 Context manifest
+T325 Workspace ownership registry                      ✔ (this branch)
+T330 Write interception         ← needs an amendment to ADR-018
+T335 Decision interruption      ← what older documents call T330
+T400 Worktree isolation
+T405 Ownership-aware scheduler
+T410 Attention queue
+```
+
+Two things this changes, and one it does not. **`T330` means write
+interception now**; decision interruption is `T335`, and live references were
+retargeted. **`T315` is already shipped** by the agent-observability tasks, so
+its row says superseded rather than re-specifying work that exists. Completion
+reports keep the numbers they were written with — history is not edited to
+match a later decision.
+
+**T325 does not gate on T300.** A lease is held by a workstream (T200), not by
+a run, so ownership is usable — and testable — before Gritty owns a single
+agent. What it deliberately does *not* do is stop a write: that is T330, and it
+is an ADR amendment before it is code.
+
 ## Success criteria for the product thesis (plan §22)
 
 Editor failures are rare and never interrupt unrelated work; basic editing feels

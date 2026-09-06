@@ -5,7 +5,7 @@ use std::fs;
 use std::io::{Seek, SeekFrom, Write};
 
 use gritty_persistence::store::{
-    decisions, operations, session, snapshots, tabs, window, workspace, workstreams,
+    decisions, operations, ownership, session, snapshots, tabs, window, workspace, workstreams,
 };
 use gritty_persistence::testing::TempDir;
 use gritty_persistence::{DB_FILE_NAME, Database, PersistenceError, SCHEMA_VERSION};
@@ -711,5 +711,267 @@ fn decisions_cascade_with_their_workstream_and_count_only_the_open_ones() {
             .unwrap()
             .is_some(),
         "another workstream's decisions are untouched"
+    );
+}
+
+#[test]
+fn ownership_repository_round_trips_and_only_lists_what_still_holds() {
+    let database = Database::open_in_memory().unwrap();
+    let workstream = |id: &str| workstreams::WorkstreamRow {
+        id: id.into(),
+        workspace_root: "/repo".into(),
+        title: format!("title {id}"),
+        goal: None,
+        state: "IN_PROGRESS".into(),
+        created_at: 1,
+        updated_at: 1,
+    };
+    let lease = |id: &str, holder: &str, pattern: &str, acquired_at: i64| ownership::LeaseRow {
+        id: id.into(),
+        workspace_root: "/repo".into(),
+        workstream_id: holder.into(),
+        agent_run_id: None,
+        target_kind: "DIRECTORY".into(),
+        target_pattern: pattern.into(),
+        mode: "WRITE".into(),
+        note: None,
+        acquired_at,
+        expires_at: None,
+        state: "ACTIVE".into(),
+        released_at: None,
+    };
+    database
+        .write(|tx| {
+            workstreams::insert(tx, &workstream("auth"))?;
+            workstreams::insert(tx, &workstream("pay"))?;
+            workstreams::insert(
+                tx,
+                &workstreams::WorkstreamRow {
+                    workspace_root: "/other".into(),
+                    ..workstream("elsewhere")
+                },
+            )?;
+            ownership::insert_lease(tx, &lease("l-2", "pay", "src/payments/**", 2))?;
+            ownership::insert_lease(tx, &lease("l-1", "auth", "src/auth/**", 1))?;
+            ownership::insert_lease(
+                tx,
+                &ownership::LeaseRow {
+                    workspace_root: "/other".into(),
+                    ..lease("l-3", "elsewhere", "src/**", 3)
+                },
+            )
+        })
+        .unwrap();
+
+    let held = database.read(|c| ownership::list_held(c, "/repo")).unwrap();
+    assert_eq!(
+        held.iter().map(|e| e.lease.id.as_str()).collect::<Vec<_>>(),
+        ["l-1", "l-2"],
+        "oldest first, and never another workspace's"
+    );
+    assert_eq!(held[0].holder_state, "IN_PROGRESS", "the join carries it");
+
+    // Releasing is once only, and a released lease leaves the listing.
+    assert!(
+        database
+            .write(|tx| ownership::release_lease(tx, "l-1", 9))
+            .unwrap()
+    );
+    assert!(
+        !database
+            .write(|tx| ownership::release_lease(tx, "l-1", 10))
+            .unwrap()
+    );
+    let held = database.read(|c| ownership::list_held(c, "/repo")).unwrap();
+    assert_eq!(held.len(), 1);
+    let released = database
+        .read(|c| ownership::get_lease(c, "l-1"))
+        .unwrap()
+        .expect("still stored");
+    assert_eq!(released.state, "RELEASED");
+    assert_eq!(released.released_at, Some(9));
+}
+
+#[test]
+fn conflicts_close_with_their_lease_and_cascade_with_their_workstream() {
+    let database = Database::open_in_memory().unwrap();
+    database
+        .write(|tx| {
+            for id in ["auth", "pay", "docs"] {
+                workstreams::insert(
+                    tx,
+                    &workstreams::WorkstreamRow {
+                        id: id.into(),
+                        workspace_root: "/repo".into(),
+                        title: id.into(),
+                        goal: None,
+                        state: "DRAFT".into(),
+                        created_at: 1,
+                        updated_at: 1,
+                    },
+                )?;
+            }
+            ownership::insert_lease(
+                tx,
+                &ownership::LeaseRow {
+                    id: "l-1".into(),
+                    workspace_root: "/repo".into(),
+                    workstream_id: "auth".into(),
+                    agent_run_id: None,
+                    target_kind: "FILE".into(),
+                    target_pattern: "src/api/router.ts".into(),
+                    mode: "WRITE".into(),
+                    note: None,
+                    acquired_at: 1,
+                    expires_at: None,
+                    state: "ACTIVE".into(),
+                    released_at: None,
+                },
+            )?;
+            for (id, requester) in [("c-1", "pay"), ("c-2", "docs")] {
+                ownership::insert_conflict(
+                    tx,
+                    &ownership::ConflictRow {
+                        id: id.into(),
+                        workspace_root: "/repo".into(),
+                        requested_by: requester.into(),
+                        owned_by: "auth".into(),
+                        holding_lease_id: "l-1".into(),
+                        target_kind: "FILE".into(),
+                        target_pattern: "src/api/router.ts".into(),
+                        created_at: 2,
+                        state: "WAITING".into(),
+                        resolved_at: None,
+                    },
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+
+    // The same refusal is found rather than duplicated.
+    assert!(
+        database
+            .read(|c| ownership::waiting_conflict(c, "pay", "l-1", "FILE", "src/api/router.ts"))
+            .unwrap()
+            .is_some()
+    );
+
+    // Closing one leaves the other, and closing the rest of a lease's queue
+    // can skip the one already dealt with.
+    assert!(
+        database
+            .write(|tx| ownership::close_conflict(tx, "c-1", "OVERRIDDEN", 5))
+            .unwrap()
+    );
+    assert!(
+        !database
+            .write(|tx| ownership::close_conflict(tx, "c-1", "CANCELLED", 6))
+            .unwrap()
+    );
+    assert_eq!(
+        database
+            .write(|tx| ownership::close_conflicts_for_lease(tx, "l-1", "RESOLVED", 7, Some("c-1")))
+            .unwrap(),
+        1
+    );
+
+    let listed = database
+        .read(|c| ownership::list_conflicts(c, "/repo", 10))
+        .unwrap();
+    assert_eq!(listed.len(), 2);
+    assert!(listed.iter().all(|row| row.state != "WAITING"));
+
+    // Everything hangs off the workstream: remove the holder and the lease
+    // goes, and the conflicts waiting on it go with it.
+    assert!(
+        database
+            .write(|tx| workstreams::delete(tx, "auth"))
+            .unwrap()
+    );
+    assert!(
+        database
+            .read(|c| ownership::get_lease(c, "l-1"))
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        database
+            .read(|c| ownership::list_conflicts(c, "/repo", 10))
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_database_written_before_ownership_existed_migrates_forward_with_its_rows() {
+    let dir = TempDir::new("migrate-v3");
+    let path = dir.join(DB_FILE_NAME);
+
+    // Schema 2 exactly as it shipped: the migration runner applied up to the
+    // workstream migration and stopped.
+    {
+        let conn = rusqlite::Connection::open(&path).expect("open");
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        conn.execute_batch(
+            "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)",
+        )
+        .unwrap();
+        for migration in gritty_persistence::MIGRATIONS.iter().take(2) {
+            conn.execute_batch(migration.sql).expect("apply");
+            conn.execute(
+                "INSERT INTO schema_version (version, applied_at) VALUES (?1, 0)",
+                [migration.version],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO workstream (id, workspace_root, title, goal, state, created_at, updated_at)
+             VALUES ('kept', '/repo', 'Authentication', NULL, 'IN_PROGRESS', 1, 1)",
+            [],
+        )
+        .unwrap();
+    }
+
+    let opened = Database::open(&path).expect("migrate the old database");
+    assert_eq!(opened.migrations.from, 2);
+    assert_eq!(opened.migrations.to, SCHEMA_VERSION);
+
+    // The row that was there is still there, and the new tables work against it.
+    let existing = opened
+        .database
+        .read(|c| workstreams::get(c, "kept"))
+        .unwrap()
+        .expect("the workstream survived");
+    assert_eq!(existing.title, "Authentication");
+    opened
+        .database
+        .write(|tx| {
+            ownership::insert_lease(
+                tx,
+                &ownership::LeaseRow {
+                    id: "l-1".into(),
+                    workspace_root: "/repo".into(),
+                    workstream_id: "kept".into(),
+                    agent_run_id: None,
+                    target_kind: "DIRECTORY".into(),
+                    target_pattern: "src/auth/**".into(),
+                    mode: "WRITE".into(),
+                    note: None,
+                    acquired_at: 2,
+                    expires_at: None,
+                    state: "ACTIVE".into(),
+                    released_at: None,
+                },
+            )
+        })
+        .unwrap();
+    assert_eq!(
+        opened
+            .database
+            .read(|c| ownership::list_held(c, "/repo"))
+            .unwrap()
+            .len(),
+        1
     );
 }

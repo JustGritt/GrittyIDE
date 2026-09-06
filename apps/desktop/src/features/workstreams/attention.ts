@@ -1,4 +1,11 @@
-import type { Decision, Workstream, WorkstreamState } from '@gritty/protocol';
+import type {
+  Decision,
+  OwnershipConflict,
+  OwnershipMap,
+  Workstream,
+  WorkstreamState,
+} from '@gritty/protocol';
+import { waitingConflicts } from './ownership';
 
 /**
  * What "needs you" means, in one place (T210, artboards 4b and 5b).
@@ -25,21 +32,31 @@ export type AttentionItem =
       readonly id: string;
       readonly workstream: Workstream;
       readonly since: number;
+    }
+  | {
+      readonly kind: 'conflict';
+      readonly id: string;
+      readonly conflict: OwnershipConflict;
+      /** The workstream that asked and is waiting — whose work is blocked. */
+      readonly workstream: Workstream;
+      /** The one already holding the ground. */
+      readonly owner: Workstream;
+      readonly since: number;
     };
 
 /**
  * Everything waiting on the user, oldest first — the order you triage in, and
  * the order artboard 4b sorts by.
  *
- * Two kinds today, because two are all the domain can honestly produce:
- * open decisions, and work that has been handed back for review. Approvals,
- * conflicts and failures arrive with agent runs (T300) and worktrees (T400);
- * inventing them now would mean showing the user categories that can never
- * have anything in them.
+ * Three kinds, because three are all the domain can honestly produce: open
+ * decisions, work handed back for review, and ownership refusals (T325).
+ * Approvals and failures arrive with agent runs (T300); inventing them now
+ * would mean showing the user categories that can never have anything in them.
  */
 export function attentionItems(
   workstreams: readonly Workstream[],
   decisions: readonly Decision[],
+  ownership: OwnershipMap,
 ): AttentionItem[] {
   const byId = new Map(workstreams.map((workstream) => [workstream.id as string, workstream]));
   const items: AttentionItem[] = [];
@@ -67,6 +84,22 @@ export function attentionItems(
       since: workstream.updatedAt,
     });
   }
+  for (const conflict of waitingConflicts(ownership)) {
+    const workstream = byId.get(conflict.requestedBy as string);
+    const owner = byId.get(conflict.ownedBy as string);
+    // Both sides cascade away with their workstream in the database, so this
+    // only guards a partially-loaded renderer. A row that cannot name who is
+    // in the way is not worth showing.
+    if (!workstream || !owner) continue;
+    items.push({
+      kind: 'conflict',
+      id: `conflict:${conflict.id}`,
+      conflict,
+      workstream,
+      owner,
+      since: conflict.createdAt,
+    });
+  }
   return items.sort((left, right) => left.since - right.since || left.id.localeCompare(right.id));
 }
 
@@ -74,12 +107,13 @@ export function attentionItems(
 export function attentionCount(
   workstreams: readonly Workstream[],
   decisions: readonly Decision[],
+  ownership: OwnershipMap,
 ): number {
-  return attentionItems(workstreams, decisions).length;
+  return attentionItems(workstreams, decisions, ownership).length;
 }
 
 /** The queue's filter tabs, with their counts. */
-export type AttentionFilter = 'all' | 'question' | 'review';
+export type AttentionFilter = 'all' | 'question' | 'review' | 'conflict';
 
 export function filterItems(
   items: readonly AttentionItem[],

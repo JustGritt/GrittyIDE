@@ -92,6 +92,9 @@ impl Intent {
             | CoreEvent::WorkstreamCreated(_)
             | CoreEvent::WorkstreamChanged(_)
             | CoreEvent::WorkstreamRemoved(_)
+            // Ownership writes itself too (T325), in the same transaction that
+            // decided the answer.
+            | CoreEvent::OwnershipChanged(_)
             // The agent roster (T220) is an observation of other processes,
             // rediscovered from scratch each launch. Persisting it would make
             // Gritty claim on startup that sessions are running which may have

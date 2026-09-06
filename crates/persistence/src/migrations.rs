@@ -29,10 +29,15 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "workstreams",
         sql: include_str!("migrations/0002_workstreams.sql"),
     },
+    Migration {
+        version: 3,
+        name: "ownership",
+        sql: include_str!("migrations/0003_ownership.sql"),
+    },
 ];
 
 /// The schema version this build expects after migrating.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 const _: () = assert!(MIGRATIONS[MIGRATIONS.len() - 1].version == SCHEMA_VERSION);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

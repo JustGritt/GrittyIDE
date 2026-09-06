@@ -1,8 +1,15 @@
 import {
+  type ConflictId,
+  type ConflictResolution,
   type CoreError,
   type Decision,
   type DecisionId,
   type DecisionOption,
+  type LeaseId,
+  type OwnershipAcquisition,
+  type OwnershipCheck,
+  type OwnershipMap,
+  type OwnershipTarget,
   toCoreError,
   type Workspace,
   type Workstream,
@@ -11,6 +18,7 @@ import {
 } from '@gritty/protocol';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { core } from '../../core/client';
+import { initialOwnershipState, ownershipReducer } from './ownership-reducer';
 import {
   initialWorkstreamsState,
   selectDecisions,
@@ -34,6 +42,22 @@ export interface WorkstreamsController {
   raise(workstreamId: WorkstreamId, question: string, options?: DecisionOption[]): Promise<void>;
   resolve(decisionId: DecisionId, chosen: string, rationale?: string): Promise<void>;
   dismiss(decisionId: DecisionId, rationale?: string): Promise<void>;
+  /** Who owns what in this workspace (T325). Replaced whole on every change. */
+  readonly ownership: OwnershipMap;
+  readonly ownershipLoaded: boolean;
+  /**
+   * Ask for write ownership. Resolves with the core's answer — `GRANTED` or
+   * `CONFLICTED` — rather than throwing on a refusal: a conflict is a value
+   * the queue draws, not an error the user has to dismiss.
+   */
+  acquire(
+    workstreamId: WorkstreamId,
+    target: OwnershipTarget,
+    note?: string,
+  ): Promise<OwnershipAcquisition | undefined>;
+  release(leaseId: LeaseId): Promise<void>;
+  checkOwnership(target: OwnershipTarget): Promise<OwnershipCheck | undefined>;
+  resolveConflict(conflictId: ConflictId, action: ConflictResolution): Promise<void>;
 }
 
 /**
@@ -47,6 +71,7 @@ export interface WorkstreamsController {
  */
 export function useWorkstreams(workspace: Workspace | null): WorkstreamsController {
   const [state, dispatch] = useReducer(workstreamsReducer, initialWorkstreamsState);
+  const [ownership, dispatchOwnership] = useReducer(ownershipReducer, initialOwnershipState);
   const [error, setError] = useState<CoreError | null>(null);
   const [inFlight, setInFlight] = useState(0);
   const workspaceId = workspace?.id ?? null;
@@ -55,22 +80,32 @@ export function useWorkstreams(workspace: Workspace | null): WorkstreamsControll
   workspaceRef.current = workspaceId;
 
   useEffect(() => {
-    const unsubscribe = core.subscribeAll((event) => dispatch({ type: 'event', event }));
+    // One subscription for both reducers, so the roster and the ownership map
+    // can never be a beat apart.
+    const unsubscribe = core.subscribeAll((event) => {
+      dispatch({ type: 'event', event });
+      dispatchOwnership({ type: 'event', event });
+    });
     return unsubscribe;
   }, []);
 
   useEffect(() => {
     dispatch({ type: 'workspace', workspace });
+    dispatchOwnership({ type: 'workspace', workspace });
     if (!workspace) return;
     let active = true;
-    // Both lists in one pass: the queue needs decisions, and asking for them
-    // separately would show a roster with no reason for its BLOCKED rows.
+    // All three in one pass: the queue needs decisions and conflicts, and
+    // asking for them separately would show a roster with no reason for its
+    // BLOCKED rows.
     Promise.all([
       core.workstreams.list({ workspaceId: workspace.id }),
       core.decisions.list({ workspaceId: workspace.id }),
+      core.ownership.list({ workspaceId: workspace.id }),
     ]).then(
-      ([workstreams, decisions]) => {
-        if (active) dispatch({ type: 'loaded', workstreams, decisions });
+      ([workstreams, decisions, map]) => {
+        if (!active) return;
+        dispatch({ type: 'loaded', workstreams, decisions });
+        dispatchOwnership({ type: 'loaded', map });
       },
       (cause: unknown) => {
         if (active) setError(toCoreError(cause));
@@ -195,6 +230,48 @@ export function useWorkstreams(workspace: Workspace | null): WorkstreamsControll
     [run],
   );
 
+  const acquire = useCallback(
+    async (workstreamId: WorkstreamId, target: OwnershipTarget, note?: string) => {
+      const id = workspaceRef.current;
+      if (!id) return undefined;
+      return run(() =>
+        core.ownership.acquire(
+          note
+            ? { workspaceId: id, workstreamId, target, note }
+            : { workspaceId: id, workstreamId, target },
+        ),
+      );
+    },
+    [run],
+  );
+
+  const releaseLease = useCallback(
+    async (leaseId: LeaseId) => {
+      const id = workspaceRef.current;
+      if (!id) return;
+      await run(() => core.ownership.release({ workspaceId: id, leaseId }));
+    },
+    [run],
+  );
+
+  const checkOwnership = useCallback(
+    async (target: OwnershipTarget) => {
+      const id = workspaceRef.current;
+      if (!id) return undefined;
+      return run(() => core.ownership.check({ workspaceId: id, target }));
+    },
+    [run],
+  );
+
+  const resolveConflict = useCallback(
+    async (conflictId: ConflictId, action: ConflictResolution) => {
+      const id = workspaceRef.current;
+      if (!id) return;
+      await run(() => core.ownership.resolve({ workspaceId: id, conflictId, action }));
+    },
+    [run],
+  );
+
   return {
     workstreams,
     decisions,
@@ -209,5 +286,13 @@ export function useWorkstreams(workspace: Workspace | null): WorkstreamsControll
     raise,
     resolve,
     dismiss,
+    // The map arrives whole on every change, so there is nothing to merge and
+    // nothing that can disagree with the event that produced it.
+    ownership: ownership.map,
+    ownershipLoaded: ownership.loaded,
+    acquire,
+    release: releaseLease,
+    checkOwnership,
+    resolveConflict,
   };
 }
