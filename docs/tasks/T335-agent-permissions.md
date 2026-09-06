@@ -1,7 +1,7 @@
 # Task T335 — Permissions: asked in place, answered in a queue (design artboards 12a/12b)
 
 - **Phase:** 4
-- **Status:** todo
+- **Status:** review
 - **Depends on:** T221 (hook bridge — the `PermissionRequest` event and the
   state file this extends), T232 (the timeline view the prompt is drawn in),
   T210 (the attention queue the background asks land in), **ADR-020**
