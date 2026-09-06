@@ -213,4 +213,155 @@ Claim `PROTOCOL_VERSION 2.12.0` in `docs/merge-queue.md` before spending it.
 
 ## Completion report
 
-_To be filled in._
+### Summary
+
+A permission prompt is answerable from Gritty, and both halves of design turn 12
+are drawn. `PermissionRequest` now carries a bounded `ask` — verb, target, a
+short redacted diff, and whether the write lands outside the session's own root
+— and the hook waits, **only while Gritty is alive**, for a verdict the user
+wrote. 12a draws that as a framed card at the foot of the feed; 12b draws it as
+a banner and a fourth kind in the attention queue.
+
+The decision this rests on is ADR-020, which amends ADR-018 §5. Every claim in
+it was **measured before any of it was written**, against Claude Code 2.1.263,
+in an isolated project supplied through `--settings` so neither the user's
+`~/.claude/settings.json` nor any real project was touched.
+
+### Files changed
+
+- `docs/decisions/ADR-020-agent-permission-verdicts.md` (new), `README.md`
+- `crates/agents/src/hook.rs` — `HookAsk`, `AskVerb`, state format 1 → 2
+- `crates/agents/src/verdict.rs` (new) — the answer file and the liveness marker
+- `crates/agents/src/integration.rs` — `--ask-timeout`, and a `timeout` on the
+  `PermissionRequest` entry only
+- `crates/agent-hook/src/{lib,main}.rs` — the classifier, the wait, and the one
+  path on which stdout is used
+- `crates/gritty-core/src/agent_session/{permission.rs (new),wire.rs,mod.rs}`
+- `apps/desktop/src-tauri/src/{commands.rs,lib.rs}`,
+  `packages/protocol/src/{client,commands,types}.ts` + generated
+- `apps/desktop/src/features/agents/{permission-prompt.tsx,permission-model.ts,
+  permission-chords.ts,permission-banner.tsx}` (new), `agent-timeline.tsx`,
+  `agent-rail.tsx`, `use-agents.ts`
+- `apps/desktop/src/features/workstreams/{attention.ts,attention-queue.tsx,
+  island.tsx}`, `features/editor/status-bar.tsx`, `App.tsx`,
+  `app.css`, `styles/tokens.css`
+- `docs/architecture/agent-sessions.md`, `docs/merge-queue.md`
+
+### Tests actually executed
+
+`pnpm check` **exit 0** (Biome, tsc, 70 vitest files / 548 tests, `cargo fmt
+--check`, clippy `-D warnings`, `cargo test --workspace`, generated types
+fresh).
+
+Beyond the unit and render tests, four things were executed rather than
+reasoned about, because rule 12 requires it and because a paragraph cannot
+establish any of them.
+
+**Against a probe hook, before the design was fixed** (these are ADR-020's
+measurements):
+
+1. `PermissionRequest` fires exactly when a human would be asked, and carries
+   `session_id`, `cwd`, `tool_name`, `tool_input` and `permission_suggestions`.
+2. `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":
+   {"behavior":"allow"}}}` is honoured — the transcript records `Allowed by
+   PermissionRequest hook` — and a denial's `message` reaches the model, which
+   reasoned about it.
+3. A hook that overruns its entry's `timeout` has its output discarded and the
+   human's prompt stays live. **This is what makes waiting safe.**
+4. The prompt is shown *while* the hook deliberates, so both answer paths are
+   live at once and the first wins.
+
+**Against the shipped `gritty-agent-hook` and a real Claude Code session**, with
+a twenty-line stand-in playing the core's loop (refresh the marker, read the
+ask, write the verdict):
+
+- **Allow.** `verb=WRITE_FILE`, the target, `diff=['+verified']`, `+1/-0`. File
+  created, no keystroke, `Allowed by PermissionRequest hook`.
+- **Deny on a `.env`.** `sensitive=true`, `diff` absent. The file was not
+  created; `Denied in Gritty by the user.` reached the model. **`hunter2`
+  appears nowhere under the data directory** — the secret was never captured.
+- **Gritty not running.** No marker: the hook returned at once and said nothing,
+  the state file was still written (so `BLOCKED` is still earned), the prompt
+  reached the human, and their answer created the file.
+
+And in the automated suite, the two that cannot be unit-tested: a verdict
+written *while the shipped binary is waiting* is what the agent reads, and
+killing Gritty mid-wait releases it in well under its own deadline with empty
+stdout.
+
+### Architectural decisions
+
+- **ADR-020 narrows ADR-018 §5 rather than deleting it.** The hook still never
+  blocks unless Gritty is alive *and* the agent was about to block on a human
+  anyway — the wait replaces a wait. §6 (a file, not a socket) and §7 (evidence,
+  not authority) stand; what travels back is not a derivation Gritty made.
+- **Answer at `PermissionRequest`, not `PreToolUse`.** `PreToolUse` also accepts
+  a decision and fires for *every* tool call, including the ones the agent would
+  have allowed unasked. Gritty would have had to re-derive a policy the agent
+  already applies, and pay a round trip per tool use.
+- **The ask lives on `AgentSession`, not only on `AgentTimeline`.** Only one
+  timeline is followed at a time, so an ask that lived only there would be
+  invisible for every agent the user is *not* watching — which is exactly the
+  set 12b exists for. `AgentTimeline.pending` is derived from the same value.
+- **Grants are in memory and die with their session** (see the non-goal). This
+  released `SCHEMA_VERSION` 5 and migration `0005`, both claimed during
+  planning; `docs/merge-queue.md` records the release, because a claimed
+  migration number that is never spent breaks the next one.
+- **The permission `AttentionItem` carries no workstream.** The other three are
+  about a workstream; this one is about a session Gritty observes, and T223's
+  link is opt-in. Requiring one would have made the most urgent item in the
+  queue the one most often missing from it.
+- **Undo is a grant revocation, not a rollback**, and the label says so. By the
+  time a verdict is read the tool has run.
+- **`--ok-wash` was added to `tokens.css`**, completing the set beside
+  `--warn-wash` and `--error-wash`, because a diff draws both halves of a change
+  and ADR-016 says colours are tokens.
+
+### Known limitations
+
+- **The UI has not been seen running.** `pnpm check` is green and every surface
+  is covered by a static-markup render test, but no screenshot was taken and no
+  click was performed: this agent has no display. Manual-pass steps for 12a and
+  12b are the remaining verification, and the light ramp in particular is
+  argued-from-tokens rather than observed.
+- **No interaction test.** `apps/desktop`'s vitest project is a node one, so key
+  handling is covered by a pure matcher and the buttons by their markup —
+  nothing presses them. `JSDOM-VITEST` is what would change that; it was not
+  taken as a dependency because everything here was written to be testable
+  without it.
+- **The classifier is shallow by design.** `is_install` is a prefix match and
+  `is_outside` is textual — no canonicalisation, no `stat`, no symlink
+  following, because the hook runs inside somebody else's process. Both only
+  *label* a prompt; the command and the path are shown either way.
+- **`MARKER_FRESH_FOR` is 4 s**, so a force-killed Gritty holds a waiting agent
+  for up to that long. Measured only against a deleted marker, not against a
+  real `SIGKILL` of the desktop binary.
+- **One provider.** The verdict file, the marker and the bounded ask are
+  provider-neutral; the event name and the reply shape live in the adapter.
+
+### Follow-up tasks
+
+- **T224** would let the card's "answer in its terminal" affordance actually
+  reveal the session; the prop exists and is deliberately unwired, so nothing
+  draws a button that does nothing.
+- **A shortcut registry.** This adds the *fifth* hand-gated `keydown` listener.
+  Four files now apologise for there being no registry; the next one should
+  build it instead.
+- **T330** now has the mechanism it was waiting for: ADR-020 establishes that a
+  hook may be answered, which is what write interception needs.
+- **The standing-rules row** in 12b lists what a grant covers, but editing the
+  defaults that *produce* the prompts is Claude Code's own settings surface, not
+  Gritty's. A capability model (addendum §8) is where that would belong.
+
+### Remaining risks
+
+- **ADR-020 weakens a guarantee three task files repeat.** The fail-open chain
+  is what earns it, and every link of it is now executed rather than argued —
+  but a future change to the hook's wait must re-run those three scenarios, not
+  reason about them.
+- **`tool_input` is a new exfiltration surface.** It is bounded twice, redacted
+  by name, and never logged; the redaction list is a heuristic and deserves a
+  reviewer's eye specifically.
+- **A grant is matched by string prefix.** `covers()` is deliberately narrow and
+  refuses where unsure, but it is the one place in this task where being wrong
+  means a person is *not* asked.

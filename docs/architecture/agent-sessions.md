@@ -4,10 +4,16 @@ How Gritty answers *what is happening* for the coding agents the user is
 already running outside it, and — just as importantly — what it refuses to
 claim about them.
 
-This is **observability, not orchestration**. Gritty reads evidence the machine
-already produces. It starts nothing, stops nothing, answers nothing and approves
-nothing. Runs that Gritty *owns* are T300 and are a different type with a
-different lifecycle; nothing here may be mistaken for one.
+This is **observability, and one answer**. Gritty reads evidence the machine
+already produces: it starts nothing, stops nothing, types into nothing and
+cancels nothing. Runs that Gritty *owns* are T300 and are a different type with
+a different lifecycle; nothing here may be mistaken for one.
+
+The single exception is a permission prompt (T335, ADR-020). When a session
+stops to ask a human, Gritty may carry that human's answer back to it. That is
+narrower than it sounds: the prompt exists whether or not Gritty is running, and
+if Gritty says nothing the user answers it in the terminal instead — which is
+exactly what happens on a machine where Gritty is not running, by construction.
 
 It writes to exactly one thing outside itself, and only when the user asks: one
 hook entry in an agent's own configuration (T221, ADR-018), which makes the
@@ -351,7 +357,13 @@ hook combinations (`PROCESS_AND_HOOK`, `TRANSCRIPT_AND_HOOK`, `ALL`) — but no
 
 **What the prompt is about.** The state file's bounded `tool` field becomes a
 `PermissionPending` timeline entry, so a rail showing a blocked session names
-*what* is waiting rather than only that something is. Its `detail` comes from
+*what* is waiting rather than only that something is. T335 widened that: the
+state file now also carries a bounded `ask` — the classified verb, the target, a
+short redacted diff, and whether the write lands outside the session's own root
+— so the prompt can be *answered* rather than only reported. The redaction is
+the part worth naming: a target whose name says it holds a secret (`.env`,
+`*.pem`, `id_rsa`) is named and never quoted, because a prompt that leaked the
+secret it was asking about would be worse than no prompt. Its `detail` comes from
 the transcript's outstanding tool call, and only when the two name the same
 tool: they are describing one call, so pairing them is not a guess, while
 pairing a different call's input to this prompt would be. The entry is held
@@ -509,7 +521,9 @@ not yet built; nothing here may be described as behaviour Gritty has.
 **The rest.** T222 adds Codex. T224 turns the pid and tty into a "reveal the
 terminal" action behind a new platform crate.
 
-**Still deliberately absent afterwards:** any control (prompting, answering,
-approving, keystroke injection), any screen-scraping of another terminal, a
-daemon that outlives the app, and a socket or plugin surface. Runs Gritty owns
-are T300 and remain a different type with a different lifecycle.
+**Still deliberately absent afterwards:** every kind of control except the one
+ADR-020 argued for — no prompting, no keystroke injection, no cancelling a turn;
+no screen-scraping of another terminal, no daemon that outlives the app, and no
+socket or plugin surface. *Answering* a question the agent asked is in, and is
+described above. Enforcing a decision nobody asked about is T330. Runs Gritty
+owns are T300 and remain a different type with a different lifecycle.
