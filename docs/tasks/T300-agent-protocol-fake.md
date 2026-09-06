@@ -509,3 +509,270 @@ not something the adapter reported.
   judgement, unmeasured. They are named constants with tests, so moving them is
   a one-line change, but T310 should check them against a real provider's
   output rather than inherit them.
+
+### T300-CORE — the run manager: supervision, cancellation, the ring
+
+Branch `t300-core-run-manager`. Sections **12-15 only**; §§1-7 were T300-C's and
+are unchanged here, §§8-11 are T300-FAKE's, §16 onward T300-CMD's.
+
+**Summary.** `crates/gritty-core/src/agent_run/` grew the half T300-C
+deliberately left unbuilt: a registry that owns every run in the process, a
+`CancellationToken` per run, the bounded ring that `MAX_RUN_EVENTS` was until
+now only a promise about, and the three reactions that stop a run outliving
+what it was working on. Nothing on the wire changed — no command, no event, no
+exported type, no `PROTOCOL_VERSION`, no migration — which is the whole point
+of landing it behind a contract that was frozen first.
+
+Supervision is a terminal session's shape, not `OperationRegistry`'s: a
+ten-state machine with an event stream beside it does not fit
+`OperationStatus`'s five terminal states, and squeezing it in would mean either
+flattening the machine this gate exists to freeze or widening `OperationStatus`
+for one caller. What *is* reused, verbatim, is the operation model's discipline
+— a child token per run under a root token, the driver running as its own task
+so a panic is contained, and every path out of the supervising task leaving the
+run terminal.
+
+**Files changed**
+
+| File | What |
+|---|---|
+| `crates/gritty-core/src/agent_run/manager.rs` (new) | `AgentRunManager`, `AgentRunContext`, `AgentRunSpec`, `MAX_CONCURRENT_RUNS`, `FINISHED_RETENTION` |
+| `crates/gritty-core/src/agent_run/ring.rs` (new) | the per-run bounded ring and its coalesced batch, 7 tests |
+| `crates/gritty-core/src/agent_run/tests.rs` (new) | 27 supervision and cancellation tests |
+| `crates/gritty-core/src/agent_run/mod.rs` | declares the two modules, re-exports the manager, records that the contract's two named gaps are closed |
+
+**The API surface T300-CMD and T300-FAKE call.** Written out because both were
+being built at the same time as this.
+
+```rust
+// crates/gritty-core/src/agent_run/manager.rs — re-exported from agent_run
+pub const MAX_CONCURRENT_RUNS: usize = 4;
+pub const FINISHED_RETENTION: usize = 50;
+
+pub struct AgentRunSpec {          // not a wire type; runs.startFake builds one
+    pub workspace_id: WorkspaceId,
+    pub workstream_id: WorkstreamId,   // the CALLER guarantees it exists
+    pub provider: AgentRunProvider,
+    pub actor: Actor,
+    pub correlation_id: CorrelationId,
+}
+
+impl AgentRunManager {
+    pub fn new(Handle, Arc<EventBus>, Arc<WorkspaceManager>) -> Arc<Self>;
+
+    // runs.startFake: NotFound (workspace not open), Conflict (the bound)
+    pub fn start<F, Fut>(self: &Arc<Self>, AgentRunSpec, drive: F) -> Result<AgentRun, CoreError>
+    where F: FnOnce(AgentRunContext) -> Fut + Send + 'static,
+          Fut: Future<Output = Result<(), CoreError>> + Send + 'static;
+
+    pub fn cancel(&self, &AgentRunId, Actor) -> Result<AgentRun, CoreError>;  // runs.cancel
+    pub fn list(&self, &WorkspaceId) -> Vec<AgentRun>;                        // runs.list
+    pub fn events(&self, &AgentRunId) -> Result<AgentRunEventLog, CoreError>; // runs.events
+    pub fn get(&self, &AgentRunId) -> Option<AgentRun>;
+
+    pub fn cancel_for_workstream(&self, &WorkstreamId) -> Vec<AgentRun>;   // on WorkstreamRemoved
+    pub fn interrupt_for_workspace(&self, &WorkspaceId) -> Vec<AgentRun>;  // on WorkspaceClosed
+    pub async fn shutdown(&self, grace: Duration);                         // on Core::shutdown
+}
+
+impl AgentRunContext {   // Clone + Send; what the adapter's future receives
+    pub fn run_id(&self) -> &AgentRunId;
+    pub fn snapshot(&self) -> Option<AgentRun>;
+    pub fn is_cancelled(&self) -> bool;
+    pub fn cancelled(&self) -> WaitForCancellationFuture<'_>;
+    pub fn token(&self) -> &CancellationToken;
+    pub fn record(&self, AgentRunEvent);                                  // buffered
+    pub fn record_all(&self, impl IntoIterator<Item = AgentRunEvent>);    // buffered + flush
+    pub fn flush(&self) -> bool;                                          // one coalesced batch
+    pub fn transition(&self, AgentRunState) -> Result<AgentRun, CoreError>;
+    pub fn set_activity(&self, Option<AgentRunActivity>) -> Result<AgentRun, CoreError>;
+    pub fn advance(&self, AgentRunState, Option<AgentRunActivity>) -> Result<AgentRun, CoreError>;
+    pub fn finish(&self, Option<String>) -> Result<AgentRun, CoreError>;   // -> FINISHED
+    pub fn fail(&self, CoreError) -> Result<AgentRun, CoreError>;          // -> FAILED
+}
+```
+
+Three things about it are worth saying out loud, because they are the boundary
+rather than the plumbing:
+
+- **The driver's future ends the run or the manager does.** `drive` returns
+  `Ok(())` once it has called `finish` or `fail`. Returning without ending the
+  run is the orphan case and the manager fails it, `Internal`, naming the gap;
+  returning `Err` fails it with that error; panicking fails it with the panic
+  message. There is no fourth outcome.
+- **`CANCELLED` and `INTERRUPTED` are not reachable from `AgentRunContext`.** A
+  run does not cancel itself, and a driver claiming to have been interrupted is
+  claiming to know something only its supervisor knows. `transition` refuses
+  every terminal state.
+- **The adapter bounds nothing.** `record` puts every event through
+  `AgentRunEvent::bounded` at the ring's edge, which is the single seam T300-C
+  built it for (rule 13). An adapter that bounded its own strings would be
+  trusted to have done so; it is not.
+
+**Tests actually executed.**
+
+- `cargo test -p gritty-core` — **417 passed, 0 failed** (34 new: 27 in
+  `agent_run::tests`, 7 in `agent_run::ring`).
+- `cargo clippy -p gritty-core --all-targets -- -D warnings` — clean.
+- `cargo fmt --all -- --check` — clean.
+- `pnpm check` — **green, exit status 0** (captured from `$?`, not from a piped
+  `tail`). Biome 251 files; vitest **76 files / 593 tests passed**, both
+  known-flaky suites (`MONACO-JSDOM-FLAKE`, `MARKDOWN-BUDGET-FLAKE`) included
+  and passing on the first run; every Rust crate green; `check:generated`
+  clean, which is the mechanical proof that this branch changed no wire type.
+- `pnpm --filter @gritty/desktop sidecar` first, per `SIDECAR-FRESH-CHECKOUT`.
+
+The failure and recovery behaviour below was **provoked, not asserted from
+compilation** (rule 12). Each row is a test that forces the failure and then
+watches the run reach a terminal state on the event stream:
+
+| Forced | Test | Result |
+|---|---|---|
+| cancel from each of the six non-terminal states | `a_run_is_cancellable_from_every_non_terminal_state` | `CANCELLED` from all six, no `RUN_FAILED` |
+| a driver parked on a future that never resolves | `a_driver_parked_forever_is_still_cancelled` | aborted, `CANCELLED` |
+| a driver that returns without ending its run | `a_driver_that_returns_without_ending_its_run_fails_it` | `FAILED`, `Internal`, names the gap |
+| a driver whose script is dropped | `a_run_whose_script_is_dropped_still_ends` | `FAILED` |
+| a driver that panics | `a_panicking_driver_is_contained_and_fails_its_run` | `FAILED`, panic message kept, process fine, manager still usable |
+| **the supervising task killed with the run live** | `shutdown_force_ends_a_run_whose_supervisor_died`, `cancelling_a_run_whose_supervisor_died_still_ends_it` | force-ended `INTERRUPTED` / `CANCELLED`, never left `RUNNING` |
+| workstream removed mid-run | `removing_the_workstream_cancels_only_its_own_runs` | `CANCELLED`; another workstream's run untouched |
+| workspace closed mid-run | `closing_the_workspace_interrupts_its_runs` | `INTERRUPTED` |
+| shutdown with a live and a blocked run | `shutdown_leaves_no_run_running` | both `INTERRUPTED` before `shutdown` returns |
+
+The acceptance criterion itself — `STARTING → RUNNING → BLOCKED (permission) →
+RUNNING → NEEDS_DECISION → RUNNING → FINISHED` with the exact state *and* event
+sequence, run twice, identical — is `the_scripted_lifecycle_is_deterministic`.
+There is no `sleep` anywhere in the assertion path: each step is acknowledged
+before the next is sent, and an ending is awaited on the event stream rather
+than on the clock.
+
+**Architectural decisions**
+
+1. **A stop's ending depends on who asked.** §15 says all three cases are
+   "cancelled, not orphaned", but `AgentRunState::Interrupted`'s own contract
+   names two of them literally — "the app is shutting down, the workspace
+   closed" — and distinguishes itself from `Cancelled` because "nobody asked".
+   So: `runs.cancel` and a removed workstream end `CANCELLED` (a person asked
+   for the work to stop), a closed workspace and shutdown end `INTERRUPTED`
+   (the ground went out from under the run). Both satisfy §15's actual
+   requirement, which is that the run is terminal; the state now also says
+   *which* happened, which is worth more to the user than one word for three
+   different events.
+2. **The manager holds `WorkspaceManager` but no database.** A run against a
+   workspace that is not open has nowhere to happen, and that check is cheap
+   and synchronous, so "a closed workspace is `NotFound`" is a core invariant
+   here rather than an adapter convention. Workstream *existence* needs the
+   session database, which is `WorkstreamManager`'s and asynchronous — so
+   `runs.startFake`'s "unknown workstream is `NotFound`" is **T300-CMD's
+   precondition**, stated on `AgentRunSpec::workstream_id` where its caller
+   will read it.
+3. **`MAX_CONCURRENT_RUNS = 4`, per workspace, refusing rather than queueing.**
+   The shape of `MAX_OPEN_TIMELINES`, and deliberately smaller than it: a run
+   is an agent working inside the user's workspace, and this project puts
+   inspectability above orchestration power. Four is already more than one
+   person can watch, and T410 exists because even four can need attention at
+   once. The fake costs nothing, so the bound constrains nothing today — which
+   is exactly why it is set now rather than after a real provider makes the
+   answer expensive. **T310 must justify it against real process cost**
+   (memory, token spend, how many worktrees T400 can hold) rather than inherit
+   it.
+4. **Cancellation is cooperative *and* enforced.** The token fires for a driver
+   that watches it; the supervising task aborts one that does not. That is what
+   makes "cancellable from any non-terminal state" unconditional rather than
+   true-for-well-behaved-adapters — a run `BLOCKED` on a permission it will
+   never get is parked on an await, and only the abort reaches it.
+5. **Once a stop is requested, the ending is the manager's.** A driver mid-step
+   when the cancel lands gets `Conflict` from `transition` and its `finish` is
+   redirected to the chosen ending — the operation registry's rule ("once
+   cancellation was requested, the only terminal state is `CANCELLED`"),
+   because the alternative is a run that un-cancels itself in the window before
+   its task is aborted.
+6. **`RUN_FAILED` is recorded by whoever decided on the failure.** The first
+   draft had `fail()` record it and the orphan path not, so a consumer reading
+   only the event stream saw an orphaned run's log stop mid-sentence. It now
+   happens in the one place a run becomes `FAILED`, so a driver's own failure,
+   an orphan and a panic all close their log the same way. A cancellation
+   records nothing — that stays what T300-C decided, a fact about the run
+   rather than something the adapter reported.
+7. **`dropped` is cumulative on both sides**, unlike the agent timeline's,
+   whose batch carries a delta. That is what
+   `AgentRunEventAppendedPayload::dropped`'s contract says ("a client compares
+   it with what it last saw"), so a batch is worth emitting when it has records
+   *or* when the total moved — a burst that evicted everything undelivered
+   still reports that it did.
+8. **Batches coalesce at a step boundary, not on a timer.** A state or activity
+   change flushes on its own, `record_all` flushes, and the pending list
+   auto-flushes at `MAX_RUN_EVENTS` so a driver that never flushes still cannot
+   make it unbounded. A wall-clock flusher would have bought timeliness for a
+   silent stream at the cost of the determinism T300-FAKE's tests are built on;
+   see follow-ups.
+9. **Emissions are collected under the registry lock and emitted after it is
+   released.** `EventBus::emit` assigns sequence numbers under its own lock and
+   calls sinks under it, so a sink that re-entered this manager would deadlock
+   — the same re-entrancy `TerminalManager` documents for its PTY host.
+
+**Known limitations**
+
+- **An `AgentRun` still does not survive a Gritty restart**, and this ticket
+  does not change that — the manager is entirely in memory, `session/tap.rs`
+  persists neither run event, and there is no migration. For a fake that is
+  correct rather than merely acceptable, for exactly the reason T300-C gave: a
+  row claiming on startup that a run is `RUNNING` when the process driving it
+  died with the app is the orphan this whole state machine exists to prevent,
+  and failing closed is the right direction. It becomes a real gap the moment
+  T310 gives a run something worth losing, and **ADR-021** is where that is
+  decided. What this ticket adds to that question is one datum: the in-process
+  guarantee is now strong enough that persistence would only ever need to
+  reconcile a *process death*, never a live orphan.
+- **`FINISHED_RETENTION = 50` is the whole of a session's run history.** Beyond
+  it the oldest ended run is pruned entirely, ring and all, and `runs.events`
+  on it becomes `NotFound`. Same shape as the operation registry's 200; smaller
+  because a run carries up to `MAX_RUN_EVENTS` records beside it.
+- **No timer-driven flush.** A driver that records events for a long time
+  without changing state or calling `flush` leaves them undelivered until it
+  does (they are in the ring, so `runs.events` still answers). The fake drives
+  step by step, so this is invisible today; a real provider streaming tokens
+  might notice.
+- **The reactions are explicit calls, not a subscription.** `EventBus` is
+  emit-only — there is no way for the core to observe its own events, and a
+  sink that tried would deadlock — so `cancel_for_workstream` and
+  `interrupt_for_workspace` must be wired by the composition root next to
+  `workstreams.remove` and `workspace.close`. That wiring is **T300-CMD's**;
+  until it exists the guarantees are proved but not connected.
+
+**Follow-ups** (recorded, not taken)
+
+- **Wire the three reactions in the composition root** (T300-CMD, or a
+  one-line ticket after it): `cancel_for_workstream` after `workstreams.remove`
+  succeeds, `interrupt_for_workspace` after `workspace.close`, and
+  `AgentRunManager::shutdown` in `Core::shutdown` **before** the session writer
+  flushes, where the terminal manager's already is.
+- **A coalescing flush interval**, if a real provider (T310) turns out to
+  stream many events between state changes. It belongs behind an explicit
+  `start_flusher(interval)` the app calls and tests do not, so determinism is
+  not traded away for timeliness by default.
+- **`MAX_CONCURRENT_RUNS` against real cost** — T310's, as above.
+- **The island surface for an owned run** is unchanged from T300-C's
+  recommendation and still unassigned: a second line on the workstream's own
+  island row (`RUNNING / Editing src/auth/session.ts`), with
+  `needs_attention()` feeding the count the island already keeps, rather than a
+  fourth surface.
+
+**Risks**
+
+- **The context is the seam two concurrent tickets meet at.** `AgentRunContext`
+  was designed while `gritty-agent-fake` and the `runs.*` adapters were being
+  written against a description of it rather than against it. The shapes most
+  likely to need a nudge are `record_all` (whether an adapter wants to hand
+  over a step's events at once or one at a time) and `advance` (which refuses a
+  no-op state change, so an adapter whose activity changed while the state held
+  still must use `set_activity`). Both are additive changes to one file.
+- **`abandon_supervisor` is `#[cfg(test)]` and exists to be nasty.** It kills a
+  run's supervising task with the run still live, which is the only way to
+  reproduce a dead supervisor from outside. If a future refactor makes it
+  inconvenient, the instinct to delete it should be resisted: it is the test
+  that would catch a stop path quietly assuming someone is still watching.
+- **The one thing not proved here is the app.** Every guarantee above is a
+  `cargo test`; the manual pass in "Tests required" needs a Runs panel and
+  `runs.*` commands, which are T300-CMD's. Until that lands, "close the
+  workspace with a run active and confirm it disappears" is proved in the core
+  and unproved in the product.
