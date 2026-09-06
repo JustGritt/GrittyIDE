@@ -67,6 +67,7 @@ the workflow below are hand-maintained.
 | CI-COST | CI: self-hosted macOS runner, and stop burning metered minutes |  | – | review |
 | CI-LINUX-DARK | Linux CI is dark until the minute allowance resets (1 Oct) or a spending limit is set |  | – | blocked |
 | CI-RUNNER-GC | Self-hosted runner never cleans up: target/ and stale bundles grow unbounded on the dev Mac |  | – | unspec |
+| [EVENT-LISTEN-GAP](EVENT-LISTEN-GAP-startup-events.md) | An event emitted before the WebView is listening reaches nobody | 1 | T010 | todo |
 <!-- board:table end -->
 
 ## Dependency graph (architecture addendum §2)
