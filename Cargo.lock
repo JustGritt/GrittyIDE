@@ -1191,10 +1191,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "gritty-agent-hook"
+version = "0.1.0"
+dependencies = [
+ "gritty-agents",
+ "serde_json",
+]
+
+[[package]]
 name = "gritty-agents"
 version = "0.1.0"
 dependencies = [
+ "gritty-workspace",
+ "serde",
  "serde_json",
+ "thiserror 2.0.20",
  "tracing",
 ]
 

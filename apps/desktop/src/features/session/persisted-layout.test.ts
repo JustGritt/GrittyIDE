@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { DocumentTab } from '../documents/documents-reducer';
 import {
   buildSessionTabs,
+  DEFAULT_AGENT_RAIL_LAYOUT,
   DEFAULT_LAYOUT,
   DEFAULT_TERMINAL_LAYOUT,
   isViewMode,
@@ -42,10 +43,11 @@ describe('layout blob', () => {
         fontFamily: 'MesloLGS NF',
         fontSize: 15,
       },
-      panes: { sidebarWidth: 260, terminalHeight: 340 },
+      agentRail: { open: true },
+      panes: { sidebarWidth: 260, terminalHeight: 340, agentRailWidth: 300 },
     };
     const blob = serializeLayout(layout);
-    expect(blob.version).toBe(4);
+    expect(blob.version).toBe(5);
     expect(parseLayout(blob)).toEqual(layout);
     expect(parseLayout(undefined)).toEqual(DEFAULT_LAYOUT);
     expect(parseLayout({ version: 9, explorer: { showHidden: 'yes' } })).toEqual(DEFAULT_LAYOUT);
@@ -58,8 +60,33 @@ describe('layout blob', () => {
     expect(parseLayout({ version: 1, explorer: { showHidden: true } })).toEqual({
       explorer: { showHidden: true },
       terminal: DEFAULT_TERMINAL_LAYOUT,
+      agentRail: DEFAULT_AGENT_RAIL_LAYOUT,
       panes: DEFAULT_LAYOUT.panes,
     });
+  });
+
+  it('reads a blob written before the agent rail existed', () => {
+    // Same case one version later: a version-4 blob has no rail section and no
+    // rail width, which is a rail nobody has opened rather than a broken blob.
+    const before = {
+      version: 4,
+      explorer: { showHidden: true },
+      terminal: { profilePath: '/bin/zsh', customShells: [], fontFamily: null, fontSize: null },
+      panes: { sidebarWidth: 260, terminalHeight: 340 },
+    };
+    const layout = parseLayout(before);
+    expect(layout.agentRail).toEqual(DEFAULT_AGENT_RAIL_LAYOUT);
+    expect(layout.panes.agentRailWidth).toBe(PANE_LIMITS.agentRail.default);
+    // Everything written beside it survives.
+    expect(layout.panes.sidebarWidth).toBe(260);
+    expect(layout.terminal.profilePath).toBe('/bin/zsh');
+  });
+
+  it('ignores a rail section that is not a usable value', () => {
+    for (const agentRail of [null, {}, { open: 'yes' }, { open: 1 }, 'open']) {
+      expect(parseLayout({ agentRail }).agentRail).toEqual(DEFAULT_AGENT_RAIL_LAYOUT);
+    }
+    expect(parseLayout({ agentRail: { open: true } }).agentRail.open).toBe(true);
   });
 
   it('ignores terminal settings that are not usable values', () => {
@@ -88,22 +115,33 @@ describe('layout blob', () => {
 
   it('clamps a stored pane size instead of discarding it', () => {
     // A blob from a larger monitor should still open a usable sidebar.
-    const huge = parseLayout({ panes: { sidebarWidth: 5000, terminalHeight: 5000 } }).panes;
+    const huge = parseLayout({
+      panes: { sidebarWidth: 5000, terminalHeight: 5000, agentRailWidth: 5000 },
+    }).panes;
     expect(huge).toEqual({
       sidebarWidth: PANE_LIMITS.sidebar.max,
       terminalHeight: PANE_LIMITS.terminal.max,
+      agentRailWidth: PANE_LIMITS.agentRail.max,
     });
 
-    const tiny = parseLayout({ panes: { sidebarWidth: 1, terminalHeight: -10 } }).panes;
+    const tiny = parseLayout({
+      panes: { sidebarWidth: 1, terminalHeight: -10, agentRailWidth: 12 },
+    }).panes;
     expect(tiny).toEqual({
       sidebarWidth: PANE_LIMITS.sidebar.min,
       terminalHeight: PANE_LIMITS.terminal.min,
+      agentRailWidth: PANE_LIMITS.agentRail.min,
     });
   });
 
   it('falls back to the default pane sizes for anything that is not a number', () => {
     for (const panes of [null, {}, { sidebarWidth: '320' }, { sidebarWidth: Number.NaN }]) {
       expect(parseLayout({ panes }).panes.sidebarWidth).toBe(PANE_LIMITS.sidebar.default);
+    }
+    for (const agentRailWidth of ['320', Number.NaN, null, undefined]) {
+      expect(parseLayout({ panes: { agentRailWidth } }).panes.agentRailWidth).toBe(
+        PANE_LIMITS.agentRail.default,
+      );
     }
   });
 

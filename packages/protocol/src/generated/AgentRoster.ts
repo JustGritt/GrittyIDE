@@ -11,7 +11,7 @@ import type { AgentSession } from "./AgentSession";
  */
 export type AgentRoster = { sessions: Array<AgentSession>, 
 /**
- * How many are `WAITING` — the island's "needs you" count.
+ * How many are `BLOCKED` or `WAITING` — the island's "needs you" count.
  */
 needsYou: number, 
 /**

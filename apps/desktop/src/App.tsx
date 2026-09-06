@@ -3,6 +3,8 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { Splitter } from './components/splitter';
 import { boundsWithin } from './components/splitter-geometry';
 import { core } from './core/client';
+import { AgentRail } from './features/agents/agent-rail';
+import { useAgentRail } from './features/agents/use-agent-rail';
 import { useAgents } from './features/agents/use-agents';
 import { activeTab } from './features/documents/documents-reducer';
 import { useDocuments } from './features/documents/use-documents';
@@ -79,8 +81,25 @@ export function App() {
   // and the queue replaces the editor body; both read this one controller, so
   // answering a question in either clears it in the other.
   const workstreams = useWorkstreams(workspace);
-  // Machine-wide, so it takes no workspace and outlives changes of one.
+  // Machine-wide, so it takes no workspace and outlives changes of one. One
+  // controller for both surfaces that read it (T231): the rail is the primary
+  // one and the island keeps a count, and two rosters would drift apart.
   const agents = useAgents();
+  const rail = useAgentRail({
+    agents,
+    open: layout.agentRail.open,
+    onOpenChange: useCallback(
+      (open: boolean) =>
+        setLayout((current) => ({ ...current, agentRail: { ...current.agentRail, open } })),
+      [],
+    ),
+    // How a file the agent touched reaches the editor (T232). The rail is given
+    // the document store rather than its own way in, so opening from the
+    // timeline is the same `documents.status` / `documents.open` pair the
+    // explorer and the launcher already use.
+    documents,
+    workspaceId: workspace?.id ?? null,
+  });
   // What the previous window had open, for the launcher's resume rail (T051).
   // Asked for whenever no workspace is open, which is exactly when the
   // launcher is on screen — including after the user closes one mid-run.
@@ -179,6 +198,20 @@ export function App() {
       ),
     [],
   );
+  // The editor's minimum is measured against the sidebar as well, because on
+  // this axis the rail is the third pane rather than the second: what is left
+  // for the rail is the window minus the sidebar minus the editor.
+  const sidebarWidth = layout.panes.sidebarWidth;
+  const agentRailBounds = useCallback(
+    (root: HTMLElement) =>
+      boundsWithin(
+        root.clientWidth - sidebarWidth,
+        PANE_LIMITS.agentRail.min,
+        EDITOR_MIN_WIDTH,
+        PANE_LIMITS.agentRail.max,
+      ),
+    [sidebarWidth],
+  );
 
   return (
     <main
@@ -188,6 +221,7 @@ export function App() {
         {
           '--sidebar-width': `${layout.panes.sidebarWidth}px`,
           '--terminal-height': `${layout.panes.terminalHeight}px`,
+          '--agent-rail-width': `${layout.panes.agentRailWidth}px`,
         } as React.CSSProperties
       }
     >
@@ -220,7 +254,7 @@ export function App() {
           <AttentionQueue controller={workstreams} onClose={() => setQueueOpen(false)} />
         </div>
       ) : workspace ? (
-        <div className="shell__body">
+        <div className={`shell__body shell__body--rail${rail.open ? '' : '-collapsed'}`}>
           <aside className="shell__sidebar">
             <ExplorerPanel
               explorer={explorer}
@@ -254,6 +288,34 @@ export function App() {
             onRequestClose={closeFlow.request}
             onRequestCloseMany={closeFlow.requestMany}
           />
+          {/* Only while the rail is open, for the dock's reason: resizing a
+              collapsed pane means nothing and an invisible tab stop is worse
+              than no gutter. */}
+          {rail.open && (
+            <Splitter
+              orientation="vertical"
+              label="Resize the agent rail"
+              value={layout.panes.agentRailWidth}
+              fallback={PANE_LIMITS.agentRail.default}
+              // The rail is anchored to the right, so it grows as the pointer
+              // moves left — against the axis, like the dock.
+              direction={-1}
+              target={shell}
+              property="--agent-rail-width"
+              bounds={agentRailBounds}
+              onCommit={(agentRailWidth) =>
+                setLayout((current) => ({
+                  ...current,
+                  panes: { ...current.panes, agentRailWidth },
+                }))
+              }
+            />
+          )}
+          {/* The third region (T231): what the machine's agents are doing,
+              beside your code rather than instead of it. The island's ⌥ chords
+              win while it is open — there is no shortcut registry to arbitrate
+              for them. */}
+          <AgentRail agents={agents} rail={rail} chords={!islandOpen} />
         </div>
       ) : session.state.phase === 'ready' ? (
         <Launcher

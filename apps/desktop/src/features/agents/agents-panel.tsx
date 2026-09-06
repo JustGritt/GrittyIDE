@@ -1,130 +1,88 @@
-import type { AgentSession } from '@gritty/protocol';
-import { ErrorEnvelope } from '../../components/error-envelope';
-import {
-  activityLabel,
-  activityTone,
-  runningCount,
-  sessionsElsewhere,
-  sessionsHere,
-  taskLine,
-  toolLine,
-} from './agents-reducer';
+import { AgentIntegrationSettings } from './agent-integration-settings';
+import { AGENT_RAIL_CHORD_HINT } from './agent-rail-chords';
+import { AgentStatusBadge } from './agent-status-badge';
+import { mostUrgent, runningCount, taskLine } from './agents-reducer';
 import type { AgentsController } from './use-agents';
 
 /**
- * The agent roster inside the island (T220).
+ * The agent roster inside the island — reduced to a count and one row (T231 §7).
  *
- * Deliberately read-only. Every row is something another terminal owns, so
- * there is no button here that acts on one — the pid and the tty are shown
- * precisely so the user can go and find it themselves. When Gritty runs agents
- * of its own (T300) those get their own rows, with controls, and this section
- * keeps meaning "everything else".
+ * The rail is the primary surface now. The island keeps the summary because it
+ * is always on screen, and keeps the single row worth interrupting for so the
+ * user does not have to open the rail to learn there is nothing to do. It does
+ * *not* keep a roster of its own: it reads the same `AgentsController` the rail
+ * does, so the two cannot report different counts.
+ *
+ * Still deliberately read-only. Every session here is one another terminal
+ * owns; nothing in Gritty starts, stops or answers one.
  */
 export function AgentsSection({ controller }: { controller: AgentsController }) {
   const { roster, loaded } = controller;
-  const here = sessionsHere(roster);
-  const elsewhere = sessionsElsewhere(roster);
+  const urgent = mostUrgent(roster);
+  const running = runningCount(roster);
 
   return (
     <section className="agents" aria-label="Agent sessions on this machine">
       <div className="agents__head">
         <span className="agents__title">Agents</span>
         <span className="island__spacer" />
-        <button
-          type="button"
-          className="btn--bare"
-          onClick={() => void controller.refresh()}
-          disabled={controller.busy}
-        >
-          {controller.busy ? 'Scanning…' : 'Rescan'}
-        </button>
+        {/* Where the rest of them are. No control, just the way in — the rail
+            is a read, and so is this. */}
+        <span className="agents__hint">
+          The rail lists them all <kbd className="island__chord">{AGENT_RAIL_CHORD_HINT}</kbd>
+        </span>
+        {/* The hook integration (T221) lives here, in settings, and not as a
+            control on a session row: it changes a file the user owns, and that
+            is a decision about the machine rather than about any one session
+            (ADR-018 §1). It reads nothing until it is opened. */}
+        <AgentIntegrationSettings />
       </div>
 
-      {controller.error && (
-        <div className="island__error">
-          <ErrorEnvelope error={controller.error} onDismiss={controller.clearError} />
-        </div>
-      )}
-
-      {/* The process table was unreadable, so every row would read as ended
-          whether or not it is. Say that instead of asserting the machine is
-          quiet — the roster cannot tell the difference. */}
-      {loaded && !roster.processEvidence && (
-        <p className="agents__note">
-          Cannot read the process list, so nothing can be shown as running. Sessions below come from
-          their transcripts alone.
-        </p>
-      )}
-
-      {!loaded ? (
+      {/* The envelope itself belongs to the rail, which is where the rescan
+          is; saying nothing here would leave the island claiming to still be
+          looking when the scan already failed. */}
+      {controller.error && !loaded ? (
+        <p className="island__empty">The agent roster could not be read. The rail says why.</p>
+      ) : !loaded ? (
         <p className="island__empty">Looking for agent sessions…</p>
       ) : roster.sessions.length === 0 ? (
         <p className="island__empty">
-          No agent sessions found. Gritty looks for coding agents running in your own terminals — it
-          does not start them, and it changes nothing about how they run.
+          No agent sessions found. Gritty looks for coding agents running in your own terminals.
         </p>
       ) : (
         <>
-          {here.length > 0 && (
-            <div className="agents__group">
-              <p className="agents__group-title">In this workspace</p>
-              {here.map((session) => (
-                <AgentRow key={session.id} session={session} />
-              ))}
-            </div>
-          )}
-          {elsewhere.length > 0 && (
-            <div className="agents__group">
-              <p className="agents__group-title">Elsewhere on this machine</p>
-              {elsewhere.map((session) => (
-                <AgentRow key={session.id} session={session} showRoot />
-              ))}
+          <p className="agents__summary">
+            {roster.processEvidence ? (
+              `${running} running of ${roster.sessions.length}`
+            ) : (
+              // Without the process table every session reads as ended, so a
+              // "running" count here would be a claim the roster cannot make.
+              <span className="agents__note">
+                {roster.sessions.length} found; the process list is unreadable
+              </span>
+            )}
+            {roster.needsYou > 0 && (
+              <span className="island__needs"> · {roster.needsYou} needs you</span>
+            )}
+          </p>
+          {urgent && (
+            <div className="agents__row">
+              <div className="agents__body">
+                <div className="agents__line">
+                  <span className="agents__task">
+                    {taskLine(urgent) ?? <em className="agents__unknown">No transcript yet</em>}
+                  </span>
+                </div>
+                <div className="agents__meta">
+                  <AgentStatusBadge activity={urgent.activity} />
+                  {urgent.root && <span>{urgent.root}</span>}
+                </div>
+              </div>
             </div>
           )}
         </>
       )}
     </section>
-  );
-}
-
-/**
- * One session: what it is doing, what it is doing it to, and where to find it.
- *
- * Everything textual here came out of a transcript, which is untrusted input.
- * It arrives already bounded and whitespace-collapsed by the core and is
- * rendered as text, never as markup and never as a path anything opens.
- */
-function AgentRow({ session, showRoot = false }: { session: AgentSession; showRoot?: boolean }) {
-  const task = taskLine(session);
-  const tool = toolLine(session);
-
-  return (
-    <div className={`agents__row agents__row--${activityTone(session.activity)}`}>
-      <span
-        className={`island__dot island__dot--${activityTone(session.activity)}`}
-        aria-hidden="true"
-      />
-      <div className="agents__body">
-        <div className="agents__line">
-          <span className="agents__task">
-            {task ?? <em className="agents__unknown">No transcript yet</em>}
-          </span>
-          <span className="agents__activity">{activityLabel(session.activity)}</span>
-        </div>
-        <div className="agents__meta">
-          {showRoot && session.rootName && <span title={session.root}>{session.rootName}</span>}
-          {session.gitBranch && <span>{session.gitBranch}</span>}
-          {session.model && <span>{session.model}</span>}
-          {session.tty && <span>{session.tty}</span>}
-          {session.pid !== undefined && <span>pid {session.pid}</span>}
-        </div>
-        {tool && (
-          <div className="agents__tool" title={tool}>
-            {tool}
-          </div>
-        )}
-      </div>
-    </div>
   );
 }
 

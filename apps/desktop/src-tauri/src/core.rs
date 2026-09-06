@@ -104,7 +104,8 @@ impl Core {
         let file_drop = FileDropService::new(events.clone(), workspaces.clone());
         // Synchronous: a small database opens in milliseconds and the window
         // geometry must be known before the window shows.
-        let store = match options.data_dir {
+        let data_dir = options.data_dir;
+        let store = match data_dir.as_deref() {
             Some(dir) => SessionStore::open(&dir.join(DB_FILE_NAME)),
             None => SessionStore::unavailable("no application data directory is available"),
         };
@@ -130,11 +131,19 @@ impl Core {
         // Discovery of *other* agents on this machine (T220). Read-only, and
         // started here rather than lazily so the roster is warm by the time the
         // island first asks for it.
+        //
+        // The hook reader (T221) is pointed at the same application-data
+        // directory the session database lives in, and at this build's own hook
+        // binary. Both may be absent — no data directory, or a build whose
+        // binary is not beside the executable — and the integration is then
+        // simply not offered rather than half-wired.
         let agents = AgentSessionManager::start(
             handle,
             events,
             workspaces.clone(),
-            AgentDiscoveryConfig::for_current_home(),
+            AgentDiscoveryConfig::for_current_home()
+                .with_data_dir(data_dir.as_deref())
+                .with_hook_binary(resolve_hook_binary()),
         );
         Self {
             registry,
@@ -173,6 +182,43 @@ impl Core {
             }
             self.registry.shutdown(SHUTDOWN_GRACE).await;
         });
+    }
+}
+
+/// Environment variable naming this build's `gritty-agent-hook` (dev, tests).
+pub const HOOK_BINARY_ENV: &str = "GRITTY_AGENT_HOOK";
+
+/// Where this build's agent hook binary is (T221).
+///
+/// `GRITTY_AGENT_HOOK` first, then a sibling of the running executable — which
+/// is what `cargo run`, `target/debug` and a macOS bundle's `MacOS/` directory
+/// all give. `None` when it is not there, and the integration is then reported
+/// as unavailable rather than installed as an entry that would point at
+/// nothing (ADR-018's uninstall obligation, from the other end).
+///
+/// This does **not** yet resolve a bundled sidecar resource: bundling the hook
+/// into the installer is a packaging change `pnpm check` does not exercise, and
+/// claiming it works without having run a bundle would be exactly the kind of
+/// claim rule 12 forbids. It is recorded as follow-up work in T221.
+pub fn resolve_hook_binary() -> Option<PathBuf> {
+    const HOOK_BINARY_NAME: &str = "gritty-agent-hook";
+    if let Some(path) = std::env::var_os(HOOK_BINARY_ENV).filter(|value| !value.is_empty()) {
+        let path = PathBuf::from(path);
+        tracing::info!(path = %path.display(), "agent hook binary from {HOOK_BINARY_ENV}");
+        return Some(path);
+    }
+    let beside = std::env::current_exe()
+        .ok()?
+        .parent()?
+        .join(HOOK_BINARY_NAME);
+    if beside.is_file() {
+        Some(beside)
+    } else {
+        tracing::debug!(
+            path = %beside.display(),
+            "no agent hook binary; the hook integration is not offered"
+        );
+        None
     }
 }
 
