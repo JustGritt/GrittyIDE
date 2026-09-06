@@ -112,7 +112,11 @@ pub struct OwnershipLease {
     pub stale: bool,
 }
 
-/// Where a refused request has got to.
+/// Where a refusal — or a violation — has got to.
+///
+/// Two of these are *open*: [`Self::Waiting`] and [`Self::Observed`], which is
+/// what [`Self::is_open`] answers and what the attention queue draws. The other
+/// two are the record of what was decided.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ConflictState {
@@ -126,6 +130,19 @@ pub enum ConflictState {
     Cancelled,
     /// The user took the lease off its holder, deliberately and on the record.
     Overridden,
+    /// A write that already landed on somebody else's ground (T326).
+    ///
+    /// The other four describe a request that was *refused before* the work
+    /// started. This one points the other way in time: nothing was refused,
+    /// nothing was blocked, and the file was written. It is a state on this row
+    /// rather than a table of its own because "someone is in someone else's
+    /// way" is one shape, and the queue, the island and the panel already read
+    /// it — T326 §§6-7.
+    ///
+    /// `requested_by` is the workstream whose session did the writing, and
+    /// `target` is the one file it touched, never the pattern the holder
+    /// claimed.
+    Observed,
 }
 
 impl ConflictState {
@@ -134,6 +151,7 @@ impl ConflictState {
         Self::Resolved,
         Self::Cancelled,
         Self::Overridden,
+        Self::Observed,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -142,7 +160,17 @@ impl ConflictState {
             Self::Resolved => "RESOLVED",
             Self::Cancelled => "CANCELLED",
             Self::Overridden => "OVERRIDDEN",
+            Self::Observed => "OBSERVED",
         }
+    }
+
+    /// Whether the user has still to deal with this one.
+    ///
+    /// Both open states are closed by the same paths — the lease is released,
+    /// it is overridden, or the user dismisses the row — which is why
+    /// `close_conflict` and `close_conflicts_for_lease` match on both.
+    pub const fn is_open(self) -> bool {
+        matches!(self, Self::Waiting | Self::Observed)
     }
 
     pub fn parse(raw: &str) -> Result<Self, CoreError> {

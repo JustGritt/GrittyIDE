@@ -165,7 +165,11 @@ impl Core {
                 // Attention notifications (T223). Off until the user turns
                 // them on; passing the notifier only makes the setting
                 // *offerable*, and arms nothing.
-                .with_notifier(Some(notifier)),
+                .with_notifier(Some(notifier))
+                // The registry a touched file is checked against (T326). It
+                // notices a write after it happened; it does not stop one, and
+                // a build without a session database simply finds nothing.
+                .with_ownership(Some(ownership.clone())),
         );
         Self {
             registry,

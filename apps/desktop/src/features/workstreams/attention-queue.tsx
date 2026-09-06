@@ -18,7 +18,14 @@ import {
   waitedFor,
 } from './attention';
 import { DecisionCard } from './island';
-import { targetLabel } from './ownership';
+import {
+  conflictCancelLabel,
+  conflictHeadline,
+  conflictHint,
+  conflictResolutions,
+  conflictSummary,
+  targetLabel,
+} from './ownership';
 import { RaiseQuestion } from './raise-question';
 import type { WorkstreamsController } from './use-workstreams';
 
@@ -255,7 +262,10 @@ function rowBody(item: AttentionItem): string {
     case 'review':
       return 'Finished and handed back for your review.';
     case 'conflict':
-      return `Wants ${targetLabel(item.conflict.target)}, owned by ${item.owner.title}.`;
+      // A refusal and a violation read differently, because they are different
+      // things: one was stopped before it happened, the other was not stopped
+      // at all (T326 §12).
+      return conflictSummary(item.conflict, item.owner.title);
   }
 }
 
@@ -361,7 +371,7 @@ function QueueDetail({
         )}
         {item.kind === 'conflict' && (
           <>
-            <dt>Wants</dt>
+            <dt>{item.conflict.state === 'OBSERVED' ? 'Wrote' : 'Wants'}</dt>
             <dd>{targetLabel(item.conflict.target)}</dd>
             <dt>Owned by</dt>
             <dd>{item.owner.title}</dd>
@@ -408,12 +418,17 @@ function QueueDetail({
 }
 
 /**
- * A refusal, and the two ways out of it (T325).
+ * A refusal, and the two ways out of it (T325) — or a violation, and the one
+ * way out of that (T326).
  *
  * There is no "grant it to me" button. Releasing the holder's claim is a
  * separate act from taking the ground, so that an override is never a silent
  * transfer — the requester asks again, and that second ask goes through the
  * same check as the first.
+ *
+ * On a violation the override is absent rather than present and refused: there
+ * is no pending request to unblock, the core answers `InvalidInput`, and a
+ * button that only ever produces an error is worse than no button.
  */
 function ConflictCard({
   item,
@@ -422,10 +437,11 @@ function ConflictCard({
   item: Extract<AttentionItem, { kind: 'conflict' }>;
   controller: WorkstreamsController;
 }) {
+  const verbs = conflictResolutions(item.conflict);
   return (
     <div className="island__card island__card--conflict">
       <div className="island__card-body">
-        {item.workstream.title} wants to modify {targetLabel(item.conflict.target)}.
+        {conflictHeadline(item.conflict, item.workstream.title, item.owner.title)}
       </div>
       <dl className="queue__facts">
         <dt>Currently owned by</dt>
@@ -439,21 +455,21 @@ function ConflictCard({
           disabled={controller.busy}
           onClick={() => void controller.resolveConflict(item.conflict.id, 'CANCEL')}
         >
-          Withdraw the request
+          {conflictCancelLabel(item.conflict)}
         </button>
         <span className="queue__spacer" />
-        <button
-          type="button"
-          className="btn--bare"
-          disabled={controller.busy}
-          onClick={() => void controller.resolveConflict(item.conflict.id, 'OVERRIDE')}
-        >
-          Release {item.owner.title}'s claim
-        </button>
+        {verbs.includes('OVERRIDE') && (
+          <button
+            type="button"
+            className="btn--bare"
+            disabled={controller.busy}
+            onClick={() => void controller.resolveConflict(item.conflict.id, 'OVERRIDE')}
+          >
+            Release {item.owner.title}'s claim
+          </button>
+        )}
       </div>
-      <p className="queue__meta">
-        Releasing it does not hand the ground over: {item.workstream.title} has to claim it again.
-      </p>
+      <p className="queue__meta">{conflictHint(item.conflict, item.workstream.title)}</p>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 # Task T326 — Ownership notices a violation after it happens, not before
 
 - **Phase:** 4
-- **Status:** todo
+- **Status:** review
 - **Depends on:** T230 (`FileTouched` timeline entries, on `main`), T325
   (the ownership registry, ADR-019), T223 (session→workstream link, landing
   in parallel — depend on its table's shape, not its code)
@@ -224,11 +224,241 @@ pnpm check
 
 ## Completion report
 
-_(filled in by the implementing session)_ — with obligations beyond the
-template: state which Failure-behavior rows a real test exercised versus
-reasoned about only, naming the ring-overflow row either way (rule 12);
-flag where §2 guessed wrong against the shape T223 actually landed with;
-confirm persistence changed by exactly §8's two widened clauses and nothing
-else; and argue the §6/§7 `ConflictState`-reuse trade in Architectural
-decisions — a reviewer disagreeing with that call is the most likely reason
-this task returns from review.
+### Summary
+
+The registry now notices a write it could not refuse. Every tick of the agent
+rail already produces a delta of what each session did; the `FileTouched`
+entries in it are cross-checked against the leases the registry still holds,
+attributed through T223's `(provider, session_id)` link, and a write that
+landed inside another workstream's lease is persisted as an ordinary
+`OwnershipConflict` in a fourth `ConflictState`, `OBSERVED`.
+
+**Nothing here stops a write, and the shipped words still say so.** The detector
+runs after the fact, `ownership.md` lines 17–26 are unchanged, and the panel's
+sentence about observation rather than protection is untouched. What changed in
+that document is line 30, which was a future conditional and is now a
+description.
+
+No new command, no new event, no new capability line, no new table, no new
+column, and **no migration**: `SCHEMA_VERSION` stays at 4. `agents.timeline` is
+unchanged, and the registry does not subscribe to it — §1's point is that a
+read for a human is not a feed for a checker, so detection rides the delta the
+rail already emits.
+
+### Files changed
+
+| File | What |
+|---|---|
+| `crates/gritty-core/src/ownership/wire.rs` | `ConflictState::Observed`, and `is_open()` for the two states that are still the user's problem |
+| `crates/gritty-core/src/ownership/mod.rs` | `OwnershipManager::observe_touches` — the whole detection pass, in one transaction; `OVERRIDE` on an `OBSERVED` row refused; module doc |
+| `crates/gritty-core/src/ownership/tests.rs` | 16 tests for the pass (below) |
+| `crates/gritty-core/src/agent_session/mod.rs` | `AgentDiscoveryConfig::ownership` + `with_ownership`; `touched_paths`; `observe_ownership`, called from `follow_once` *after* the rail's own batches are emitted |
+| `crates/gritty-core/src/agent_session/tests.rs` | the `ViolationRig` (workspace + database + transcript), 4 whole-tick tests, and the `touched_paths` unit test |
+| `crates/persistence/src/store.rs` | **exactly** the two widened `WHERE` clauses of §8, plus the `OBSERVED` constant they interpolate. Nothing else in `crates/persistence/` is touched: no file, no column, no migration |
+| `apps/desktop/src-tauri/src/core.rs` | one builder call wiring the registry to the rail |
+| `apps/desktop/src/features/workstreams/ownership.ts` | `waitingConflicts` widened; `isViolation`, `conflictHeadline`, `conflictSummary`, `conflictResolutions`, `conflictCancelLabel`, `conflictHint` |
+| `apps/desktop/src/features/workstreams/attention-queue.tsx` | the row, the card and the fact list read those functions; the `OVERRIDE` button is absent on a violation rather than present and refused |
+| `apps/desktop/src/features/workstreams/{ownership,attention}.test.ts` | the TS tests below |
+| `crates/gritty-core/src/protocol/mod.rs` | `PROTOCOL_VERSION` 2.12.0 → **2.15.0**, claimed in `docs/merge-queue.md` |
+| `packages/protocol/src/generated/{ConflictState,version}.ts` | written by `cargo test -p gritty-core`, never by hand |
+| `docs/architecture/ownership.md` | line 30 stops being a conditional; the conflict states, the `resolve` row and "deliberately not here" follow it |
+
+`apps/desktop/src/features/workstreams/attention-queue.tsx` is **one file
+outside the spec's Allowed-scope list** (§ "Allowed scope" names
+`ownership-panel.tsx`). The conflict row and card are drawn there, not in the
+panel, so "render `OBSERVED`" is not satisfiable without it. Every word it
+gained comes from a pure function in `ownership.ts`, which is in scope and is
+what the tests assert; the `.tsx` edit is the call sites. `ownership-panel.tsx`
+and `ownership-reducer.ts` needed no change at all — the reducer replaces a
+whole map, and the panel draws leases.
+
+### Tests actually executed
+
+`cargo test -p gritty-core --lib` — **341 passed, 0 failed**.
+`pnpm check:rust` (`cargo fmt --check`, `clippy --workspace --all-targets -D
+warnings`, `cargo test --workspace`) — **exit 0**, every crate green,
+`gritty-terminal` included (the known `pty.rs` flake did not fire).
+`pnpm typecheck` — exit 0. `pnpm lint` — clean after `pnpm format`.
+`pnpm vitest run apps/desktop/src/features/workstreams` — **82 passed**.
+
+`pnpm check` as a whole is **red, on two failures that are not this work**:
+
+- `packages/editor/src/monaco/model-eol.dom.test.ts` — `beforeAll` hook times
+  out loading Monaco at 10 s. Verified pre-existing: stashed to the bare base
+  commit `e8ada81` and it fails identically. Nothing here touches
+  `packages/editor`.
+- `packages/markdown/src/render.test.ts` "within budget" — a 2 000 ms wall-clock
+  assertion, measured 2 530–2 900 ms with five agents building on this machine.
+  Passes in isolation (`pnpm vitest run --project markdown`, 54 passed).
+
+The desktop crate also needs T225's sidecar staged at
+`apps/desktop/src-tauri/binaries/gritty-agent-hook-aarch64-apple-darwin` before
+`cargo clippy --workspace` will build it at all. That path is git-ignored and
+T225 is still in review, so it was built and copied by hand for this run.
+
+#### Which failure-behavior rows a real test exercised
+
+| Row | Test |
+|---|---|
+| No link for the touching session | `an_unlinked_session_touching_owned_ground_is_nobodys_violation`, and `attribution_is_by_session_and_not_by_anything_else` for the key |
+| No open workspace | `no_open_workspace_finds_no_violation` |
+| The entry's `path` is absent | `only_a_resolved_touched_path_is_checked` — over `touched_paths` directly, with a no-path entry, an unrelated kind, and a repeat |
+| Touch overlaps a lease the same workstream holds | `a_write_on_your_own_ground_is_not_a_violation` |
+| Touch overlaps several leases | `a_write_under_two_leases_of_one_holder_is_one_row_for_each` |
+| Session links to several workstreams | `a_session_on_two_workstreams_is_checked_once_per_link` |
+| Overlapping lease is `EXPIRED` | `an_expired_lease_is_not_violated` |
+| Released before the check ran | `a_lease_released_before_the_check_is_not_violated` |
+| The same violation recurs every tick | `a_write_on_another_workstreams_ground_is_recorded_once` — ten further ticks, one row, no event |
+| **A tick absorbs more than the ring holds** | **`a_tick_over_the_ring_checks_only_what_survived_it` — a real test, not reasoning.** 540 touches into a 500-entry ring, through a real `absorb`: the batch reports `dropped > 0`, the detector receives exactly `MAX_TIMELINE_ENTRIES` paths, and the oldest (`src/auth/f0.ts`) is in neither the batch nor the rows. The gap §1 predicted is real and is now pinned |
+| No database this tick | `no_database_finds_no_violation` |
+| Violated lease released, or overridden | `releasing_a_violated_lease_resolves_its_observed_row` (which also asserts an unrelated `WAITING` row on another lease is untouched), `overriding_the_violated_lease_resolves_its_observed_row` |
+| `resolve(OVERRIDE)` on `Observed` | `override_on_an_observed_violation_is_invalid_input` — and asserts the refusal changed nothing: the lease still holds, the row is still open |
+| `MAX_CONFLICTS` reached | exercised, though not by a test written for it: the ring test's 500 surviving touches write 500 rows and the map returns 200. See Known limitations |
+
+Also tested and not in the table: `cancel_dismisses_an_observed_violation` (and
+that a later write raises it again — acknowledging is not silencing),
+`a_tick_with_no_touched_files_does_nothing`,
+`two_files_under_one_lease_are_two_rows`,
+`removing_the_toucher_removes_its_observed_rows` (T325's cascade, inherited).
+
+Whole-tick tests: `one_tick_records_a_violation_and_says_so_once`,
+`a_touch_outside_every_lease_records_nothing`,
+`without_a_registry_the_rail_is_unchanged`.
+
+TS: `waitingConflicts` returns both open states; `attentionItems` files a
+violation as the same `conflict` kind under the same filter (and
+`attentionCount` counts it); the two headlines and summaries differ in tense;
+neither says *locked* or *blocked*; `conflictResolutions` returns `['CANCEL']`
+for a violation and both verbs for a refusal.
+
+**Manual: none claimed.** As T325 recorded, no session here has a screen.
+
+### Architectural decisions
+
+**§6/§7 — a fourth `ConflictState` rather than a new table or column.** This is
+the call most likely to bring the task back from review, so here is the case.
+
+A violation and a refusal answer the same question — *who is in whose way, over
+what ground, and what do you want to do about it* — with the same five facts:
+who, whom, which lease, which target, when. They differ in one thing, tense:
+one is a request that was stopped, the other a write that was not. A state is
+exactly the right size for that difference. A second table would make the
+attention queue, the island, the panel and the reducer each learn a second
+shape for one concept, and every later change to "someone is in someone else's
+way" would then have two places to be got right.
+
+The `state` column is unconstrained `TEXT` with no `CHECK` (`0003_ownership.sql`
+lines 40–53), so the fourth value costs one match arm and no migration. Every
+write goes through `insert_conflict`, which T325 already tested. The cascade,
+the bound and the ordering are inherited rather than re-derived.
+
+The cost, stated plainly: `OwnershipConflict.requestedBy` now means "the
+workstream that asked" *or* "the workstream that wrote", and `target` means
+"what was asked for" *or* "the file that was written". Two readings of two
+fields, disambiguated by `state`. That is real, and it is why the UI never
+renders a conflict without branching on `state` first. The alternative price
+was two shapes for one idea, and this seemed the cheaper of the two.
+
+If review disagrees: a new column or table needs migration `0005`, which
+`docs/merge-queue.md` still holds for T326 and which this branch has **not**
+spent, so it is free for exactly that.
+
+**Attribution is the link and nothing else.** No matching on working directory,
+title or process. A session with no link resolves to zero workstreams and
+writes nothing — T325's own note already ruled that a violation nobody can
+attribute is not one, and guessing an attribution would put a workstream's name
+on a row it may not have earned (rule 4).
+
+**Direction of the dependency.** `agent_session` hands the ownership manager
+what a tick produced; the registry does not read `agents.timeline`. That keeps
+the *rail* the single place a transcript is followed, and it is why the check
+cannot cost a second scan. The seam is `AgentDiscoveryConfig::with_ownership`,
+so a build with no session database wires nothing and the rail is byte-for-byte
+what T230 shipped (`without_a_registry_the_rail_is_unchanged`).
+
+**Where in the tick.** The check runs *after* the rail's own batches are
+emitted, so the agent view never waits on SQLite, and it is `spawn_blocking`
+like every other ownership command. A failure is logged at `debug` and costs
+that tick only.
+
+**`Actor::System` on the event.** Not `Agent`: nothing constructs an
+`AgentRunId` for a session Gritty merely observes (ADR-019 §2). Not `External`:
+the write was external, but the row is Gritty's own record of having noticed.
+The rail's other machine-observed events already use `System`.
+
+**`OVERRIDE` is absent, not disabled.** The core answers `InvalidInput`; the UI
+does not render a button whose only outcome is an error. `CANCEL` is relabelled
+"Acknowledge", because withdrawing a request you never made is not what the
+user is doing.
+
+### §2 against the shape T223 actually landed with
+
+§2 guessed right, and the guess cost nothing. `workstream_agent_link
+(workstream_id, provider, session_id, linked_at)` landed exactly as specified
+in migration `0004_agent_links.sql`, with `agent_links::list_for_workspace`
+joining through `workstream` for the workspace filter — so the detector reads
+one function that already existed rather than adding a query. `provider` is
+stored as `AgentProvider::as_str()`, which is the same spelling the roster
+carries, so the `(provider, session_id)` comparison needs no translation.
+
+Nothing in §2 had to be corrected.
+
+### Persistence: exactly §8, and nothing else
+
+`git diff crates/persistence/` is three hunks in one file, `src/store.rs`:
+`close_conflict`'s `WHERE` and `close_conflicts_for_lease`'s `WHERE` each widen
+from `state = '{WAITING}'` to `state IN ('{WAITING}', '{OBSERVED}')`, plus the
+`pub const OBSERVED` those two clauses interpolate. No new file under
+`src/migrations/`, no change to `migrations.rs`, `SCHEMA_VERSION` still 4.
+
+### Known limitations
+
+- **The conflict table can now grow without a user doing anything.** Before
+  this, a row appeared only when somebody called `ownership.acquire`; now an
+  agent writing 500 distinct files inside a lease writes 500 rows in one tick.
+  Dedup stops repeats but not distinct files, and `list_conflicts` reads only
+  the newest `MAX_CONFLICTS` (200) — so above 200 open rows the dedup window
+  truncates and a violation already recorded can be recorded again. §"Failure
+  behavior" ruled the bound "inherited risk, not new" and this honours that
+  literally rather than inventing a second one; the ring test pins the
+  behaviour. Follow-up below.
+- **A violation is only as trustworthy as the agent's own report.** Gritty
+  cannot verify a provider touched no more than it said. An absent row is not
+  evidence of no write.
+- **Case folding.** Inherited from `WorkspacePath` (ADR-019 §5): on a
+  case-insensitive volume `src/Auth.ts` and `src/auth.ts` are one file and two
+  targets, so a write to one does not violate a lease on the other.
+- **Nothing is attributed without a link**, which in practice means a user has
+  to have attached the session in the island first. Until they do, the registry
+  protects nothing it can name.
+- **No test drives the real desktop app.** The check is exercised through
+  `follow_once` with a scratch transcript; no session here has a screen.
+
+### Follow-up tasks
+
+1. **Bound observed rows per workspace.** Either cap insertions against the
+   open-row count, or age them out, or count opens in SQL instead of paging
+   `list_conflicts`. Needs a decision about what to drop, which is why it is not
+   in this task.
+2. **Dedup without the 200-row read window.** A `state`-parameterised sibling of
+   `waiting_conflict` would make §9 exact at any table size — a new persistence
+   query, which §9 explicitly declined here.
+3. **Group a violation burst in the queue.** Twelve files under one lease are
+   twelve rows and one story; the queue has no notion of a group.
+4. **`agents.timeline` could mark an entry as having violated something**, so
+   the rail shows it where the user is already looking. Needs the rail to read
+   ownership, which this task deliberately did not wire.
+5. **T330 still needs the ADR-018 amendment** (ADR-018A is on the board).
+   Detection makes the case for it concrete: every `OBSERVED` row is a write
+   enforcement would have stopped.
+
+### Remaining risks
+
+- The §6 trade is a judgement, not a fact; a reviewer preferring a table has a
+  real argument and migration `0005` is unspent for it.
+- `pnpm check` is red on two failures verified as not this work, one of them by
+  reproducing it on the bare base commit. A reviewer should confirm both
+  independently rather than take this on trust.
+- The detector's cost is one link read, one lease read and one conflict read per
+  tick **that touched a file** — nothing when no file was written, which is the
+  common case. Not measured under a real agent writing continuously.

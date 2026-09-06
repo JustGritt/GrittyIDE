@@ -21,13 +21,18 @@
 //!   it may be said to do. Stopping a write before it happens needs an agent
 //!   that offers a pre-write hook Gritty may answer, which ADR-018 currently
 //!   forbids its hook from doing (T330);
-//! - **detecting that an agent wrote to owned ground anyway** (T326): it needs
-//!   to know which workstream a running session belongs to, which is T223;
 //! - **worktrees** (T400). Two workstreams in separate trees cannot collide on
 //!   the filesystem at all; what they can still do is collide on merge, which
 //!   is a review conflict and not this;
 //! - **scheduling** (T405): comparing a workstream's intended scope against the
 //!   registry *before* an agent starts.
+//!
+//! What *is* here, and was not in T325: **noticing that an agent wrote to owned
+//! ground anyway** (T326). [`OwnershipManager::observe_touches`] cross-checks
+//! the files the agent rail reported against the registry, attributed through
+//! T223's session→workstream link, and records what it finds as a fourth
+//! [`ConflictState`], `Observed`. It runs *after* the write, never before it,
+//! so the paragraph above still holds in full: this notices, it does not stop.
 //!
 //! Storage is the session database (T060), one migration chain, keyed by the
 //! canonical workspace root like every other table there. Every command reads
@@ -36,12 +41,15 @@
 pub mod target;
 pub mod wire;
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
-use gritty_persistence::store::{ownership, workstreams};
+use gritty_persistence::store::{agent_links, ownership, workstreams};
 use gritty_persistence::{Connection, Database, PersistenceError, now_ms};
+use gritty_workspace::WorkspacePath;
 use tokio::runtime::Handle;
 
+use crate::agent_session::AgentProvider;
 use crate::event::{CoreEvent, EventBus, EventOrigin};
 use crate::protocol::actor::Actor;
 use crate::protocol::error::{CoreError, CoreErrorCode};
@@ -60,6 +68,12 @@ pub use wire::{
     OwnershipConflict, OwnershipLease, OwnershipMap, OwnershipMode, ReleaseOwnershipRequest,
     ResolveConflictRequest,
 };
+
+/// What makes two observed violations the same one (T326 §9):
+/// `(requested_by, holding_lease_id, target_kind, target_pattern)`. The state
+/// is not in the key because only unresolved `OBSERVED` rows are ever put in
+/// the set — a violation the user has dealt with does not suppress the next.
+type ObservedKey = (String, String, String, String);
 
 /// Owns the ownership domain. One per process, managed by the composition root
 /// next to the workstream manager it shares a database with.
@@ -325,12 +339,187 @@ impl OwnershipManager {
         .await
     }
 
+    /// T326: a session said it wrote these files. Record the ones that landed
+    /// on another workstream's ground.
+    ///
+    /// **This notices, it does not stop.** By the time this runs the write has
+    /// happened; ownership is still *observed* and not enforced, and
+    /// `docs/architecture/ownership.md` lines 17-26 say so where the user can
+    /// read it. Stopping the write is T330 and needs an ADR-018 amendment
+    /// first.
+    ///
+    /// It is not a command. It rides the per-tick delta the agent rail already
+    /// produces (`AgentTimelineAppended`), so it costs no scan of its own and
+    /// no second feed — and a tick that finds nothing writes nothing and emits
+    /// nothing (rule 8). No database, no open workspace or no link means no
+    /// finding, which is not a failure: a violation nobody can attribute is not
+    /// one.
+    ///
+    /// Attribution is by `(provider, session_id)` — the pair T223's link is
+    /// keyed on — never by working directory or title, so nothing is guessed
+    /// (rule 4).
+    ///
+    /// Returns how many rows it wrote, which is what the tests assert and what
+    /// decides whether an event is emitted at all.
+    pub async fn observe_touches(
+        self: &Arc<Self>,
+        provider: AgentProvider,
+        session_id: String,
+        paths: Vec<WorkspacePath>,
+    ) -> Result<usize, CoreError> {
+        if paths.is_empty() || self.database.is_none() {
+            return Ok(0);
+        }
+        // The one workspace whose leases these paths could be in: `FileTouched`
+        // only carries a path when the file is inside the open root, so a
+        // second workspace cannot be the subject of this batch.
+        let correlation = CorrelationId::new();
+        let Some((workspace_id, _root)) = self.workspaces.current_open() else {
+            return Ok(0);
+        };
+        let Ok(root) = self.root_of(&workspace_id, &correlation) else {
+            // Closed between the tick and here. Nothing to check against.
+            return Ok(0);
+        };
+        let for_event = workspace_id.clone();
+
+        let (recorded, map) = self
+            .blocking(move |db| {
+                db.write(|tx| {
+                    // T223's link, and only it. A session nobody attached to a
+                    // piece of work resolves to zero workstreams.
+                    let mut candidates: Vec<String> = agent_links::list_for_workspace(tx, &root)?
+                        .into_iter()
+                        .filter(|link| {
+                            link.provider == provider.as_str() && link.session_id == session_id
+                        })
+                        .map(|link| link.workstream_id)
+                        .collect();
+                    candidates.sort_unstable();
+                    candidates.dedup();
+                    if candidates.is_empty() {
+                        return Ok((0, None));
+                    }
+
+                    let now = now_ms();
+                    let held = ownership::list_held(tx, &root)?;
+                    let active: Vec<&ownership::HeldLease> = held
+                        .iter()
+                        .filter(|entry| still_holds(&entry.lease, now))
+                        .collect();
+                    if active.is_empty() {
+                        return Ok((0, None));
+                    }
+
+                    // §9: one row per violation, not one per tick. `waiting_conflict`
+                    // hardcodes `state = WAITING` and cannot answer this, so the
+                    // dedup filters in Rust rather than adding a second query —
+                    // and the same set absorbs repeats *within* this batch.
+                    let mut seen: HashSet<ObservedKey> =
+                        ownership::list_conflicts(tx, &root, MAX_CONFLICTS as i64)?
+                            .into_iter()
+                            .filter(|row| row.state == ownership::OBSERVED)
+                            .map(|row| {
+                                (
+                                    row.requested_by,
+                                    row.holding_lease_id,
+                                    row.target_kind,
+                                    row.target_pattern,
+                                )
+                            })
+                            .collect();
+
+                    let mut recorded = 0usize;
+                    for workstream_id in &candidates {
+                        for path in &paths {
+                            let target = OwnershipTarget::File { path: path.clone() };
+                            for entry in &active {
+                                // Overlapping your own ground is not a
+                                // violation, exactly as it is not a conflict on
+                                // acquisition: nothing is protected from its
+                                // holder.
+                                if &entry.lease.workstream_id == workstream_id {
+                                    continue;
+                                }
+                                // The one matcher T325 built (rule 2). A stored
+                                // target this build cannot parse is skipped
+                                // rather than failing the tick, as `acquire`
+                                // skips it.
+                                let Ok(held_target) = OwnershipTarget::from_storage(
+                                    &entry.lease.target_kind,
+                                    &entry.lease.target_pattern,
+                                ) else {
+                                    continue;
+                                };
+                                if !held_target.overlaps(&target) {
+                                    continue;
+                                }
+                                let key = (
+                                    workstream_id.clone(),
+                                    entry.lease.id.clone(),
+                                    target.kind().to_owned(),
+                                    target.as_pattern(),
+                                );
+                                if !seen.insert(key) {
+                                    continue;
+                                }
+                                ownership::insert_conflict(
+                                    tx,
+                                    &ownership::ConflictRow {
+                                        id: ConflictId::new().to_string(),
+                                        workspace_root: root.clone(),
+                                        requested_by: workstream_id.clone(),
+                                        owned_by: entry.lease.workstream_id.clone(),
+                                        holding_lease_id: entry.lease.id.clone(),
+                                        target_kind: target.kind().to_owned(),
+                                        // The file that was written, not the
+                                        // pattern the holder claimed.
+                                        target_pattern: target.as_pattern(),
+                                        created_at: now,
+                                        state: ConflictState::Observed.as_str().to_owned(),
+                                        resolved_at: None,
+                                    },
+                                )?;
+                                recorded += 1;
+                            }
+                        }
+                    }
+
+                    // Read inside the transaction that changed it, like every
+                    // other command here — and skipped entirely when nothing
+                    // changed, which is what stops a 400 ms loop being a 400 ms
+                    // event storm.
+                    let map = match recorded {
+                        0 => None,
+                        _ => Some(read_map(tx, &root, &workspace_id, now)?),
+                    };
+                    Ok((recorded, map))
+                })
+                .map_err(from_write)
+            })
+            .await?;
+
+        if let Some(map) = map {
+            // `System`, not `Agent`: nothing constructs an `AgentRunId` for a
+            // session Gritty only observes (ADR-019 §2), and the row is
+            // Gritty's own record rather than the agent's action.
+            self.emit(&for_event, &correlation, &Actor::System, map);
+        }
+        Ok(recorded)
+    }
+
     /// `ownership.resolve`: what the user decided about a refusal.
     ///
     /// `OVERRIDE` releases the holder's lease and says so on the record. It
     /// does not hand the ground to the requester — coding-agent rule 7 forbids
     /// a *silent* override, and an automatic grant would be exactly that, one
     /// step later.
+    ///
+    /// Two verbs, still, for four states (T326 §11). On an `OBSERVED` row
+    /// `CANCEL` reads "acknowledged, stop asking" — there is no request to
+    /// withdraw, but dismissing it is what the user wants — and `OVERRIDE` is
+    /// `InvalidInput`: it exists to unblock a pending acquisition, and there is
+    /// no pending acquisition behind a write that already happened.
     pub async fn resolve_conflict(
         self: &Arc<Self>,
         request: ResolveConflictRequest,
@@ -350,6 +539,19 @@ impl OwnershipManager {
                     if existing.workspace_root != root {
                         return Err(not_found(format!(
                             "ownership conflict {conflict_id} does not exist in this workspace"
+                        )));
+                    }
+                    // An override releases a lease so that a *pending* request
+                    // can be made again. A violation has no pending request:
+                    // the toucher already wrote (T326 §11).
+                    if action == ConflictResolution::Override
+                        && ConflictState::parse(&existing.state).map_err(domain)?
+                            == ConflictState::Observed
+                    {
+                        return Err(domain(CoreError::invalid_input(
+                            "action",
+                            "this conflict records a write that already happened, so there is \
+                             nothing to unblock; release the lease itself, or dismiss the row",
                         )));
                     }
                     let now = now_ms();
