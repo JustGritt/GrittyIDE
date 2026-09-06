@@ -306,14 +306,30 @@ forwards every `CoreEvent` generically. The wire surface is one event.
 | `cargo test -p gritty-workspace --test watch -- --ignored --nocapture` | 1 passed; the A6/B5 measurement below |
 | `pnpm check:rust` (`fmt --check`, `clippy --workspace --all-targets -D warnings`, `cargo test --workspace`) | exit 0, no warnings. `pty.rs::kill_terminates_the_whole_process_tree` passed |
 | `pnpm check:ts` (biome, tsc, vitest) | exit 0: **75 files, 584 tests passed** |
-| `pnpm check` (the whole gate, after committing the generated types) | green |
+| `pnpm check:generated` | exit 0 |
+| `pnpm check` (the whole gate, run four times) | **exit 1 every time, on two suites this branch does not touch** — see below |
 
-Two failures seen on the way are **not** this branch and were reproduced with
-it stashed: `packages/editor/src/monaco/model-eol.dom.test.ts` (10 s `beforeAll`
-hook timeout) and `packages/markdown/src/render.test.ts` ("renders a long
-document within budget", 2037 ms against a 2000 ms bound). Both are
-load-sensitive; five agent sessions were building concurrently, and both pass on
-a quiet machine. Note also that `cargo test --workspace` needs
+**The two gate failures are not this branch, and that is provable rather than
+argued.** `git diff main...HEAD --name-only -- packages/editor packages/markdown`
+is **empty**: both packages are byte-identical to `main`, and the only new
+dependency here is a Rust crate, which cannot reach a Vitest run. They are
+`packages/editor/src/monaco/model-eol.dom.test.ts` (its 10 s `beforeAll` times
+out) and `packages/markdown/src/render.test.ts` ("renders a long document
+within budget", measured 2037–3988 ms against a 2000 ms bound). Both are
+contention-sensitive: they fail when all 75 test files run in parallel on a
+machine where five agent sessions are building, and both pass in isolation here
+(`pnpm vitest run packages/editor` → 41/41). The editor one was reproduced with
+this branch **stashed**, and another session in this wave has already filed it
+on the board as `MONACO-JSDOM-FLAKE`. The markdown budget deserves the same
+ticket and does not have one.
+
+So: `pnpm check:ts` was observed **exit 0 with 581/581 passing**,
+`pnpm check:rust` **exit 0**, and `pnpm check:generated` **exit 0** — all three
+halves green, and the composite red only through those two pre-existing flakes.
+A reviewer on a quiet machine should see it green; that is stated as a claim,
+not as an observation (hard rule 12).
+
+Note also that `cargo test --workspace` needs
 `pnpm --filter @gritty/desktop sidecar` to have staged
 `binaries/gritty-agent-hook-*` first — a pre-existing T225 prerequisite, not
 something this branch introduced.
@@ -434,14 +450,19 @@ re-lists all of those — never the storm's size. Asserted in
    (`use-documents.ts` and its new test); `crates/gritty-core/src/event/mod.rs`,
    `protocol/mod.rs`, `session/tap.rs` and `packages/protocol/src/types.ts` were
    each edited exactly once, in one commit, per the wave rules.
-7. **One comment in another lane's file is now stale and was left alone**
+7. **`docs/architecture/overview.md:78` is now half-stale** and was left alone:
+   the allowed scope names `documents.md` and `workspace.md`, not the overview.
+   It says a root that disappears is noticed by "the command that notices",
+   which is no longer the only way, and its workspace section has no link to the
+   new `workspace.md`. One sentence and one link for whoever owns that file.
+8. **One comment in another lane's file is now stale and was left alone**
    (rule 14): `apps/desktop/src/features/agents/open-touched-file.ts:26` says
    "T070's watcher does not exist", and `open-touched-file.test.ts:86` says the
    same. The behaviour they describe is still right — `documents.status` before
    opening is still the correct move, because a file rewritten a second ago may
    not have cleared the debounce yet — so only the parenthetical is wrong.
    Whoever next touches T232's lane should drop that clause.
-8. **The `overflowed` fan-out is not throttled.** Every loaded node is re-listed
+9. **The `overflowed` fan-out is not throttled.** Every loaded node is re-listed
    in one pass; a user with many directories expanded gets that many
    `workspace.list` calls at once. Bounded and correct, but a queue would be
    kinder.
