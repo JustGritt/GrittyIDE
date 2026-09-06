@@ -481,7 +481,10 @@ fn the_large_repo_storm_stays_batched_and_bounded() {
     // It converges: one change after the storm is reported on its own.
     let after = dir.join("docs/after-the-storm.md");
     fs::write(&after, "done").expect("write");
-    let batch = match rx.recv_timeout(DELIVERY_TIMEOUT).expect("no batch after the storm") {
+    let batch = match rx
+        .recv_timeout(DELIVERY_TIMEOUT)
+        .expect("no batch after the storm")
+    {
         WatchEvent::Changed(batch) => batch,
         other => panic!("expected a batch, got {other:?}"),
     };
