@@ -96,7 +96,15 @@ file decides.
 
 | Thing | Value | Branch |
 |---|---|---|
-| – | nothing claimed | – |
+| `PROTOCOL_VERSION` | **2.16.0** | `T300-CMD` — the `runs.*` commands |
+
+**Only T300-CMD claims anything in the Gate D wave.** T300-CORE is core domain
+behind the contract already on `main`, and T300-FAKE is a new crate; neither
+adds a command, an event or a type, so neither spends a minor. T300-C already
+generated the run types and both `CoreEvent` variants at 2.15.0 — what is left
+for 2.16.0 is the four `runs.*` request/response shapes and their client
+methods. No migration: nothing about a run is persisted, deliberately, until
+ADR-021 says what a real provider's runs should keep.
 
 **The six-branch wave landed on `main` on 2026-09-06** (`8fb69d5`): T300-C,
 T326, T100, T070, PTY-FLAKE and CI-RUNNER-GC. Their rows are deleted per the
