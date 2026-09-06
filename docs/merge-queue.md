@@ -96,42 +96,21 @@ file decides.
 
 | Thing | Value | Branch |
 |---|---|---|
-| `PROTOCOL_VERSION` | **2.13.0** | `T300-C` — the run contract (Gate D) — **spent** on `t300-c-agent-run-contract` |
-| `PROTOCOL_VERSION` | **2.14.0** | `T070` — file watcher |
-| `PROTOCOL_VERSION` | **2.15.0** | `T326` — observed ownership violations |
-| ~~`SCHEMA_VERSION` + migration~~ | ~~**5** / `0005`~~ | **released unspent** — see below |
+| – | nothing claimed | – |
 
-Everything through `PROTOCOL_VERSION` **2.12.0**, `SCHEMA_VERSION` **4** and
-migration `0004_agent_links.sql` is on `main`.
+**The six-branch wave landed on `main` on 2026-09-06** (`8fb69d5`): T300-C,
+T326, T100, T070, PTY-FLAKE and CI-RUNNER-GC. Their rows are deleted per the
+rule below. `PROTOCOL_VERSION` **2.15.0** is on `main`; 2.13.0 and 2.14.0 were
+spent on the way and the resolved line took the highest. `SCHEMA_VERSION` is
+still **4** and migration **`0005` is free** — T326 needed neither.
 
-**These four rows were claimed together on 2026-09-06**, before any of the wave
-was written, which is the point of the exercise: three branches in this wave
-touch `PROTOCOL_VERSION` and the rule above says a collision costs a migration
-while a gap costs nothing. They are claimed in one place so that none of them
-has to guess "the next free one" against two siblings it cannot see.
+**The next free values are `PROTOCOL_VERSION` 2.16.0, `SCHEMA_VERSION` 5,
+migration `0005`, and ADR-026.**
 
-**`PROTO-W2`'s claim on 2.13.0 is released.** It was a planning claim for a
-ticket that turns out to have no specification anywhere — the board row, the
-wave position and that version claim are all of it, with no command names or
-event variants written down — so it is not in this wave and cannot spend a
-number. It takes the next free minor when someone writes it, which the five
-completion reports from this wave are meant to make possible.
-
-**T326 released `SCHEMA_VERSION` 5 and migration `0005` without spending them.**
-It persists an observed violation as an ordinary `OwnershipConflict` row in a
-fourth `ConflictState`, so it needed no new table and no migration at all —
-`SCHEMA_VERSION` stays at 4. **`0005` is free and is the next migration
-number.** This is the release that matters most under rule 3: a claimed
-migration number that is never spent would leave a hole, and
-`migrations_are_numbered_contiguously_from_one` asserts `version == index + 1`,
-so the hole would break the build for whoever took `0006`.
-
-**T100 claims nothing.** `docs/tasks/T100-git-baseline.md:62-63` already defers
-its wire to `PROTO-W2`, so it builds `crates/git/` and
-`crates/gritty-core/src/git/` and stops at the magnet.
-
-The per-lane minors in `execution-board.md` are a planning hint and are already
-wrong: 2.11 was reserved there for T070 and T223 took it.
+What that wave proved, for the next one: claiming three protocol minors by name
+before launching turned the only collision that mattered into a one-line
+resolution. The one thing not on the claim list — ADR numbers — collided
+immediately, which is why rule 3b now exists.
 
 T335 is spending 2.12.0 **and nothing else**. It claimed `SCHEMA_VERSION` 5 and
 migration `0005` while it was being planned and has **released both**: permission
