@@ -10,9 +10,11 @@ import {
   type AgentIntegrationRequest,
   type AgentLinkChange,
   type AgentNotificationSettings,
+  type AgentPermissionGrants,
   type AgentRoster,
   type AgentTimeline,
   type AgentTimelineRequest,
+  type AnswerPermissionRequest,
   type CandidatesRequest,
   type CheckOwnershipRequest,
   type CloseDocumentRequest,
@@ -64,6 +66,7 @@ import {
   type ResizeTerminalRequest,
   type ResolveConflictRequest,
   type ResolveDecisionRequest,
+  type RevokeGrantRequest,
   type SaveDocumentRequest,
   type SessionRestoreResponse,
   type SetAgentNotificationsRequest,
@@ -383,6 +386,23 @@ export interface CoreClient {
      */
     notifications(): Promise<AgentNotificationSettings>;
     setNotifications(request: SetAgentNotificationsRequest): Promise<AgentNotificationSettings>;
+    /**
+     * Answer a permission prompt an agent is stopped at (T335, ADR-020).
+     *
+     * Returns the fresh roster, because answering removes the ask from the
+     * card, the row, the banner, the header count and the status bar at once —
+     * and because an ask that has already gone is not an error: the user may
+     * have answered in the terminal first, and both paths are live at once.
+     */
+    answerPermission(request: AnswerPermissionRequest): Promise<AgentRoster>;
+    /** Every standing grant, for the queue's standing-rules row. */
+    permissionGrants(request?: ListAgentSessionsRequest): Promise<AgentPermissionGrants>;
+    /**
+     * Take a standing grant back, so the next matching ask returns to the user.
+     * What Undo calls — a grant revocation, never a rollback: the tool the
+     * grant allowed has already run.
+     */
+    revokeGrant(request: RevokeGrantRequest): Promise<AgentRoster>;
   };
   subscribe<N extends EventName>(name: N, handler: (event: EventOf<N>) => void): Unsubscribe;
   subscribeAll(handler: (event: EventEnvelope) => void): Unsubscribe;
@@ -541,6 +561,10 @@ export function createCoreClient(
       notifications: () => command<AgentNotificationSettings>('agents.notifications'),
       setNotifications: (request) =>
         command<AgentNotificationSettings>('agents.setNotifications', { request }),
+      answerPermission: (request) => command<AgentRoster>('agents.answerPermission', { request }),
+      permissionGrants: (request = {}) =>
+        command<AgentPermissionGrants>('agents.permissionGrants', { request }),
+      revokeGrant: (request) => command<AgentRoster>('agents.revokeGrant', { request }),
     },
     subscribe: (name, handler) => hub.subscribe(name, handler),
     subscribeAll: (handler) => hub.subscribeAll(handler),
