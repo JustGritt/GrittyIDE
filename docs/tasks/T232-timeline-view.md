@@ -301,9 +301,10 @@ assertion would have failed for the right reason and passed for the wrong one.
 2. **`restarted` and `dropped` gaps were exercised from fixtures, not from a
    real truncation.** The core's own tests cover producing them; these tests
    cover drawing them.
-3. **A `PERMISSION_PENDING` row cannot appear yet.** The core only produces it
-   from hook evidence (T221). The row is written, styled and tested against a
-   fixture; nothing in this build can make one arrive.
+3. ~~**A `PERMISSION_PENDING` row cannot appear yet.**~~ Stale on `main` and
+   corrected by the fix pass below: T221 landed in the same pull request, so the
+   core *does* produce the prompt and delivers it as `AgentTimeline.pending`.
+   What was missing was the renderer reading it.
 4. **The files-touched list does not mark a subagent's writes.** Deduplication
    is by path, and splitting the key by `sidechain` would show the same file
    twice. The feed marks who wrote it; the list answers "what changed".
@@ -365,3 +366,80 @@ assertion would have failed for the right reason and passed for the wrong one.
    re-maps up to 500 entries. Measured cost was not a problem at this bound; if
    the ring ever grows, incremental mapping is the fix rather than a smaller
    view.
+
+---
+
+## Fix pass — 2026-09-06
+
+Sent back to `tofix` by `gritt` with finding 1 of `docs/testing/review-findings.md`
+attached: *the permission prompt is delivered by the core and drawn by nothing.*
+
+### What was wrong
+
+T221 landed in the same pull request as this task (`#20`, `1eac44b` then
+`efb4ea1`), and its decision was to hold the prompt **beside** the ring rather
+than in it — `AgentTimeline.pending` and `AgentTimelineAppendedPayload.pending`.
+Both halves of the renderer dropped it:
+
+- `applyAppended` returned `{ ...timeline, entries, dropped, restarted }`, so
+  every delta discarded `batch.pending` on the floor.
+- `timelineRows()` mapped `restarted`, `dropped` and `entries` only, so even the
+  `openTimeline` snapshot's copy was never drawn.
+
+The `case 'PERMISSION_PENDING':` arm was written, styled and fixture-tested; it
+was reachable only from a ring entry, which the core marks `unreachable!("T221
+only")`. So the feature the hook bridge exists to deliver arrived at the
+renderer and stopped there, and limitation 3 above blamed the core for it.
+
+### What changed
+
+| File | What |
+|---|---|
+| `agent-rail-reducer.ts` | `applyAppended` carries `batch.pending` through, replacing rather than merging |
+| `agent-timeline-model.ts` | `timelineRows` appends the prompt as the last row; new `pendingPinKey` |
+| `agent-timeline.tsx` | `Feed` takes `pinKey` and re-pins once when the prompt changes |
+| the three test files beside them | 7 new cases |
+
+Three decisions:
+
+1. **The prompt is replaced, never appended.** It is a *state*: every batch
+   carries its whole current value and `undefined` means the session has left
+   the prompt. Accumulating it the way entries accumulate would leave an
+   answered prompt in the feed forever claiming to be waiting — which is the
+   exact failure the core avoided by keeping it out of the ring.
+2. **It is the last row, and it is keyed `pending`.** The core stamps it
+   `u64::MAX` to say that it has no position in the sequence; `u64::MAX` does
+   not survive the trip through a JavaScript number, and the row's identity is
+   "the prompt this session is stopped at" rather than a sequence number.
+3. **A new or changed prompt re-pins the feed once.** §2 calls this "the one the
+   user is meant to act on", and a row that can arrive off-screen for someone
+   who scrolled up is not that. `pendingPinKey` is a pure function of the
+   timeline, so the rule is tested without a DOM, and the ordinary pin rule
+   applies again immediately afterwards — a standing prompt does not drag the
+   view back down.
+
+No CSS change: `.agent-feed__row--permission` was already written for this row.
+No Rust, no protocol change, `packages/protocol/src/generated` untouched.
+
+### Tests actually executed
+
+- `pnpm vitest run apps/desktop/src/features/agents` — 8 files, 92 tests, green.
+- `pnpm check` — see the shared run at the end of `T210`'s fix pass; the three
+  fixes shipped in one pull request and one check covers them.
+
+New cases: `applyAppended` takes a prompt whole, replaces it and clears it when
+a batch carries none; `timelineRows` draws it last and draws it for a session
+with an empty ring; `pendingPinKey` is `null` for nothing waiting, changes on a
+different tool *and* on a different call of the same tool, and ignores an entry
+a newer core put in `pending` that is not a prompt; and the render test asserts
+a hostile tool name and detail reach the DOM as text, that the prompt closes the
+feed, and that a session stopped at one is not called empty.
+
+### Still not executed
+
+**A real prompt has never been observed in the running app.** The entry is
+produced from hook evidence and from nothing else — rule 12, and the core is
+explicit that no transcript pattern may synthesise one — so seeing it requires
+T221's hook installed against a real `~/.claude/settings.json` and a real
+permission prompt in another terminal. That is Session 6 of the manual pass, and
+it is the same distinction this report drew before: fixture-tested, not observed.

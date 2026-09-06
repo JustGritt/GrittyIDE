@@ -132,6 +132,41 @@ describe('the timeline renders agent output as text', () => {
     expect(inside).not.toContain('href');
   });
 
+  it('draws the permission prompt the core holds beside the ring', () => {
+    // The one row the user is meant to act on, and the only one that arrives
+    // outside `entries`. It is the last thing in the feed, and its tool name
+    // and detail are transcript strings like every other field here.
+    const waiting = render([entry({ type: 'ASSISTANT_TEXT', text: 'about to run it' })], {
+      pending: {
+        seq: Number.MAX_SAFE_INTEGER,
+        kind: { type: 'PERMISSION_PENDING', tool: HOSTILE, detail: `rm -rf ${TRAVERSAL}` },
+        sidechain: false,
+      },
+    });
+    expect(waiting).toContain('Waiting on you');
+    expect(waiting).toContain('agent-feed__row--permission');
+    expect(waiting).toContain(`rm -rf ${TRAVERSAL}`);
+    expect(waiting).not.toContain('<script');
+    // Last: the prompt closes the feed rather than sitting somewhere in it.
+    expect(waiting.indexOf('agent-feed__row--permission')).toBeGreaterThan(
+      waiting.indexOf('about to run it'),
+    );
+  });
+
+  it('does not call a session stopped at a prompt an empty one', () => {
+    // "Nothing in this session's transcript yet" is the wrong thing to say
+    // about a session that is waiting on the user.
+    const waiting = render([], {
+      pending: {
+        seq: Number.MAX_SAFE_INTEGER,
+        kind: { type: 'PERMISSION_PENDING', tool: 'Bash', detail: null },
+        sidechain: false,
+      },
+    });
+    expect(waiting).toContain('Waiting on you');
+    expect(waiting).not.toContain('Nothing in this session');
+  });
+
   it('shows an entry kind this build does not know as text', () => {
     const future = render([
       entry({ type: 'FROM_A_NEWER_CORE', text: HOSTILE } as unknown as AgentTimelineEntry['kind']),

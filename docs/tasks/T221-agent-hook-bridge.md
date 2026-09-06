@@ -469,10 +469,11 @@ no row — so the combination cannot occur.
   derivation already accommodate.
 - T223 can now notify on entering `BLOCKED`, which is the value it was waiting
   for.
-- T232's timeline view should render `AgentTimeline.pending` — the entry exists
-  and is delivered, but nothing draws it yet.
-- Consider surfacing `activitySource` on the rail row; `activitySourceLabel` is
-  exported and tested but only the settings surface is wired today.
+- ~~T232's timeline view should render `AgentTimeline.pending`~~ — done in
+  T232's fix pass, 2026-09-06.
+- ~~Consider surfacing `activitySource` on the rail row~~ — this was never a
+  "consider": §24 is a *Required behavior* item, and the sentence was wrong
+  about where the label lived. Done in the fix pass below.
 
 ### Remaining risks
 

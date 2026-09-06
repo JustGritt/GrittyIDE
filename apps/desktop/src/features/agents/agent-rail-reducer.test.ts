@@ -24,6 +24,18 @@ function said(seq: number, text: string): AgentTimelineEntry {
   return { seq, kind: { type: 'ASSISTANT_TEXT', text }, sidechain: false };
 }
 
+/**
+ * The prompt a session is stopped at, as the core sends it: outside the ring,
+ * so `seq` is the sentinel the core stamps rather than a position in it.
+ */
+function prompt(tool: string, detail: string | null): AgentTimelineEntry {
+  return {
+    seq: Number.MAX_SAFE_INTEGER,
+    kind: { type: 'PERMISSION_PENDING', tool, detail },
+    sidechain: false,
+  };
+}
+
 function batch(
   sessionId: string,
   entries: readonly AgentTimelineEntry[],
@@ -305,5 +317,26 @@ describe('applying a timeline delta', () => {
     // asserting something the core did not send (a T230 follow-up).
     const blind: AgentTimeline = { ...held, transcriptEvidence: false };
     expect(applyAppended(blind, batch('a', [said(2, 'three')])).transcriptEvidence).toBe(false);
+  });
+
+  it('takes the permission prompt whole, and lets a later batch replace it', () => {
+    const next = applyAppended(held, batch('a', [], { pending: prompt('Bash', 'cargo test') }));
+    expect(next.pending?.kind).toEqual({
+      type: 'PERMISSION_PENDING',
+      tool: 'Bash',
+      detail: 'cargo test',
+    });
+    // A state, not a delta: the second prompt replaces the first rather than
+    // queueing behind it.
+    const second = applyAppended(next, batch('a', [], { pending: prompt('Edit', 'src/lib.rs') }));
+    expect(second.pending?.kind).toMatchObject({ tool: 'Edit' });
+  });
+
+  it('clears the prompt when a batch carries none', () => {
+    const waiting = applyAppended(held, batch('a', [], { pending: prompt('Bash', null) }));
+    const answered = applyAppended(waiting, batch('a', [said(2, 'three')]));
+    // Absent means the session left the prompt. Keeping it would leave a row in
+    // the feed forever claiming to be waiting on someone who already answered.
+    expect(answered.pending).toBeUndefined();
   });
 });

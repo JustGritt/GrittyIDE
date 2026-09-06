@@ -1,6 +1,11 @@
 import type { AgentTimeline, AgentTimelineEntry, AgentTimelineKind } from '@gritty/protocol';
 import { describe, expect, it } from 'vitest';
-import { isPinnedToBottom, timelineRows, touchedFiles } from './agent-timeline-model';
+import {
+  isPinnedToBottom,
+  pendingPinKey,
+  timelineRows,
+  touchedFiles,
+} from './agent-timeline-model';
 
 /** The row at `index`, or a failure that names the index rather than `undefined`. */
 function at<T>(items: readonly T[], index: number): T {
@@ -26,6 +31,18 @@ function timelineOf(
     restarted: false,
     transcriptEvidence: true,
     ...overrides,
+  };
+}
+
+/**
+ * The prompt a session is stopped at, as the core sends it: outside the ring,
+ * so `seq` is the sentinel the core stamps rather than a position in it.
+ */
+function pendingEntry(tool: string, detail: string | null): AgentTimelineEntry {
+  return {
+    seq: Number.MAX_SAFE_INTEGER,
+    kind: { type: 'PERMISSION_PENDING', tool, detail },
+    sidechain: false,
   };
 }
 
@@ -205,10 +222,66 @@ describe('timelineRows', () => {
     const rows = timelineRows(
       timelineOf(
         EVERY_KIND.map((kind) => entry(kind)),
-        { dropped: 1, restarted: true },
+        { dropped: 1, restarted: true, pending: pendingEntry('Bash', 'rm -rf build') },
       ),
     );
     expect(new Set(rows.map((row) => row.key)).size).toBe(rows.length);
+  });
+
+  it('draws the permission prompt last, whatever else is in the ring', () => {
+    const rows = timelineRows(
+      timelineOf(
+        [
+          entry({ type: 'ASSISTANT_TEXT', text: 'about to remove the build dir' }),
+          entry({ type: 'TOOL_CALL', toolUseId: 'call-1', name: 'Read', detail: 'src/lib.rs' }),
+        ],
+        { pending: pendingEntry('Bash', 'rm -rf build') },
+      ),
+    );
+    // Last, because the core stamps it `u64::MAX` to say exactly that: it is
+    // the end of the feed and it vanishes rather than being superseded.
+    const last = at(rows, rows.length - 1);
+    expect(last.key).toBe('pending');
+    expect(last.tone).toBe('permission');
+    expect(last.text).toBe('Bash');
+    expect(last.detail).toBe('rm -rf build');
+  });
+
+  it('draws a prompt on a session that has said nothing yet', () => {
+    // The prompt is held beside the ring, so a session stopped at one before
+    // anything reached the transcript still has a row — "nothing to show" would
+    // be the wrong thing to say about a session waiting on the user.
+    const rows = timelineRows(timelineOf([], { pending: pendingEntry('Edit', null) }));
+    expect(rows).toHaveLength(1);
+    expect(at(rows, 0).tone).toBe('permission');
+    expect(at(rows, 0).detail).toBeNull();
+  });
+});
+
+describe('pendingPinKey', () => {
+  it('is null when nothing is waiting', () => {
+    expect(pendingPinKey(null)).toBeNull();
+    expect(pendingPinKey(timelineOf([]))).toBeNull();
+  });
+
+  it('changes when the prompt does, so the next one re-pins the feed', () => {
+    const bash = pendingPinKey(timelineOf([], { pending: pendingEntry('Bash', 'cargo test') }));
+    expect(bash).not.toBeNull();
+    // Same tool, different call: answering one prompt and stopping at the next
+    // must not read as the same prompt still standing.
+    expect(pendingPinKey(timelineOf([], { pending: pendingEntry('Bash', 'cargo fmt') }))).not.toBe(
+      bash,
+    );
+    expect(pendingPinKey(timelineOf([], { pending: pendingEntry('Edit', 'cargo test') }))).not.toBe(
+      bash,
+    );
+  });
+
+  it('ignores an entry that is not a prompt', () => {
+    // Defence in depth: a newer core putting something else in `pending` must
+    // not make the feed pin itself to a row it does not draw as a prompt.
+    const odd = entry({ type: 'ASSISTANT_TEXT', text: 'not a prompt' });
+    expect(pendingPinKey(timelineOf([], { pending: odd }))).toBeNull();
   });
 });
 
