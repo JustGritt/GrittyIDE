@@ -90,7 +90,7 @@ file decides.
 
 | Thing | Value | Branch |
 |---|---|---|
-| `PROTOCOL_VERSION` | **2.13.0** | `T300-C` — the run contract (Gate D) |
+| `PROTOCOL_VERSION` | **2.13.0** | `T300-C` — the run contract (Gate D) — **spent** on `t300-c-agent-run-contract` |
 | `PROTOCOL_VERSION` | **2.14.0** | `T070` — file watcher |
 | `PROTOCOL_VERSION` | **2.15.0** | `T326` — observed ownership violations |
 | `SCHEMA_VERSION` + migration | **5** / `0005` | `T326` — and nothing else in this wave |

@@ -32,13 +32,13 @@ the workflow below are hand-maintained.
 | [T096](T096-terminal-chrome.md) | Terminal chrome from design artboard 8a | 0/2 | T047, T048, T090, T095 | done |
 | [T097](T097-shell-integration-blocks.md) | Shell integration (OSC 133) and command blocks | 2 | T090, T095, T096 | todo |
 | [T098](T098-terminal-colours-and-rooting.md) | Terminal session colours, and starting where you work | 0/2 | T047, T090, T095, T096 | done |
-| PTY-FLAKE | `pty.rs::kill_terminates_the_whole_process_tree` is flaky under load | 2 | T090 | todo |
+| PTY-FLAKE | `pty.rs::kill_terminates_the_whole_process_tree` is flaky under load | 2 | T090 | doing |
 | Phase 0 tests | `docs/plans/phase-0-spike.md` sections B–D | 0 | T060, T090 | doing |
 | ADR-001 | Confirm or reject Tauri | 0 | Phase 0 tests | todo |
 | MANUAL-PASS-COVERAGE | The manual pass covers every task sitting at review (review-findings finding 6) | 0 | T041, T045, T051, T210, T220, T221, T231, T232, T325 | review |
-| [T070](T070-file-watcher.md) | File watcher | 1A/2 | T020, T030, ADR-001 | todo |
+| [T070](T070-file-watcher.md) | File watcher | 1A/2 | T020, T030, ADR-001 | doing |
 | [T080](T080-search.md) | Search: the walk, the match, the streamed result (the core half) | 2 | T020, T070, ADR-001 | todo |
-| [T100](T100-git-baseline.md) | Git baseline: gix status and typed diff (the core half) | 2 | T020, ADR-001 | todo |
+| [T100](T100-git-baseline.md) | Git baseline: gix status and typed diff (the core half) | 2 | T020, ADR-001 | doing |
 | [T110](T110-diagnostics.md) | Diagnostics | 2 | T060, T090, T220, T325, ADR-001 | todo |
 | [T200](T200-workstream-model.md) | Workstream model + decisions (Gate C) | 3 | T010, T020, T060 | done |
 | [T210](T210-workstream-ui.md) | Workstream UI: the island and the attention queue | 3 | T200 | review |
@@ -58,7 +58,7 @@ the workflow below are hand-maintained.
 | T315 | Live agent activity | 4 | T310 | superseded by T220/T230/T231/T232 |
 | T320 | Context manifest | 4 | T300 | unspec |
 | [T325](T325-workspace-ownership.md) | Workspace ownership registry | 4 | T200, T210, ADR-019 | done |
-| [T326](T326-ownership-violations.md) | Observed ownership violations | 4 | T223, T230, T325 | todo |
+| [T326](T326-ownership-violations.md) | Observed ownership violations | 4 | T223, T230, T325 | doing |
 | T330 | Write interception (enforced ownership) | 4 | T325, ADR-018 amendment | unspec |
 | [T335](T335-agent-permissions.md) | Permissions: asked in place, answered in a queue (12a/12b) | 4 | T210, T221, T232, ADR-020 | review |
 | T400 | Worktree isolation | 5 | T100, T325 | unspec |
@@ -81,7 +81,7 @@ the workflow below are hand-maintained.
 | T222-CODEX | Codex, as one provider file | 3 | T222-SEAM | todo |
 | T222-SEAM | A provider registry, so providers stop being serial | 3 | T220 | unspec |
 | T233 | Agents in the left sidebar, or not (the 12a/12b divergence) | 3 | – | unspec |
-| T300-C | The run contract, alone (Gate D) | 4 | T200, T210 | todo |
+| T300-C | The run contract, alone (Gate D) | 4 | T200, T210 | review |
 | T300-CMD | runs.* adapters, and the minimal surface | 4 | T300-C | todo |
 | T300-CORE | The run manager: supervision, cancellation, bounded events | 4 | T300-C | todo |
 | T300-FAKE | gritty-agent-fake: a scripted, deterministic adapter | 4 | T300-C | todo |
