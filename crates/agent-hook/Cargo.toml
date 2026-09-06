@@ -1,0 +1,26 @@
+[package]
+name = "gritty-agent-hook"
+description = "Gritty's agent hook: records one coding-agent session's phase to a state file and exits"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "gritty-agent-hook"
+path = "src/main.rs"
+
+[lib]
+# The binary is a shell around this, so every decision it makes is testable
+# without spawning a process.
+name = "gritty_agent_hook"
+path = "src/lib.rs"
+
+[dependencies]
+gritty-agents = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

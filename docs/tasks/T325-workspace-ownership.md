@@ -275,8 +275,10 @@ screen, which is why every T2xx task is at `review`. See below.
 ### Follow-up tasks
 
 - **T326 — observed violations (§20).** Cross-check `FILE_TOUCHED` timeline
-  entries against active leases and raise an `OBSERVED` conflict. Needs T223's
-  session↔workstream link, and T230's timeline, which is on another branch.
+  entries against active leases and raise an `OBSERVED` conflict. T230's
+  timeline is now on `main`, so the only thing still missing is T223's
+  session↔workstream link — without it a touch cannot be attributed to a
+  workstream, and a violation nobody can attribute is not one.
 - **T330 — write interception (§19).** `scripts/agent-lease.py` proves the
   mechanism: Claude Code's `PreToolUse` hook takes a
   `permissionDecision: "deny"`. `gritty-agent-hook` deliberately cannot answer
@@ -287,8 +289,8 @@ screen, which is why every T2xx task is at `review`. See below.
   worktree.
 - Annotate the rail's touched-file list and the editor with the owning
   workstream, through `ownership.check`.
-- **T223's migration is now `0004`**, not `0003`. Its task file has been
-  updated; it is unstarted, so nothing else moves.
+- **T223's migration is now `0004`**, not `0003`; its task file was updated in
+  the merge that brought T221–T232 in. It is unstarted, so nothing else moves.
 - A history view of released leases, if anyone asks who used to own something.
 
 ### Remaining risks

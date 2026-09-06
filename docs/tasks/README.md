@@ -33,6 +33,13 @@ domain abstraction before its upstream contract exists.
 | [T200](T200-workstream-model.md) | Workstream model + decisions (Gate C) | 3 | T010, T020, T060 | review |
 | [T210](T210-workstream-ui.md) | Workstream UI: the island and the attention queue | 3 | T200 | review |
 | [T220](T220-agent-session-discovery.md) | Agent session discovery: what is running, and on what | 3 | T010, T020, T210 | review |
+| [T221](T221-agent-hook-bridge.md) | Agent hook bridge: earning `BLOCKED` | 3 | T220, T230, ADR-018 | review |
+| [T222](T222-agent-providers.md) | More providers: Codex first, then what can be verified | 3 | T220, T221 | not yet started |
+| [T223](T223-agent-attention.md) | Attention: notify when an agent needs you, and link it to the work | 3 | T200, T210, T220, T221 | not yet started |
+| [T224](T224-reveal-terminal.md) | Reveal the terminal a session is running in | 3 | T220 | not yet started |
+| [T230](T230-agent-timeline.md) | Agent timeline: what a session is actually doing | 3 | T020, T220 | review |
+| [T231](T231-agent-rail.md) | The agent rail: a dedicated region for running agents | 3 | T046, T060, T220, T230 | review |
+| [T232](T232-timeline-view.md) | The timeline view, and the files an agent touched | 3 | T030, T230, T231 | review |
 | T300 | Agent event protocol + deterministic fake agent (Gate D) | 4 | T200, T210 | not yet specified |
 | T305 | Agent capability model | 4 | T300 | not yet specified |
 | T310 | First real adapter | 4 | T300, T305 | not yet specified |
@@ -65,7 +72,14 @@ T110 Diagnostics ─────────────┘
 T200 Workstream model (done: state machine, decisions, persistence)
  └─ T210 Workstream UI
      ├─ T220 Agent session discovery (read-only; observes agents Gritty
-     │        does not own, so it does not gate on T300)
+     │    │   does not own, so it does not gate on T300)
+     │    ├─ T230 Agent timeline (follower, domain, protocol — no UI)
+     │    │    ├─ T221 Hook bridge → BLOCKED (ADR-018; needs T230's fast loop)
+     │    │    │    ├─ T222 More providers (Codex …)
+     │    │    │    └─ T223 Notifications + workstream link
+     │    │    └─ T231 Agent rail (third region, status colours)
+     │    │         └─ T232 Timeline view + files touched
+     │    └─ T224 Reveal the terminal (independent of the rest)
      ├─ T300 Agent event protocol + deterministic fake agent (Gate D)
      │    ├─ T305 Capability model
      │    │    └─ T310 First real adapter
@@ -74,7 +88,7 @@ T200 Workstream model (done: state machine, decisions, persistence)
      │    └─ T335 Decision interruption
      └─ T325 Workspace ownership registry (observed; holds a workstream's
           │   claims, refuses a second one — it does not stop a write)
-          ├─ T326 Observed violations (also needs T223's session↔workstream link)
+          ├─ T326 Observed violations (needs T223's session↔workstream link)
           ├─ T330 Write interception (needs an ADR-018 amendment)
           ├─ T400 Worktree isolation
           ├─ T405 Ownership-aware scheduler

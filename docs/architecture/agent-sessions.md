@@ -5,10 +5,15 @@ already running outside it, and — just as importantly — what it refuses to
 claim about them.
 
 This is **observability, not orchestration**. Gritty reads evidence the machine
-already produces. It starts nothing, stops nothing, answers nothing, approves
-nothing, and writes to no agent's configuration. Runs that Gritty *owns* are
-T300 and are a different type with a different lifecycle; nothing here may be
-mistaken for one.
+already produces. It starts nothing, stops nothing, answers nothing and approves
+nothing. Runs that Gritty *owns* are T300 and are a different type with a
+different lifecycle; nothing here may be mistaken for one.
+
+It writes to exactly one thing outside itself, and only when the user asks: one
+hook entry in an agent's own configuration (T221, ADR-018), which makes the
+agent *tell* Gritty when it stops at a permission prompt. That is still not
+control — a hook is a notification the agent emits, not a channel into it — and
+discovery is complete without it, which stays the default.
 
 ## The layers
 
@@ -61,14 +66,17 @@ Derived from evidence alone, in this order:
 | `WORKING` | live process, a `tool_use` with no matching `tool_result` |
 | `WAITING` | live process, nothing outstanding — the user's move |
 
+(T221 adds `BLOCKED` between `IDLE` and `WORKING`; see below.)
+
 A stale transcript outranks an outstanding tool call on purpose: a call with no
 result for half an hour is a session someone walked away from, not one that is
 working.
 
-There is **no `WAITING_FOR_APPROVAL`**. Poll-only discovery cannot distinguish a
-pending permission prompt from a finished turn — both are a live process with
-nothing outstanding. Only a hook integration could, and claiming the
-distinction without one would violate `AGENTS.md` rule 12.
+There is **no `WAITING_FOR_APPROVAL` from these two sources**. Poll-only
+discovery cannot distinguish a pending permission prompt from a finished turn —
+both are a live process with nothing outstanding — so claiming the distinction
+from them would violate `AGENTS.md` rule 12. `BLOCKED` exists, and T221's hook
+integration below is the only thing that can produce it.
 
 Likewise, an unreadable process table is not an empty one. Everything reads
 `ENDED`, and `AgentRoster.processEvidence` is `false` so the UI explains itself
@@ -141,3 +149,263 @@ still works. Nothing claims cross-platform support that was not tested (rule 11)
 One variant on `Provider`, one arm in `provider_of_command`, and a transcript
 reader for that agent's format. Deliberately not a trait: one match arm is
 cheaper to read than an abstraction with a single implementation.
+
+**A second provider is not quite free, and T222 says why.** Claude Code repeats
+`sessionId`, `cwd` and `gitBranch` on nearly every record, which is what makes
+the tail sufficient. Codex writes its identity once, in a `session_meta` record
+on the **first** line, so its reader needs a bounded *head* read as well as the
+bounded tail. Both bounds are constant, so the O(1)-in-file-size property
+survives — but a provider added without checking where its identity lives will
+quietly lose it.
+
+## The timeline (T230)
+
+The scan above reads a *fixed tail* of each transcript to produce one roster
+line. That is the right shape for "which agents are running" and the wrong one
+for "what is this one doing", so `gritty-agents` carries a **follower** beside
+the scanner: given a session and a byte offset, `follow` parses only the bytes
+appended since, which makes a live feed cost the same on a 400 MB transcript as
+on a 4 KB one.
+
+```
+   scan()    fixed tail of every transcript   → roster      (6 s loop)
+   follow()  new bytes of the open one        → timeline    (fast loop, 400 ms)
+```
+
+Nothing about this needs the agent's cooperation. Claude Code's transcript
+already carries the whole vocabulary: `type=assistant` with `text`, `thinking`
+and `tool_use` content blocks, `type=user` with `tool_result`, `type=system` for
+notices, `file-history-delta` for files touched, and `isSidechain` marking
+subagent work. The entries are folded into a provider-neutral
+`AgentTimelineEntry` in the core (hard rule 4), bounded there (rule 13), held in
+a ring of 500 that drops from the oldest end and *reports* the loss — the
+terminal's rule, not a new one — and delivered in coalesced batches, one per
+tick per session, with **nothing at all** emitted while a transcript is
+unchanged (rule 8).
+
+Four things the follower refuses to do, each because the alternative lies:
+
+- a **partial final line** is not consumed and not counted into the next offset.
+  The agent is appending while we read, so half a record is re-read on the next
+  tick rather than parsed into a truncated entry;
+- a file **shorter than the offset** was truncated or replaced, so the follower
+  restarts from a bounded tail and sets `restarted`. The ring is cleared and the
+  UI is told its view reset, instead of two unrelated files being spliced
+  together. The same flag covers a burst larger than one call may read (1 MiB),
+  which is a gap in the feed by another name;
+- a line that does not parse is **skipped**, and non-UTF-8 costs a glyph rather
+  than the batch around it;
+- an entry's time comes from the record's own `timestamp` or is **absent**.
+  Stamping it with the read time would make a static timeline look like it was
+  moving.
+
+`file-history-delta.trackingPath` is relative to the agent's working directory
+when the file is inside it and absolute when it is not. Both are resolved
+lexically — no `stat` per entry on a loop that runs twice a second — against the
+**open workspace root**: inside it the entry carries a `WorkspacePath` the UI
+may open, outside it the entry carries a display string and no openable path
+(ADR-010). Because that resolution is fixed at read time, an open timeline
+**closes** when the workspace changes rather than quietly re-pointing itself.
+
+**Two loops, deliberately.** Discovery stays at 6 s because `ps` and `lsof` are
+its cost. The fast loop follows only the timelines that are open (at most eight;
+the rail opens one), which is what makes 400 ms affordable. Measured in a
+release build on a 400 MB transcript: **1.4–3.4 ms** for a cold open, **~25 µs**
+for a tick that finds nothing appended, and **~55 µs** for one that finds a
+turn's worth of records. A cold open of a 5 KB transcript costs ~85 µs, so the
+cost tracks the 256 KiB window and not the file. A tick with nothing open does
+no I/O at all.
+
+T221 puts the hook state directory on this same loop, for the same reason: a
+permission prompt reported six seconds late is not worth reporting.
+
+## The rail (T231, T232)
+
+The roster and the timeline surface in a third region of the shell, to the right
+of the editor, with its own splitter: a list of sessions coloured by status, and
+beneath it the selected session's feed and the files it touched. Clicking a
+touched file opens it in the editor — the thing a terminal multiplexer
+structurally cannot do.
+
+T231 shipped the region and the list: the third child of `shell__body`, a
+right-anchored splitter driving `--agent-rail-width`, `agentRailWidth` and the
+collapsed flag in the layout blob, one row per session in the core's ranking,
+the five status labels below, and selection that opens exactly one timeline
+follower (`⌥G` toggles the rail; collapsing it closes the follower, because an
+invisible one is waste).
+
+T232 filled the body. Four things about it are load-bearing:
+
+- **The feed accumulates a delta, never a snapshot.** `AgentTimelineAppended`
+  carries only what was appended, so the renderer keys on `seq` and appends;
+  `openTimeline`'s answer is the base it appends to, and a consumer that missed
+  an event calls `agents.timeline` to resynchronise. Nothing assumes it has
+  ever been handed the whole timeline.
+- **`dropped` and `restarted` are drawn, not repaired.** Both render as an
+  explicit row at the head of the feed — the entries that are missing are always
+  the oldest ones. A restart clears what was held rather than joining two
+  transcripts. The core reports its own losses precisely so the UI does not have
+  to guess, and splicing around them would throw that away.
+- **A tool result attaches to its call by `toolUseId`**, so a result reads as
+  the outcome of something rather than as a floating line. A call with no result
+  yet reads as still running; a result whose call has fallen out of the ring
+  draws on its own. Subagent (`sidechain`) entries are marked and subordinate,
+  never hidden — T220 dropped them and listed that as a known limitation.
+- **Opening a touched file calls `documents.status` first.** External
+  modification is checked on demand until T070 exists, so a file the agent
+  rewrote a second ago would otherwise open from a stale buffer, or reuse an
+  open tab whose contents predate the write. Checking first turns it into the
+  ordinary external-change flow, and nothing is resolved silently (rule 7). A
+  file outside the open workspace carries no `WorkspacePath` at all, so it is
+  text and not a control — the protocol draws that line, not the renderer.
+
+Every string in the feed is a text node: no Markdown, no HTML, no link the view
+resolves, no path built by concatenation, no command anything runs. The core
+bounded each field before it crossed the protocol and the renderer's whole job
+is not to undo that (rule 13).
+
+It is deliberately **not** a tab in the document strip. Agent sessions and open
+files are different kinds of thing, and `SessionTab.path` is a required
+`WorkspacePath` in a non-nullable column, so a non-document tab would cost a
+wire change, a ts-rs regeneration and a migration. The rail's width lives in the
+UI-owned layout blob and costs none of that.
+
+The rail and the island read **one** `useAgents` controller, following T210's
+rule that two surfaces over one controller cannot disagree; the island's agents
+section reduces to a count and its most urgent row. The rail's five labels map
+onto the wire as Working=`WORKING`, Pending validation=`BLOCKED`, Done=`WAITING`,
+Idle=`IDLE`, Ended=`ENDED` — `WAITING` keeps its name because it means *the
+user's move*, and renaming the wire for a word is not worth the ripple.
+
+## The third source (T221)
+
+The `WAITING_FOR_APPROVAL` value this document used to refuse is earned by
+asking the agent instead of guessing at it. Every agent CLI in scope already
+fires a hook event precisely when it blocks on the user, so Gritty registers a
+small binary on it:
+
+```
+agent process                         gritty (usually not running)
+  │ PermissionRequest hook fires
+  ▼
+gritty-agent-hook  ──▶  <app-data>/agents/state/<session-id>.json
+  (writes atomically, exits 0)   one small file, overwritten, never appended
+                                          │
+                                          ▼  next fast-loop tick (~400 ms)
+                             merged as a third source, joined on session id
+```
+
+A **file** rather than a socket because Gritty is usually closed when a hook
+fires, and a hook must never stall the agent. **Overwritten** rather than
+appended because only the current phase is ever asked for, which removes
+rotation, truncation-tolerant parsing and an age policy from the design.
+**Atomic**, so the reader takes no lock and never sees half a file.
+
+The hook binary is deliberately the smallest thing in the repository: it reads
+one JSON payload on stdin, names a *phase* — `BLOCKED`, `ACTIVE`, `SETTLED`,
+`ENDED` — writes one file, and **exits `0` on every path**, including a payload
+that never arrives, a state directory it cannot write and a panic. A non-zero
+exit from a hook is the agent's problem, and Gritty must never be the reason
+another tool misbehaves. It links no `gritty-core`, knows nothing of the
+protocol, and does not decide what any phase *means*: the core does, which is
+the same adapter/domain split `ps` and the transcripts already go through.
+
+It also does not record the tool's *input*. A `Bash` command line or an `Edit`
+payload is exactly the kind of thing that carries a secret, and it is not needed:
+the transcript already has the core's bounded preview of the same call.
+
+**Read on the fast loop, not the discovery tick.** "Pending validation" arriving
+six seconds after the agent stopped defeats the value. The scan is a directory
+listing plus a stat and a few hundred bytes per file, bounded exactly as
+transcripts are (64 files, 6 hours, 8 KiB each), and files past the cutoff are
+swept. With nothing installed it is one failed `read_dir` and nothing else,
+which is what keeps the roster identical to T220's for anyone who never opted
+in. A tick whose hook state changed re-derives the roster from the **cached**
+discovery — no second `ps`, no second `lsof` — and still publishes only when a
+derived value actually differs.
+
+The derivation gains one row, at a defined precedence:
+
+| Value | Evidence | `activitySource` |
+|---|---|---|
+| `ENDED` | no live process, or the process table was unreadable | `PROCESS` |
+| `IDLE` | live process, transcript quiet past the idle threshold | `TRANSCRIPT` |
+| **`BLOCKED`** | live process, hook phase `BLOCKED`, not stale | `HOOK` |
+| `WORKING` | live process, a `tool_use` with no matching `tool_result` | `TRANSCRIPT` |
+| `WAITING` | live process, nothing outstanding | `PROCESS` |
+
+`ENDED` outranks `BLOCKED` — an agent killed at a prompt is gone, not blocked —
+and so does `IDLE`, for the reason already given above. A hook phase older than
+the idle threshold is discarded outright, so a state file cannot hold a row at
+`BLOCKED` forever even when its transcript is still moving. Hook state is
+*evidence, not authority*: it joins onto a session the other two sources already
+found, on **session id** (the one exact key; the process join falls back to the
+working directory), and a state file matching nothing creates no row.
+
+`BLOCKED` is only ever set from hook evidence. No transcript pattern, process
+state or elapsed-time threshold may produce it, which satisfies rule 12 by
+construction, and `activitySource` says which of the three sources produced a
+verdict so a row is attributable rather than magic. `AgentEvidence` gains the
+hook combinations (`PROCESS_AND_HOOK`, `TRANSCRIPT_AND_HOOK`, `ALL`) — but no
+`HOOK_ONLY`, because that combination cannot occur.
+
+**What the prompt is about.** The state file's bounded `tool` field becomes a
+`PermissionPending` timeline entry, so a rail showing a blocked session names
+*what* is waiting rather than only that something is. Its `detail` comes from
+the transcript's outstanding tool call, and only when the two name the same
+tool: they are describing one call, so pairing them is not a guess, while
+pairing a different call's input to this prompt would be. The entry is held
+**beside** the ring rather than in it — it is a state that goes away, and a ring
+can only ever append, so an answered prompt would otherwise sit in the feed
+forever claiming to be waiting. A batch is emitted when it changes even with no
+records appended, and not otherwise.
+
+### Writing into another tool's configuration
+
+This is the only thing in the repository that edits a file Gritty does not own,
+and ADR-018 is what constrains it. Nothing is written without an explicit user
+action for that provider; the entry is **appended** to each event's existing
+array and no other tool's entry is replaced, reordered or removed; the exact
+change is shown before it is applied and the prior file is copied to a
+timestamped backup beside it; and a configuration that does not parse — or whose
+hook section has a shape the installer does not recognise — is **refused with
+the parse error**, never rewritten, never repaired, never replaced from a
+template. If the backup cannot be written the change is abandoned before the
+original is touched.
+
+Gritty's own entries are the ones whose command runs `gritty-agent-hook`, so
+uninstall needs no marker comment and an entry left pointing at a binary that
+moved is still recognisably Gritty's — which is what makes `BROKEN` reportable.
+A broken entry breaks nothing for the user, because the agent tolerates a hook
+that fails; the only symptom is that `BLOCKED` quietly stops appearing, and the
+status line is what says why.
+
+Key order survives because the file is parsed into an order-preserving JSON
+model local to the installer, not `serde_json::Value` (which sorts) and not
+`serde_json`'s `preserve_order` feature (which is workspace-wide, enlarges every
+`Value` in the tree, and would push `CoreError` past clippy's `result_large_err`
+threshold — a repository-wide representation change to append one line to one
+file). Indentation is two spaces, which is what these files already use.
+
+The state directory is under Gritty's own application data, never `/tmp`, and is
+created owner-only. The `agents.integrationStatus`, `agents.integrationInstall`
+and `agents.integrationUninstall` commands carry the command line and the events
+it lands on — never the configuration's contents, which would put whatever else
+lives in that file into an event payload for no gain.
+
+## Specified but not built (T222, T223, T224)
+
+Everything above this line is implemented. Everything below is written down and
+not yet built; nothing here may be described as behaviour Gritty has.
+
+**The rest.** T222 adds Codex. T223 notifies on entering `BLOCKED`/`WAITING`
+and links a session to a workstream — through a separate table, never a field
+on `Workstream`, because the domain model takes no provider-specific fields
+(rule 6) and a durable row must not carry an ephemeral session id. T224 turns
+the pid and tty into a "reveal the terminal" action behind a new platform
+crate.
+
+**Still deliberately absent afterwards:** any control (prompting, answering,
+approving, keystroke injection), any screen-scraping of another terminal, a
+daemon that outlives the app, and a socket or plugin surface. Runs Gritty owns
+are T300 and remain a different type with a different lifecycle.

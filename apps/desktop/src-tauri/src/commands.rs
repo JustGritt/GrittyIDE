@@ -11,7 +11,11 @@ use std::path::PathBuf;
 use std::sync::Once;
 use std::time::Instant;
 
-use gritty_core::agent_session::{AgentRoster, ListAgentSessionsRequest};
+use gritty_core::agent_session::{
+    AgentIntegration, AgentIntegrationChange, AgentIntegrationChangeRequest,
+    AgentIntegrationRequest, AgentRoster, AgentTimeline, AgentTimelineRequest,
+    ListAgentSessionsRequest,
+};
 use gritty_core::document::{
     CloseDocumentRequest, Document, DocumentContent, DocumentStatusRequest, OpenDocumentRequest,
     ReloadDocumentRequest, SaveDocumentRequest, UpdateDocumentRequest,
@@ -557,6 +561,116 @@ pub async fn agents_refresh(
     guard("agents.refresh", move |_| async move {
         let _request: ListAgentSessionsRequest = parse_request(request)?;
         Ok(agents.refresh().await)
+    })
+    .await
+}
+
+/// `agents.openTimeline`
+///
+/// Starts following a session's transcript and returns what is known so far
+/// (T230). Still read-only: following is a read, and nothing here can write to
+/// the session or answer it.
+#[tauri::command]
+pub async fn agents_open_timeline(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentTimeline, CoreError> {
+    let agents = core.agents.clone();
+    guard("agents.openTimeline", move |_| async move {
+        let request: AgentTimelineRequest = parse_request(request)?;
+        agents.open_timeline(&request.session_id).await
+    })
+    .await
+}
+
+/// `agents.closeTimeline`
+///
+/// Idempotent: a renderer that reloaded cannot know which timelines it left
+/// open, so closing one that is not open is not an error.
+#[tauri::command]
+pub async fn agents_close_timeline(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<(), CoreError> {
+    let agents = core.agents.clone();
+    guard("agents.closeTimeline", move |_| async move {
+        let request: AgentTimelineRequest = parse_request(request)?;
+        agents.close_timeline(&request.session_id).await
+    })
+    .await
+}
+
+/// `agents.timeline`
+///
+/// Re-reads an open timeline without opening one — how the renderer
+/// resynchronises after a reload or a missed event, rather than replaying.
+#[tauri::command]
+pub async fn agents_timeline(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentTimeline, CoreError> {
+    let agents = core.agents.clone();
+    guard("agents.timeline", move |_| async move {
+        let request: AgentTimelineRequest = parse_request(request)?;
+        agents.timeline(&request.session_id).await
+    })
+    .await
+}
+
+/// `agents.integrationStatus`
+///
+/// Reads a provider's configuration and says whether Gritty's hook is in it
+/// (T221). Read-only; the two commands below are the only ones in the whole
+/// `agents.*` surface that write anything at all, and only into the one file
+/// ADR-018 allows.
+#[tauri::command]
+pub async fn agents_integration_status(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentIntegration, CoreError> {
+    let agents = core.agents.clone();
+    guard("agents.integrationStatus", move |_| async move {
+        let request: AgentIntegrationRequest = parse_request(request)?;
+        agents.integration_status(request.provider).await
+    })
+    .await
+}
+
+/// `agents.integrationInstall`
+///
+/// `apply: false` returns the change without making it — the file, the events,
+/// the entry and the backup path — so the UI shows the diff it is about to
+/// apply rather than a description of one (ADR-018 §3).
+#[tauri::command]
+pub async fn agents_integration_install(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentIntegrationChange, CoreError> {
+    let agents = core.agents.clone();
+    guard("agents.integrationInstall", move |_| async move {
+        let request: AgentIntegrationChangeRequest = parse_request(request)?;
+        agents
+            .integration_install(request.provider, request.apply)
+            .await
+    })
+    .await
+}
+
+/// `agents.integrationUninstall`
+///
+/// Removes exactly the entries whose command runs Gritty's binary, backing the
+/// file up first and leaving every other tool's entries alone.
+#[tauri::command]
+pub async fn agents_integration_uninstall(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentIntegrationChange, CoreError> {
+    let agents = core.agents.clone();
+    guard("agents.integrationUninstall", move |_| async move {
+        let request: AgentIntegrationChangeRequest = parse_request(request)?;
+        agents
+            .integration_uninstall(request.provider, request.apply)
+            .await
     })
     .await
 }

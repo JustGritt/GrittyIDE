@@ -4,7 +4,13 @@ import { type Diagnostic, EventHub, type Unsubscribe } from './events';
 import type { Transport } from './transport';
 import {
   type AcquireOwnershipRequest,
+  type AgentIntegration,
+  type AgentIntegrationChange,
+  type AgentIntegrationChangeRequest,
+  type AgentIntegrationRequest,
   type AgentRoster,
+  type AgentTimeline,
+  type AgentTimelineRequest,
   type CandidatesRequest,
   type CheckOwnershipRequest,
   type CloseDocumentRequest,
@@ -290,6 +296,41 @@ export interface CoreClient {
   agents: {
     list(request?: ListAgentSessionsRequest): Promise<AgentRoster>;
     refresh(request?: ListAgentSessionsRequest): Promise<AgentRoster>;
+    /**
+     * Start following a session's transcript (T230). The core publishes
+     * `AgentTimelineAppended` deltas from here on — subscribe to that rather
+     * than polling `timeline`. `NotFound` when the session has left the roster,
+     * which it can do between a click and this call.
+     */
+    openTimeline(request: AgentTimelineRequest): Promise<AgentTimeline>;
+    /** Stop following it. Idempotent. */
+    closeTimeline(request: AgentTimelineRequest): Promise<void>;
+    /** Re-read an open timeline — how a reloaded renderer resynchronises. */
+    timeline(request: AgentTimelineRequest): Promise<AgentTimeline>;
+    /**
+     * Whether Gritty's hook is in the provider's own configuration (T221).
+     *
+     * This is the one corner of the product that writes into a file Gritty does
+     * not own, and ADR-018 is what constrains it: nothing is written without an
+     * explicit user action for that provider, entries are appended and never
+     * replaced, the prior file is backed up, and a configuration that does not
+     * parse is refused rather than repaired.
+     *
+     * Installing it does not make Gritty able to *do* anything to an agent. A
+     * hook is a notification the agent emits; it buys exactly one value —
+     * `BLOCKED`, the roster's answer to *which one needs me* — and discovery
+     * keeps working with nothing installed, which stays the default.
+     */
+    integrationStatus(request: AgentIntegrationRequest): Promise<AgentIntegration>;
+    /**
+     * `apply: false` returns the change without making it, so the UI can show
+     * the diff it is about to apply. `apply: true` performs exactly that.
+     * `Conflict` when the configuration cannot be understood, carrying the
+     * parse error; `PermissionDenied` when it or its backup cannot be written.
+     */
+    integrationInstall(request: AgentIntegrationChangeRequest): Promise<AgentIntegrationChange>;
+    /** The same shape, in reverse. Removes only Gritty's own entries. */
+    integrationUninstall(request: AgentIntegrationChangeRequest): Promise<AgentIntegrationChange>;
   };
   subscribe<N extends EventName>(name: N, handler: (event: EventOf<N>) => void): Unsubscribe;
   subscribeAll(handler: (event: EventEnvelope) => void): Unsubscribe;
@@ -432,6 +473,15 @@ export function createCoreClient(
     agents: {
       list: (request = {}) => command<AgentRoster>('agents.list', { request }),
       refresh: (request = {}) => command<AgentRoster>('agents.refresh', { request }),
+      openTimeline: (request) => command<AgentTimeline>('agents.openTimeline', { request }),
+      closeTimeline: (request) => command<void>('agents.closeTimeline', { request }),
+      timeline: (request) => command<AgentTimeline>('agents.timeline', { request }),
+      integrationStatus: (request) =>
+        command<AgentIntegration>('agents.integrationStatus', { request }),
+      integrationInstall: (request) =>
+        command<AgentIntegrationChange>('agents.integrationInstall', { request }),
+      integrationUninstall: (request) =>
+        command<AgentIntegrationChange>('agents.integrationUninstall', { request }),
     },
     subscribe: (name, handler) => hub.subscribe(name, handler),
     subscribeAll: (handler) => hub.subscribeAll(handler),

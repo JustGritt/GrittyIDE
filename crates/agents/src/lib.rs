@@ -18,19 +18,41 @@
 //! A session found by only one is still reported, with [`Evidence`] saying
 //! which — an honest partial answer beats a confident invented one.
 //!
-//! What this cannot see, and must never pretend to: a pending permission
-//! prompt. Nothing in a transcript or a process table distinguishes "waiting
-//! for the user to approve a tool" from "waiting for the user to type". Only a
-//! hook integration can, and installing hooks is out of scope (T220 non-goals).
+//! A **third source** arrives with T221, and it is the only one the agent has
+//! to cooperate with. Nothing in a transcript or a process table distinguishes
+//! "waiting for the user to approve a tool" from "waiting for the user to
+//! type", so [`hook`] does not guess: the agent's own hook system writes a
+//! small state file and this crate reads it. [`integration`] is what puts that
+//! hook into the agent's configuration — additively, backed up, and only on an
+//! explicit user action (ADR-018).
+//!
+//! | Source | Sees | Blind to |
+//! |---|---|---|
+//! | [`hook`] (state file) | that the agent stopped at a permission prompt | everything the agent did not send |
+//!
+//! Hook state is *evidence, not authority*: it joins onto a session the other
+//! two sources already found, never creates one on its own, and never outranks
+//! the absence of a process.
 
+pub mod hook;
+pub mod integration;
+pub mod json;
 pub mod probe;
 pub mod transcript;
 
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub use hook::{HookPhase, HookScanOptions, HookState, WriteOutcome, phase_of_event};
+pub use integration::{
+    HookTarget, IntegrationChange, IntegrationError, IntegrationReport, IntegrationStatus,
+    PlannedEvent,
+};
 pub use probe::{CommandRunner, ProcessEvidence, Provider, SystemCommandRunner};
-pub use transcript::{ScanOptions, ToolCall, TranscriptEvidence};
+pub use transcript::{
+    FollowOptions, Followed, FollowedEntry, FollowedRecord, NoticeLevel, ScanOptions, ToolCall,
+    TranscriptEvidence, follow, follow_with,
+};
 
 /// Which sources agreed that a session exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

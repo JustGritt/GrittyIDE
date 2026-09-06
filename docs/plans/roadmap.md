@@ -35,6 +35,31 @@ ADR-001 confirm or reject Tauri
 T070 (watcher), T080 (search) and the rest of Phases 1–2 start only after the
 Phase 0 runtime decision is recorded. Task specs live in `docs/tasks/`.
 
+## Agent observability (T221–T232, specified, not started)
+
+T220 landed read-only discovery of the agent sessions already running on the
+machine. The rest finishes that surface without crossing into orchestration.
+
+The landing that matters first is the **agent rail**: T230 (a transcript
+follower and a provider-neutral timeline, no UI), T221 (the hook bridge, which
+earns `BLOCKED` — the one status the transcript cannot produce), T231 (a third
+region beside the editor, sessions coloured by status) and T232 (the feed, and
+opening a file the agent touched). Together they answer *what is this agent
+doing* next to the code it is changing.
+
+Then T222 (Codex), T223 (notifications plus a session↔workstream link) and
+T224 (reveal the terminal).
+
+They sit in Phase 3 beside T210 and **do not gate on T300**, because none of
+them owns a run. They are specified now and **implementation waits for ADR-001**
+— nothing new is built on a runtime decision that is still formally open.
+
+The comparison that motivated them is in ADR-018's context: Herdr ships the
+runtime layer (a detached daemon, 15+ agents, a socket API) and explicitly
+refuses worktree isolation, task graphs, approval policies and durable event
+history. That refusal list is Phases 3–5 here. Gritty should not rebuild the
+multiplexer; it should be the layer Herdr says it will not be.
+
 ## Phases 4–5, renumbered (ADR-019)
 
 `docs/plans/Gritty Agent Runtime Coordination.md` §36 sequences the

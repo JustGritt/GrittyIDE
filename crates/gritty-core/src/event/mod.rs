@@ -21,7 +21,7 @@ use ts_rs::TS;
 
 use gritty_workspace::WorkspacePath;
 
-use crate::agent_session::wire::AgentRoster;
+use crate::agent_session::wire::{AgentRoster, AgentTimelineAppendedPayload};
 use crate::document::{
     Document, DocumentChangeCause, DocumentClosedReason, ExternalModificationState,
 };
@@ -113,6 +113,13 @@ pub enum CoreEvent {
     /// Carries the whole roster and is emitted only when it actually differs
     /// from the last one, never once per poll (rule 8).
     AgentSessionsChanged(AgentRoster),
+    /// New entries were appended to an **open** agent timeline (T230).
+    ///
+    /// A delta, not a snapshot: a timeline grows without bound, so resending it
+    /// per tick would be the unbounded forwarding rule 8 forbids. Batched by
+    /// the follower, never one event per record, and emitted only for a session
+    /// whose timeline someone opened.
+    AgentTimelineAppended(AgentTimelineAppendedPayload),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -230,6 +237,7 @@ impl CoreEvent {
             Self::DecisionRequested(_) => "DecisionRequested",
             Self::DecisionResolved(_) => "DecisionResolved",
             Self::AgentSessionsChanged(_) => "AgentSessionsChanged",
+            Self::AgentTimelineAppended(_) => "AgentTimelineAppended",
             Self::OwnershipChanged(_) => "OwnershipChanged",
         }
     }
@@ -260,6 +268,7 @@ impl CoreEvent {
             | Self::DecisionRequested(_)
             | Self::DecisionResolved(_)
             | Self::AgentSessionsChanged(_)
+            | Self::AgentTimelineAppended(_)
             | Self::OwnershipChanged(_) => None,
         }
     }

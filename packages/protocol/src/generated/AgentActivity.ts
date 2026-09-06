@@ -3,10 +3,11 @@
 /**
  * What the session is doing, derived from evidence alone.
  *
- * There is deliberately no `WAITING_FOR_APPROVAL`. Poll-only discovery cannot
- * tell a pending permission prompt from a finished turn — both look like a
- * live process with nothing outstanding — and inventing the distinction would
- * be exactly the kind of claim `AGENTS.md` rule 12 forbids. A hook
- * integration is what would earn that value.
+ * `BLOCKED` is the one value poll-only discovery cannot reach: a pending
+ * permission prompt and a finished turn are both a live process with nothing
+ * outstanding. It is set **only** from hook evidence (T221, ADR-018), which
+ * satisfies rule 12 by construction — the value exists exactly where something
+ * told Gritty the truth, and no transcript pattern, process state or
+ * elapsed-time threshold may produce it.
  */
-export type AgentActivity = "WORKING" | "WAITING" | "IDLE" | "ENDED";
+export type AgentActivity = "WORKING" | "BLOCKED" | "WAITING" | "IDLE" | "ENDED";

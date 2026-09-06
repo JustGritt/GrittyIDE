@@ -52,6 +52,12 @@ export const COMMANDS = {
   'ownership.resolve': 'ownership_resolve',
   'agents.list': 'agents_list',
   'agents.refresh': 'agents_refresh',
+  'agents.openTimeline': 'agents_open_timeline',
+  'agents.closeTimeline': 'agents_close_timeline',
+  'agents.timeline': 'agents_timeline',
+  'agents.integrationStatus': 'agents_integration_status',
+  'agents.integrationInstall': 'agents_integration_install',
+  'agents.integrationUninstall': 'agents_integration_uninstall',
 } as const;
 
 export type CommandName = keyof typeof COMMANDS;

@@ -3,5 +3,10 @@
 /**
  * Which sources saw the session. Surfaced rather than hidden so the UI can be
  * honest about a partial answer instead of implying certainty.
+ *
+ * T221 adds the hook combinations. There is deliberately no `HOOK_ONLY`: a
+ * state file with no matching process and no matching transcript creates no
+ * roster row, so the combination cannot occur (ADR-018 §7 — evidence, not
+ * authority).
  */
-export type AgentEvidence = "PROCESS_ONLY" | "TRANSCRIPT_ONLY" | "BOTH";
+export type AgentEvidence = "PROCESS_ONLY" | "TRANSCRIPT_ONLY" | "BOTH" | "PROCESS_AND_HOOK" | "TRANSCRIPT_AND_HOOK" | "ALL";
