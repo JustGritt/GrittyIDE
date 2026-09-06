@@ -4311,3 +4311,112 @@ textarea:focus-visible {
   font-size: var(--text-control);
   white-space: nowrap;
 }
+
+/* The banner: one line above the panes for an agent nobody is watching
+   (artboard 12b). Restraint is the design — it never steals focus, never
+   overlays anything, and Later dismisses it without losing the count. */
+.permission-banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  min-width: 0;
+  padding: 0 var(--gap-md) 0 0;
+  background: var(--warn-wash);
+  border-bottom: 1px solid var(--warn);
+  font-size: var(--text-control);
+}
+
+.permission-banner__edge {
+  width: 3px;
+  align-self: stretch;
+  background: var(--warn);
+  flex: none;
+}
+
+.permission-banner__count {
+  font-size: var(--text-code);
+  font-weight: 600;
+  flex: none;
+  padding: 8px 0 8px 13px;
+}
+
+.permission-banner__who {
+  font-family: var(--font-mono);
+  color: var(--fg-dim);
+  flex: none;
+}
+
+.permission-banner__what {
+  font-family: var(--font-mono);
+  color: var(--fg-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.permission-banner__aside {
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  color: var(--fg-faint);
+  flex: none;
+}
+
+.permission-banner__spacer {
+  flex: 1;
+}
+
+.permission-banner__open {
+  background: var(--warn);
+  color: var(--surface-chrome);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.permission-banner__open kbd {
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  opacity: 0.65;
+  margin-left: var(--gap-xs);
+}
+
+/* The queue's permission row wears the same warning edge as the card it opens,
+   so the two are recognisably the same thing at two sizes. */
+.queue__row--permission {
+  border-left-color: var(--warn);
+}
+
+.statusbar__permissions {
+  color: var(--warn-text);
+}
+
+.queue__answered {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  min-width: 0;
+}
+
+.queue__answered-what {
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue__answered-verdict--allow {
+  color: var(--ok-text);
+  font-size: var(--text-control);
+}
+
+.queue__answered-verdict--deny {
+  color: var(--error-text);
+  font-size: var(--text-control);
+}
+
+.island__card--permission {
+  border-left-color: var(--warn);
+}

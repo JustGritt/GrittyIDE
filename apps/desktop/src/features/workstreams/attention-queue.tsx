@@ -1,6 +1,9 @@
-import type { Workstream } from '@gritty/protocol';
+import type { AgentPermissionVerdict, Workstream } from '@gritty/protocol';
 import { useEffect, useState } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
+import { taskLine } from '../agents/agents-reducer';
+import { verbLabel } from '../agents/permission-model';
+import { PermissionPrompt } from '../agents/permission-prompt';
 import type { AgentsController } from '../agents/use-agents';
 import { LinkedSessions } from './agent-link-panel';
 import {
@@ -8,6 +11,7 @@ import {
   type AttentionItem,
   attentionItems,
   filterItems,
+  isPermission,
   stateLabel,
   stateTone,
   transitionLabel,
@@ -22,10 +26,16 @@ import type { WorkstreamsController } from './use-workstreams';
  * The attention queue (T210, artboard 4b): everything waiting on you, oldest
  * first, with the selected item in full on the right.
  *
- * The artboard's five filters are four here — All, Questions, Reviews,
- * Conflicts. Conflicts arrived with ownership (T325); approvals and failures
- * belong to agent runs (T300) and are still absent, because a tab that can
- * never have anything in it teaches the user to distrust the counts.
+ * The artboard's five filters are five here — All, Permissions, Questions,
+ * Reviews, Conflicts. Conflicts arrived with ownership (T325) and permissions
+ * with T335; failures still belong to agent runs (T300) and are absent, because
+ * a tab that can never have anything in it teaches the user to distrust the
+ * counts.
+ *
+ * Permissions are why artboard 12b exists: an agent nobody is watching asks,
+ * and the queue answers it *in place* — the verb, the target and the blast
+ * radius are on the card, so judging it does not mean opening the console
+ * first, though Open console is there when it does.
  *
  * The island and this view show the same items, so answering in one clears the
  * other: both render the core's decisions rather than a copy.
@@ -44,7 +54,7 @@ export function AttentionQueue({
   onClose(): void;
 }) {
   const { workstreams, decisions, ownership } = controller;
-  const items = attentionItems(workstreams, decisions, ownership);
+  const items = attentionItems(workstreams, decisions, ownership, agents.roster.sessions);
   const [filter, setFilter] = useState<AttentionFilter>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const visible = filterItems(items, filter);
@@ -58,15 +68,17 @@ export function AttentionQueue({
 
   const counts: Record<AttentionFilter, number> = {
     all: items.length,
+    permission: items.filter((item) => item.kind === 'permission').length,
     question: items.filter((item) => item.kind === 'question').length,
     review: items.filter((item) => item.kind === 'review').length,
     conflict: items.filter((item) => item.kind === 'conflict').length,
   };
+  const answered = agents.roster.recentAnswers?.[0] ?? null;
 
   return (
     <section className="queue" aria-label="Attention queue">
       <div className="queue__bar">
-        {(['all', 'question', 'review', 'conflict'] as const).map((key) => (
+        {(['all', 'permission', 'question', 'review', 'conflict'] as const).map((key) => (
           <button
             key={key}
             type="button"
@@ -130,7 +142,38 @@ export function AttentionQueue({
           {countLabel(items.length)} · {blockedLabel(workstreams)}
         </span>
         <span className="queue__spacer" />
-        <span className="queue__meta">Approvals and failures arrive with agent runs</span>
+        {/* What was just decided, and the only part of it that can still be
+            taken back. Undoing is a grant revocation, never a rollback: by the
+            time a verdict is read the tool has run, so the label says what the
+            button does (T335). */}
+        {answered ? (
+          <span className="queue__answered">
+            <span className="queue__meta">Answered just now:</span>
+            <span className="queue__answered-what">
+              {verbLabel(answered.verb)} {answered.target}
+            </span>
+            <span
+              className={`queue__answered-verdict queue__answered-verdict--${
+                answered.verdict === 'DENY' ? 'deny' : 'allow'
+              }`}
+            >
+              {ANSWER_LABEL[answered.verdict]}
+            </span>
+            {answered.grantId && (
+              <button
+                type="button"
+                className="btn--bare"
+                onClick={() => {
+                  if (answered.grantId) void agents.revokeGrant(answered.grantId);
+                }}
+              >
+                Undo the standing rule
+              </button>
+            )}
+          </span>
+        ) : (
+          <span className="queue__meta">Failures arrive with agent runs</span>
+        )}
       </div>
     </section>
   );
@@ -138,6 +181,7 @@ export function AttentionQueue({
 
 const FILTER_LABEL: Record<AttentionFilter, string> = {
   all: 'All',
+  permission: 'Permissions',
   question: 'Questions',
   review: 'Reviews',
   conflict: 'Conflicts',
@@ -145,16 +189,29 @@ const FILTER_LABEL: Record<AttentionFilter, string> = {
 
 /** What each kind is called in a row, and which dot it wears. */
 const KIND_LABEL: Record<AttentionItem['kind'], string> = {
+  permission: 'Permission',
   question: 'Question',
   review: 'Review',
   conflict: 'Ownership',
 };
 
 const KIND_TONE: Record<AttentionItem['kind'], string> = {
+  permission: 'blocked',
   question: 'blocked',
   review: 'waiting',
   conflict: 'blocked',
 };
+
+const ANSWER_LABEL: Record<AgentPermissionVerdict, string> = {
+  ALLOW_ONCE: 'allowed once',
+  ALLOW_FOR_RUN: 'allowed for this run',
+  DENY: 'denied',
+};
+
+/** How a row names what is waiting — a workstream, or the session that asked. */
+function itemName(item: AttentionItem): string {
+  return isPermission(item) ? (taskLine(item.session) ?? item.session.id) : item.workstream.title;
+}
 
 function QueueRow({
   item,
@@ -176,7 +233,7 @@ function QueueRow({
       <span className="queue__row-head">
         <span className={`island__dot island__dot--${KIND_TONE[item.kind]}`} aria-hidden="true" />
         <span className="label">{KIND_LABEL[item.kind]}</span>
-        <span className="queue__row-name">{item.workstream.title}</span>
+        <span className="queue__row-name">{itemName(item)}</span>
         <span className="queue__spacer" />
         <span className="queue__meta">waiting {waitedFor(item.since, now)}</span>
       </span>
@@ -187,6 +244,12 @@ function QueueRow({
 
 function rowBody(item: AttentionItem): string {
   switch (item.kind) {
+    case 'permission':
+      // Verb, target and blast radius on the row itself: 12b's whole point is
+      // that you can judge an ask without opening the console first.
+      return [verbLabel(item.request.verb), item.request.target, item.request.detail]
+        .filter(Boolean)
+        .join(' · ');
     case 'question':
       return item.decision.question;
     case 'review':
@@ -205,6 +268,35 @@ function QueueDetail({
   controller: WorkstreamsController;
   agents: AgentsController;
 }) {
+  // A permission ask is the one item with no workstream behind it (T335): it
+  // belongs to a session Gritty observes, and the link to a workstream is
+  // opt-in and usually absent. Everything below this point assumes one.
+  if (isPermission(item)) {
+    return (
+      <div className="queue__detail-body">
+        <div className="queue__detail-head">
+          <span className="label">Selected · permission</span>
+          <span className="queue__spacer" />
+          <span className="island__dot island__dot--blocked" aria-hidden="true" />
+          <span className="queue__meta">{item.session.root ?? 'this machine'}</span>
+        </div>
+        <PermissionPrompt
+          request={item.request}
+          sessionLabel={taskLine(item.session) ?? item.session.id}
+          now={Date.now()}
+          busy={agents.answering === item.request.askId}
+          onAnswer={(verdict) => {
+            void agents.answerPermission(item.request.askId, verdict);
+          }}
+        />
+        <p className="queue__meta">
+          The same prompt is live in the agent's own terminal. Answering there works too — whichever
+          comes first wins.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="queue__detail-body">
       <div className="queue__detail-head">
