@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use gritty_core::CORE_EVENT_CHANNEL;
 use gritty_core::CoreError;
+use gritty_core::agent_session::attention::AttentionNotifier;
 use gritty_core::agent_session::{AgentDiscoveryConfig, AgentSessionManager};
 use gritty_core::document::{DocumentLimits, DocumentManager};
 use gritty_core::event::{EventBus, EventEnvelope, EventSink, FanOutSink};
@@ -26,6 +27,7 @@ use gritty_terminal::SystemPtyHost;
 use gritty_terminal::host::PtyHost;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
+use crate::notifications::PluginNotifier;
 use crate::shell::SystemOpener;
 
 /// How long shutdown waits for the session writer and for running operations.
@@ -89,6 +91,12 @@ impl Core {
     /// and never touch the real database).
     pub fn with_options<R: Runtime>(app: AppHandle<R>, options: CoreOptions) -> Self {
         let (tap, receiver) = SessionTap::new(TAP_CAPACITY);
+        // Built from the app handle for the same reason the event sink is: it
+        // is the platform, not a dependency the domain chooses. It reports
+        // itself unsupported when the plugin was never registered — a mock
+        // runtime in a test, or a platform that does not carry it — so nothing
+        // here has to know which case it is in (T223).
+        let notifier: Arc<dyn AttentionNotifier> = Arc::new(PluginNotifier::new(app.clone()));
         let events = EventBus::new(FanOutSink::new(vec![Arc::new(TauriEventSink { app }), tap]));
         // Tauri already runs a tokio runtime; the core builds on it (no second runtime).
         let handle = tauri::async_runtime::handle().inner().clone();
@@ -153,7 +161,11 @@ impl Core {
             workspaces.clone(),
             AgentDiscoveryConfig::for_current_home()
                 .with_data_dir(data_dir.as_deref())
-                .with_hook_binary(resolve_hook_binary()),
+                .with_hook_binary(resolve_hook_binary())
+                // Attention notifications (T223). Off until the user turns
+                // them on; passing the notifier only makes the setting
+                // *offerable*, and arms nothing.
+                .with_notifier(Some(notifier)),
         );
         Self {
             registry,

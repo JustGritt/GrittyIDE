@@ -4,6 +4,7 @@ import { createFakeTransport } from './testing/fake-transport';
 import type {
   AgentIntegration,
   AgentIntegrationChange,
+  AgentNotificationSettings,
   AgentRoster,
   AgentSession,
   HealthReport,
@@ -211,6 +212,49 @@ describe('agents integration client (T221)', () => {
       type: 'PERMISSION_PENDING',
       tool: 'Bash',
       detail: 'cargo test',
+    });
+  });
+
+  it('reads the notification setting without a request object and sets it with one', async () => {
+    const { transport, core } = client();
+    const off: AgentNotificationSettings = {
+      enabled: false,
+      supported: true,
+      permission: 'PROMPT',
+    };
+    transport.handlers.set('agents_notifications', () => off);
+    transport.handlers.set('agents_set_notifications', () => ({
+      enabled: true,
+      supported: true,
+      permission: 'GRANTED',
+    }));
+
+    await expect(core.agents.notifications()).resolves.toEqual(off);
+    await expect(core.agents.setNotifications({ enabled: true })).resolves.toMatchObject({
+      enabled: true,
+      permission: 'GRANTED',
+    });
+
+    const call = (command: string) => transport.calls.find((entry) => entry.command === command);
+    // A read takes no request at all — nothing about looking at the setting
+    // may produce a permission prompt.
+    expect(call('agents_notifications')?.args).toBeUndefined();
+    expect(call('agents_set_notifications')?.args).toEqual({ request: { enabled: true } });
+  });
+
+  it('reports a refusal as a value with the setting still off', async () => {
+    const { transport, core } = client();
+    transport.handlers.set('agents_set_notifications', () => ({
+      enabled: false,
+      supported: true,
+      permission: 'DENIED',
+    }));
+    // Not a rejection: a refusal is something the settings surface shows, not
+    // an error envelope the user has to dismiss before carrying on.
+    await expect(core.agents.setNotifications({ enabled: true })).resolves.toEqual({
+      enabled: false,
+      supported: true,
+      permission: 'DENIED',
     });
   });
 });

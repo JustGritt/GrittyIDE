@@ -10,6 +10,7 @@ use std::path::Path;
 use ts_rs::{Config, TS};
 
 use super::{CORE_EVENT_CHANNEL, PROTOCOL_VERSION};
+use crate::agent_session::attention::{AgentNotificationSettings, SetAgentNotificationsRequest};
 use crate::agent_session::wire::{
     AgentIntegration, AgentIntegrationChange, AgentIntegrationChangeRequest,
     AgentIntegrationRequest, AgentRoster, AgentSession, AgentTimeline,
@@ -42,6 +43,10 @@ use crate::terminal::wire::{
 use crate::workspace::{
     CloseWorkspaceRequest, ForgetWorkspaceRequest, ListDirectoryRequest, ListDirectoryResponse,
     OpenWorkspaceRequest, RecentWorkspace, RecentWorkspacesRequest, Workspace,
+};
+use crate::workstream::link::{
+    AgentLinkChange, LinkAgentRequest, ListAgentLinksRequest, UnlinkAgentRequest,
+    WorkstreamAgentLink,
 };
 use crate::workstream::wire::{
     CreateWorkstreamRequest, Decision, DismissDecisionRequest, ListDecisionsRequest,
@@ -79,6 +84,8 @@ fn export_bindings() {
     AgentIntegrationRequest::export_all(&cfg).expect("export AgentIntegrationRequest");
     AgentIntegrationChangeRequest::export_all(&cfg).expect("export AgentIntegrationChangeRequest");
     AgentIntegrationChange::export_all(&cfg).expect("export AgentIntegrationChange");
+    AgentNotificationSettings::export_all(&cfg).expect("export AgentNotificationSettings");
+    SetAgentNotificationsRequest::export_all(&cfg).expect("export SetAgentNotificationsRequest");
     CoreError::export_all(&cfg).expect("export CoreError");
     Operation::export_all(&cfg).expect("export Operation");
     CoreEvent::export_all(&cfg).expect("export CoreEvent");
@@ -129,6 +136,11 @@ fn export_bindings() {
     RaiseDecisionRequest::export_all(&cfg).expect("export RaiseDecisionRequest");
     ResolveDecisionRequest::export_all(&cfg).expect("export ResolveDecisionRequest");
     DismissDecisionRequest::export_all(&cfg).expect("export DismissDecisionRequest");
+    WorkstreamAgentLink::export_all(&cfg).expect("export WorkstreamAgentLink");
+    AgentLinkChange::export_all(&cfg).expect("export AgentLinkChange");
+    LinkAgentRequest::export_all(&cfg).expect("export LinkAgentRequest");
+    UnlinkAgentRequest::export_all(&cfg).expect("export UnlinkAgentRequest");
+    ListAgentLinksRequest::export_all(&cfg).expect("export ListAgentLinksRequest");
     OwnershipMap::export_all(&cfg).expect("export OwnershipMap");
     OwnershipAcquisition::export_all(&cfg).expect("export OwnershipAcquisition");
     OwnershipCheck::export_all(&cfg).expect("export OwnershipCheck");

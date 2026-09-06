@@ -51,6 +51,12 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 # only crate in the tree that opens a pseudo-terminal; kept behind the
 # `gritty-terminal` adapter so the rest of the core never sees it.
 portable-pty = "0.9.0"
+# T223 attention: raise a system notification when an observed agent session
+# stops and needs the user. Nothing in the tree can do this, and hand-rolling
+# `UNUserNotificationCenter` would need an `unsafe_code` allow against a
+# workspace-wide deny. Rust side only; the WebView is granted none of its
+# commands.
+tauri-plugin-notification = "2.4.0"
 # T090 terminal: safe wrappers for the POSIX signal calls that terminate a
 # whole process group (`killpg`). Avoids an `unsafe_code` allow for two calls;
 # unix-only, not compiled on Windows.

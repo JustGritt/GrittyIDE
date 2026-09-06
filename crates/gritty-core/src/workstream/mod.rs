@@ -23,6 +23,7 @@
 //! Every command reads the database back rather than trusting a cache: there
 //! is no in-memory copy that a failed write could leave lying.
 
+pub mod link;
 pub mod state;
 pub mod wire;
 
@@ -39,6 +40,10 @@ use crate::protocol::ids::{CorrelationId, DecisionId, WorkspaceId, WorkstreamId}
 use crate::protocol::time::Timestamp;
 use crate::workspace::WorkspaceManager;
 
+pub use link::{
+    AgentLinkChange, LinkAgentRequest, ListAgentLinksRequest, UnlinkAgentRequest,
+    WorkstreamAgentLink,
+};
 pub use state::WorkstreamState;
 pub use wire::{
     CreateWorkstreamRequest, Decision, DecisionOption, DecisionRequestedPayload,

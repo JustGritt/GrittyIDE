@@ -8,6 +8,8 @@ import {
   type AgentIntegrationChange,
   type AgentIntegrationChangeRequest,
   type AgentIntegrationRequest,
+  type AgentLinkChange,
+  type AgentNotificationSettings,
   type AgentRoster,
   type AgentTimeline,
   type AgentTimelineRequest,
@@ -30,6 +32,8 @@ import {
   type HealthReport,
   type KillTerminalRequest,
   type LastSession,
+  type LinkAgentRequest,
+  type ListAgentLinksRequest,
   type ListAgentSessionsRequest,
   type ListDecisionsRequest,
   type ListDirectoryRequest,
@@ -62,17 +66,20 @@ import {
   type ResolveDecisionRequest,
   type SaveDocumentRequest,
   type SessionRestoreResponse,
+  type SetAgentNotificationsRequest,
   type SpawnTerminalRequest,
   type StartDemoRequest,
   type Terminal,
   type TerminalProfile,
   type TransitionWorkstreamRequest,
+  type UnlinkAgentRequest,
   type UpdateDocumentRequest,
   type UpdateSessionRequest,
   type UpdateWorkstreamRequest,
   type Workspace,
   type WorkspaceId,
   type Workstream,
+  type WorkstreamAgentLink,
   type WriteTerminalRequest,
 } from './types';
 import { assertCompatible } from './version';
@@ -244,6 +251,31 @@ export interface CoreClient {
     update(request: UpdateWorkstreamRequest): Promise<Workstream>;
     transition(request: TransitionWorkstreamRequest): Promise<Workstream>;
     remove(request: RemoveWorkstreamRequest): Promise<void>;
+    /**
+     * Attach an observed agent session to this piece of work (T223).
+     *
+     * The link is a row of its own, never a field on `Workstream`: a
+     * workstream is durable, a discovered session is not, and one workstream
+     * legitimately accumulates several sessions over its life. Linking a
+     * session that is no longer in the roster is **allowed** — the roster is a
+     * snapshot of now and a link records a fact about the past.
+     *
+     * It grants no control. A linked session is still one Gritty does not own,
+     * and a `BLOCKED` session does not move its workstream.
+     *
+     * These return the workstream's links as they are afterwards rather than
+     * emitting an event: `changed` is `false` for a duplicate link and for an
+     * unlink of something that was not there, both of which are no-ops that
+     * leave the state the caller asked for.
+     */
+    linkAgent(request: LinkAgentRequest): Promise<AgentLinkChange>;
+    unlinkAgent(request: UnlinkAgentRequest): Promise<AgentLinkChange>;
+    /**
+     * Every link of the workspace, or of one workstream. A link whose session
+     * has left the roster is still returned — the UI renders "linked, not
+     * running" rather than dropping it or inventing a row.
+     */
+    agentLinks(request: ListAgentLinksRequest): Promise<WorkstreamAgentLink[]>;
   };
   /**
    * Decisions (T200): the questions that block a workstream, oldest first.
@@ -331,6 +363,26 @@ export interface CoreClient {
     integrationInstall(request: AgentIntegrationChangeRequest): Promise<AgentIntegrationChange>;
     /** The same shape, in reverse. Removes only Gritty's own entries. */
     integrationUninstall(request: AgentIntegrationChangeRequest): Promise<AgentIntegrationChange>;
+    /**
+     * System notifications when a session stops and needs you (T223).
+     *
+     * **Off by default, every run**, and reading this never produces a
+     * permission prompt — only `setNotifications({ enabled: true })` does, and
+     * only because the user asked. A refusal comes back as a value with
+     * `enabled: false` and `permission: 'DENIED'`, not as an error to dismiss,
+     * and nothing retries.
+     *
+     * `supported: false` means the setting is **absent** rather than broken:
+     * this build cannot raise a notification, so the UI offers no switch.
+     *
+     * The notification itself is raised from the Rust side, from the same
+     * place that already observes the roster diff — edge-triggered on entering
+     * `BLOCKED` or `WAITING`, throttled per session, capped globally, and
+     * silent while the Gritty window has focus. The renderer neither decides
+     * nor sends one.
+     */
+    notifications(): Promise<AgentNotificationSettings>;
+    setNotifications(request: SetAgentNotificationsRequest): Promise<AgentNotificationSettings>;
   };
   subscribe<N extends EventName>(name: N, handler: (event: EventOf<N>) => void): Unsubscribe;
   subscribeAll(handler: (event: EventEnvelope) => void): Unsubscribe;
@@ -456,6 +508,10 @@ export function createCoreClient(
       update: (request) => command<Workstream>('workstreams.update', { request }),
       transition: (request) => command<Workstream>('workstreams.transition', { request }),
       remove: (request) => command<void>('workstreams.remove', { request }),
+      linkAgent: (request) => command<AgentLinkChange>('workstreams.linkAgent', { request }),
+      unlinkAgent: (request) => command<AgentLinkChange>('workstreams.unlinkAgent', { request }),
+      agentLinks: (request) =>
+        command<WorkstreamAgentLink[]>('workstreams.agentLinks', { request }),
     },
     decisions: {
       list: (request) => command<Decision[]>('decisions.list', { request }),
@@ -482,6 +538,9 @@ export function createCoreClient(
         command<AgentIntegrationChange>('agents.integrationInstall', { request }),
       integrationUninstall: (request) =>
         command<AgentIntegrationChange>('agents.integrationUninstall', { request }),
+      notifications: () => command<AgentNotificationSettings>('agents.notifications'),
+      setNotifications: (request) =>
+        command<AgentNotificationSettings>('agents.setNotifications', { request }),
     },
     subscribe: (name, handler) => hub.subscribe(name, handler),
     subscribeAll: (handler) => hub.subscribeAll(handler),

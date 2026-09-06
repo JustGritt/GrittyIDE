@@ -706,3 +706,330 @@ async fn without_a_database_nothing_is_kept_and_every_command_says_so() {
         "a workstream that was never stored was never created"
     );
 }
+
+// ---------------------------------------------------------------------------
+// The agent link (T223)
+//
+// A workstream is durable and an observed session is not, so these tests are
+// mostly about what a link is *allowed* to be: to a session nobody can see,
+// to several sessions at once, and to the same session from two workstreams.
+// ---------------------------------------------------------------------------
+
+use crate::agent_session::wire::AgentProvider;
+use link::{LinkAgentRequest, ListAgentLinksRequest, UnlinkAgentRequest, WorkstreamAgentLink};
+
+impl Harness {
+    async fn link(
+        &self,
+        ws: &Workspace,
+        workstream: &WorkstreamId,
+        session_id: &str,
+    ) -> Result<link::AgentLinkChange, CoreError> {
+        self.manager
+            .link_agent(
+                LinkAgentRequest {
+                    workspace_id: ws.id.clone(),
+                    workstream_id: workstream.clone(),
+                    provider: AgentProvider::ClaudeCode,
+                    session_id: session_id.to_owned(),
+                },
+                CorrelationId::new(),
+            )
+            .await
+    }
+
+    async fn unlink(
+        &self,
+        ws: &Workspace,
+        workstream: &WorkstreamId,
+        session_id: &str,
+    ) -> Result<link::AgentLinkChange, CoreError> {
+        self.manager
+            .unlink_agent(
+                UnlinkAgentRequest {
+                    workspace_id: ws.id.clone(),
+                    workstream_id: workstream.clone(),
+                    provider: AgentProvider::ClaudeCode,
+                    session_id: session_id.to_owned(),
+                },
+                CorrelationId::new(),
+            )
+            .await
+    }
+
+    async fn links(
+        &self,
+        ws: &Workspace,
+        workstream: Option<&WorkstreamId>,
+    ) -> Vec<WorkstreamAgentLink> {
+        self.manager
+            .agent_links(
+                ListAgentLinksRequest {
+                    workspace_id: ws.id.clone(),
+                    workstream_id: workstream.cloned(),
+                },
+                CorrelationId::new(),
+            )
+            .await
+            .expect("read the links")
+    }
+}
+
+#[tokio::test]
+async fn a_link_is_allowed_to_name_a_session_nobody_can_see_and_survives_a_restart() {
+    let data = TempDir::new("link-restart");
+    let db = data.join(DB_FILE_NAME);
+    let dir = workspace_dir("link-restart");
+
+    let id = {
+        let harness = start(Some(&db));
+        let ws = harness.open_ws(&dir);
+        let workstream = harness.start_working(&ws, "Attention queue").await;
+        // The roster is a snapshot of *now*; a link records a fact about the
+        // past. Nothing here consults the roster, which is the point: refusing
+        // would make a link impossible for a session that ended two seconds ago.
+        let change = harness
+            .link(&ws, &workstream.id, "claude_code:pid-42")
+            .await
+            .expect("link");
+        assert!(change.changed);
+        assert_eq!(change.links.len(), 1);
+        assert_eq!(change.links[0].session_id, "claude_code:pid-42");
+        assert_eq!(change.links[0].provider, AgentProvider::ClaudeCode);
+        assert_eq!(change.links[0].workstream_id, workstream.id);
+        workstream.id
+    };
+
+    let harness = start(Some(&db));
+    let ws = harness.open_ws(&dir);
+    let links = harness.links(&ws, Some(&id)).await;
+    assert_eq!(links.len(), 1, "the link outlived the process");
+    assert_eq!(links[0].session_id, "claude_code:pid-42");
+    assert!(
+        !harness.sink.names().contains(&"WorkstreamChanged"),
+        "a link is not a change to the workstream"
+    );
+}
+
+#[tokio::test]
+async fn one_workstream_takes_several_sessions_and_one_session_serves_two_workstreams() {
+    let data = TempDir::new("link-many");
+    let dir = workspace_dir("link-many");
+    let harness = start(Some(&data.join(DB_FILE_NAME)));
+    let ws = harness.open_ws(&dir);
+    let auth = harness.start_working(&ws, "Authentication").await;
+    let search = harness.start_working(&ws, "Search").await;
+
+    // Resumed, restarted, a second agent on the same goal: a single field on
+    // the workstream would silently have meant "the most recent one".
+    harness.link(&ws, &auth.id, "s-1").await.expect("first");
+    harness.link(&ws, &auth.id, "s-2").await.expect("second");
+    // And the same session may legitimately be working on two things.
+    harness.link(&ws, &search.id, "s-1").await.expect("shared");
+
+    let of_auth = harness.links(&ws, Some(&auth.id)).await;
+    assert_eq!(
+        of_auth
+            .iter()
+            .map(|l| l.session_id.as_str())
+            .collect::<Vec<_>>(),
+        ["s-1", "s-2"]
+    );
+    assert_eq!(harness.links(&ws, Some(&search.id)).await.len(), 1);
+    assert_eq!(
+        harness.links(&ws, None).await.len(),
+        3,
+        "the whole workspace in one read, which is what the island draws"
+    );
+}
+
+#[tokio::test]
+async fn a_duplicate_link_and_an_absent_unlink_are_no_ops_that_say_so() {
+    let data = TempDir::new("link-idempotent");
+    let dir = workspace_dir("link-idempotent");
+    let harness = start(Some(&data.join(DB_FILE_NAME)));
+    let ws = harness.open_ws(&dir);
+    let workstream = harness.start_working(&ws, "Attention queue").await;
+
+    assert!(
+        harness
+            .link(&ws, &workstream.id, "s-1")
+            .await
+            .unwrap()
+            .changed
+    );
+    let again = harness.link(&ws, &workstream.id, "s-1").await.unwrap();
+    assert!(!again.changed, "the primary key makes it a no-op");
+    assert_eq!(again.links.len(), 1, "and not a second row");
+
+    let removed = harness.unlink(&ws, &workstream.id, "s-1").await.unwrap();
+    assert!(removed.changed);
+    assert!(removed.links.is_empty());
+    let nothing = harness.unlink(&ws, &workstream.id, "s-1").await.unwrap();
+    assert!(
+        !nothing.changed,
+        "unlinking twice leaves the state the caller asked for"
+    );
+}
+
+#[tokio::test]
+async fn deleting_the_workstream_takes_its_links_and_leaves_everyone_elses_alone() {
+    let data = TempDir::new("link-cascade");
+    let dir = workspace_dir("link-cascade");
+    let harness = start(Some(&data.join(DB_FILE_NAME)));
+    let ws = harness.open_ws(&dir);
+    let doomed = harness.start_working(&ws, "Doomed").await;
+    let kept = harness.start_working(&ws, "Kept").await;
+    harness.link(&ws, &doomed.id, "s-1").await.expect("link");
+    harness.link(&ws, &kept.id, "s-1").await.expect("link");
+
+    harness
+        .manager
+        .remove(
+            RemoveWorkstreamRequest {
+                workspace_id: ws.id.clone(),
+                workstream_id: doomed.id.clone(),
+            },
+            Actor::User,
+            CorrelationId::new(),
+        )
+        .await
+        .expect("remove");
+
+    let remaining = harness.links(&ws, None).await;
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].workstream_id, kept.id);
+}
+
+#[tokio::test]
+async fn links_of_another_workspace_are_not_reachable_and_a_missing_workstream_is_not_found() {
+    let data = TempDir::new("link-scope");
+    let db = data.join(DB_FILE_NAME);
+    let here = workspace_dir("link-here");
+    let there = workspace_dir("link-there");
+    let harness = start(Some(&db));
+
+    let other = harness.open_ws(&there);
+    let elsewhere = harness.start_working(&other, "Elsewhere").await;
+    harness
+        .link(&other, &elsewhere.id, "s-1")
+        .await
+        .expect("link");
+
+    let ws = harness.open_ws(&here);
+    assert!(
+        harness.links(&ws, None).await.is_empty(),
+        "another workspace's links are not this workspace's business"
+    );
+    let refused = harness
+        .link(&ws, &elsewhere.id, "s-2")
+        .await
+        .expect_err("not reachable from here");
+    assert_eq!(refused.code, CoreErrorCode::NotFound);
+    let read = harness
+        .manager
+        .agent_links(
+            ListAgentLinksRequest {
+                workspace_id: ws.id.clone(),
+                workstream_id: Some(elsewhere.id.clone()),
+            },
+            CorrelationId::new(),
+        )
+        .await
+        .expect_err("reads are scoped the same way");
+    assert_eq!(read.code, CoreErrorCode::NotFound);
+}
+
+#[tokio::test]
+async fn a_blank_session_id_is_refused_and_the_link_count_is_bounded() {
+    let data = TempDir::new("link-bounds");
+    let dir = workspace_dir("link-bounds");
+    let harness = start(Some(&data.join(DB_FILE_NAME)));
+    let ws = harness.open_ws(&dir);
+    let workstream = harness.start_working(&ws, "Bounded").await;
+
+    let blank = harness
+        .link(&ws, &workstream.id, "   ")
+        .await
+        .expect_err("a link to nothing is not a link");
+    assert_eq!(blank.code, CoreErrorCode::InvalidInput);
+    assert_eq!(blank.details.unwrap()["field"], "sessionId");
+
+    let long = harness
+        .link(&ws, &workstream.id, &"x".repeat(link::MAX_SESSION_ID + 1))
+        .await
+        .expect_err("bounded on the way in");
+    assert_eq!(long.code, CoreErrorCode::InvalidInput);
+
+    for index in 0..link::MAX_LINKS_PER_WORKSTREAM {
+        harness
+            .link(&ws, &workstream.id, &format!("s-{index}"))
+            .await
+            .expect("within the bound");
+    }
+    let over = harness
+        .link(&ws, &workstream.id, "one-too-many")
+        .await
+        .expect_err("the bound holds");
+    assert_eq!(over.code, CoreErrorCode::Conflict);
+    assert_eq!(
+        harness.links(&ws, Some(&workstream.id)).await.len(),
+        usize::try_from(link::MAX_LINKS_PER_WORKSTREAM).unwrap(),
+        "the refusal rolled its own insert back"
+    );
+    // A *duplicate* at the bound is still the no-op it always was: it asks for
+    // something that is already true.
+    let duplicate = harness
+        .link(&ws, &workstream.id, "s-0")
+        .await
+        .expect("no-op");
+    assert!(!duplicate.changed);
+}
+
+#[tokio::test]
+async fn without_a_database_every_link_command_fails_with_io() {
+    let dir = workspace_dir("link-no-db");
+    let harness = start(None);
+    let ws = harness.open_ws(&dir);
+    let id = WorkstreamId::from_raw("wst-1");
+
+    for error in [
+        harness.link(&ws, &id, "s-1").await.expect_err("link"),
+        harness.unlink(&ws, &id, "s-1").await.expect_err("unlink"),
+        harness
+            .manager
+            .agent_links(
+                ListAgentLinksRequest {
+                    workspace_id: ws.id.clone(),
+                    workstream_id: None,
+                },
+                CorrelationId::new(),
+            )
+            .await
+            .expect_err("read"),
+    ] {
+        assert_eq!(error.code, CoreErrorCode::Io);
+    }
+}
+
+#[tokio::test]
+async fn linking_does_not_change_the_workstreams_wire_shape() {
+    let data = TempDir::new("link-shape");
+    let dir = workspace_dir("link-shape");
+    let harness = start(Some(&data.join(DB_FILE_NAME)));
+    let ws = harness.open_ws(&dir);
+    let workstream = harness.create(&ws, "Unchanged").await;
+    let before = serde_json::to_string(&workstream).expect("serialise");
+
+    harness
+        .link(&ws, &workstream.id, "s-1")
+        .await
+        .expect("link");
+    let after = harness.one(&ws, &workstream.id).await;
+    assert_eq!(
+        serde_json::to_string(&after).expect("serialise"),
+        before,
+        "hard rule 6: a link is a row of its own, and the domain model does not \
+         grow a provider field because one exists"
+    );
+}
