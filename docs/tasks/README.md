@@ -66,7 +66,8 @@ the workflow below are hand-maintained.
 | T410 | Attention queue | 5 | T210, T325, T335 | unspec |
 | CI-COST | CI: self-hosted macOS runner, and stop burning metered minutes |  | – | review |
 | CI-LINUX-DARK | Linux CI is dark until the minute allowance resets (1 Oct) or a spending limit is set |  | – | blocked |
-| CI-RUNNER-GC | Self-hosted runner never cleans up: target/ and stale bundles grow unbounded on the dev Mac |  | – | unspec |
+| [CI-RUNNER-GC](CI-RUNNER-GC-disk-retention.md) | Self-hosted runner never cleans up: target/ and stale bundles grow unbounded on the dev Mac |  | – | review |
+| [EVENT-LISTEN-GAP](EVENT-LISTEN-GAP-startup-events.md) | An event emitted before the WebView is listening reaches nobody | 1 | T010 | review |
 <!-- board:table end -->
 
 ## Dependency graph (architecture addendum §2)

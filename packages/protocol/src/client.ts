@@ -92,6 +92,11 @@ export interface CoreClientOptions {
   onDiagnostic?: Diagnostic;
   /** Override the protocol version the client claims (tests only). */
   clientVersion?: string;
+  /**
+   * How long a command waits for the event listener before going anyway
+   * (tests only; the default is a safety valve a user never sees).
+   */
+  listenBudgetMs?: number;
 }
 
 export interface CoreClient {
@@ -420,7 +425,11 @@ export function createCoreClient(
 ): CoreClient {
   const diagnostic = options.onDiagnostic ?? defaultDiagnostic;
   const clientVersion = options.clientVersion ?? PROTOCOL_VERSION;
-  const hub = new EventHub(transport, CORE_EVENT_CHANNEL, diagnostic);
+  const hub = new EventHub(transport, CORE_EVENT_CHANNEL, diagnostic, options.listenBudgetMs);
+  // Open the event channel before anything asks for it. Registration is an IPC
+  // round trip, and starting it here means it overlaps the compatibility probe
+  // below instead of queueing behind whichever hook happens to subscribe first.
+  hub.start();
 
   let probe: Promise<HealthReport> | null = null;
   let refusal: CoreError | null = null;
@@ -453,6 +462,12 @@ export function createCoreClient(
 
   async function command<T>(name: CommandName, args?: Record<string, unknown>): Promise<T> {
     await ensureCompatible();
+    // The ordering guarantee (ADR-009): a command is not sent until the event
+    // listener is registered, so the events it causes cannot be emitted into a
+    // WebView that is not listening yet. `ready()` is bounded and fails open,
+    // and by here it has almost always resolved already — registration started
+    // at construction and the probe above is a full round trip.
+    await hub.ready();
     return invokeRaw<T>(name, args);
   }
 
