@@ -100,6 +100,31 @@ formally `Proposed`. Nothing in them rests on it — no new runtime assumption,
 and the Phase 0 measurements are untouched — but the gate is real, and an
 exception to it belongs in writing rather than in the commit log.
 
+## Amendment, 2026-09-06: Phase 1–2 starts against a `Proposed` ADR-001
+
+The sentence at the top of this file — "T070 (watcher), T080 (search) and the
+rest of Phases 1–2 start only after the Phase 0 runtime decision is recorded" —
+is **amended by Alexis' decision on 2026-09-06**, and T070 and T100 start now.
+`docs/plans/execution-board.md` says an early start "is an amendment to the
+roadmap and not a thing a lane decides on its own"; this paragraph is that
+amendment, written before the work rather than reconstructed from the commit
+log the way the T221/T230–T232 exception had to be.
+
+What is being accepted, stated plainly so it can be checked later:
+
+- **ADR-001 is still `Proposed`.** The ~170-minute manual pass in
+  `docs/testing/phase-0-manual-pass.md` is scheduled, not done. If it produces
+  a reject, T070 and T100 are domain crates behind the typed protocol
+  (`crates/workspace`, `crates/git`, `crates/gritty-core/src/git`), so a
+  runtime change costs them their command adapters, not their contents. That
+  is the reason this risk is judged small, and it is the claim to revisit.
+- **ADR-022 and ADR-023 are also `Proposed`, and drafted.** T100 builds against
+  ADR-023's recommendation (`gix`) and T080, when it starts, builds against
+  ADR-022's (in-process `grep`/`ignore`). Accepting those two is a short read
+  rather than a manual pass, and doing so retires this half of the risk.
+- **T097 and T080 are deliberately *not* covered by this amendment.** They wait
+  on ADR-017 and ADR-022 respectively — not on ADR-001.
+
 The comparison that motivated them is in ADR-018's context: Herdr ships the
 runtime layer (a detached daemon, 15+ agents, a socket API) and explicitly
 refuses worktree isolation, task graphs, approval policies and durable event

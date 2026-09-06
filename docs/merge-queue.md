@@ -90,12 +90,31 @@ file decides.
 
 | Thing | Value | Branch |
 |---|---|---|
-| – | nothing claimed | – |
+| `PROTOCOL_VERSION` | **2.13.0** | `T300-C` — the run contract (Gate D) |
+| `PROTOCOL_VERSION` | **2.14.0** | `T070` — file watcher |
+| `PROTOCOL_VERSION` | **2.15.0** | `T326` — observed ownership violations |
+| `SCHEMA_VERSION` + migration | **5** / `0005` | `T326` — and nothing else in this wave |
 
 Everything through `PROTOCOL_VERSION` **2.12.0**, `SCHEMA_VERSION` **4** and
-migration `0004_agent_links.sql` is on `main`. The next free values are
-**2.13.0**, **5** and **`0005`** — `PROTO-W2` takes 2.13.0 and T326 takes
-`0005`, and both claim here immediately before opening their PR.
+migration `0004_agent_links.sql` is on `main`.
+
+**These four rows were claimed together on 2026-09-06**, before any of the wave
+was written, which is the point of the exercise: three branches in this wave
+touch `PROTOCOL_VERSION` and the rule above says a collision costs a migration
+while a gap costs nothing. They are claimed in one place so that none of them
+has to guess "the next free one" against two siblings it cannot see.
+
+**`PROTO-W2`'s claim on 2.13.0 is released.** It was a planning claim for a
+ticket that turns out to have no specification anywhere — the board row, the
+wave position and that version claim are all of it, with no command names or
+event variants written down — so it is not in this wave and cannot spend a
+number. It takes the next free minor when someone writes it, which the five
+completion reports from this wave are meant to make possible.
+
+**T100 claims nothing.** `docs/tasks/T100-git-baseline.md:62-63` already defers
+its wire to `PROTO-W2`, so it builds `crates/git/` and
+`crates/gritty-core/src/git/` and stops at the magnet.
+
 The per-lane minors in `execution-board.md` are a planning hint and are already
 wrong: 2.11 was reserved there for T070 and T223 took it.
 

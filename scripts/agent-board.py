@@ -100,17 +100,25 @@ LANE_SCOPES: dict[str, list[str]] = {
         "crates/terminal/**",
         "crates/gritty-core/src/terminal/**",
         "apps/desktop/src/features/terminal/**",
+        "docs/decisions/ADR-017-terminal-command-blocks.md",
     ],
     "A": [
         "crates/agents/**",
         "crates/agent-hook/**",
         "crates/gritty-core/src/agent_session/**",
+        "crates/gritty-core/src/ownership/**",
         "apps/desktop/src/features/agents/**",
         "apps/desktop/src/features/workstreams/**",
         "crates/platform/**",
     ],
     "O": [
         "crates/gritty-core/src/agent_run/**",
+        # The one deliberate overlap in this dict: it sits inside Lane A's
+        # `crates/agents/**`. `execution-board.md` carries it with the caveat
+        # "(T310 — coordinate with Lane A first)", so it is reproduced with the
+        # caveat rather than silently dropped. No Lane O ticket before T310
+        # touches it; whoever takes T310 sequences with Lane A by hand.
+        "crates/agents/adapters/**",
     ],
     "O2": [
         "crates/agent-fake/**",
@@ -122,6 +130,11 @@ LANE_SCOPES: dict[str, list[str]] = {
         "crates/gritty-core/src/diagnostics/**",
         "apps/desktop/src/features/diagnostics/**",
     ],
+    # Lane H is Alexis: the manual pass, ADR verdicts, and the reviews. It owns
+    # no files by design, so an `H` ticket claims no lease — but the lane has to
+    # exist here, or `take` falls back to an empty default and the row silently
+    # says nothing about who is doing the work.
+    "H": [],
 }
 
 
