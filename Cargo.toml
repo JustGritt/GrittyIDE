@@ -19,6 +19,7 @@ gritty-persistence = { path = "crates/persistence" }
 gritty-terminal = { path = "crates/terminal" }
 gritty-agents = { path = "crates/agents" }
 gritty-agent-hook = { path = "crates/agent-hook" }
+gritty-git = { path = "crates/git" }
 tauri = { version = "2.11.5", features = [] }
 tauri-build = { version = "2.6.3", features = [] }
 serde = { version = "1.0.229", features = ["derive"] }
@@ -61,6 +62,18 @@ tauri-plugin-notification = "2.4.0"
 # whole process group (`killpg`). Avoids an `unsafe_code` allow for two calls;
 # unix-only, not compiled on Windows.
 nix = { version = "0.31.3", features = ["signal", "process", "user"] }
+# T100 git: read a repository in-process (ADR-023). Pure Rust end to end, so
+# the one subsystem whose inputs are an attacker's file format never reaches a C
+# parser, and no `git` subprocess inherits the user's configuration as ambient
+# authority. `default-features = false` drops `extras`, which is what keeps the
+# network transports, credential helpers and `signal-hook` out of the build:
+# nothing here can fetch or authenticate. Only `crates/git` depends on it.
+gix = { version = "0.87.1", default-features = false, features = [
+  "status",
+  "revision",
+  "max-performance-safe",
+  "sha1",
+] }
 
 [workspace.lints.rust]
 # Unsafe code needs a justified, reviewed `#![allow(unsafe_code)]` in the crate.

@@ -10,6 +10,7 @@ publish.workspace = true
 
 [dependencies]
 gritty-agents = { workspace = true }
+gritty-git = { workspace = true }
 gritty-persistence = { workspace = true }
 gritty-terminal = { workspace = true }
 gritty-workspace = { workspace = true }
@@ -24,6 +25,9 @@ url = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+# Repositories built at test time (T100). The feature is off in the production
+# build, where nothing runs the `git` binary (ADR-023).
+gritty-git = { workspace = true, features = ["fixtures"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
 
 [lints]
