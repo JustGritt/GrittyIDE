@@ -286,7 +286,8 @@ warnings`, `cargo test --workspace`) — **exit 0**, every crate green,
 - `packages/editor/src/monaco/model-eol.dom.test.ts` — `beforeAll` hook times
   out loading Monaco at 10 s. Verified pre-existing: stashed to the bare base
   commit `e8ada81` and it fails identically. Nothing here touches
-  `packages/editor`.
+  `packages/editor`, and the board already carries it as **`MONACO-JSDOM-FLAKE`**
+  ("model-eol.dom.test.ts times out its 10s beforeAll under load").
 - `packages/markdown/src/render.test.ts` "within budget" — a 2 000 ms wall-clock
   assertion, measured 2 530–2 900 ms with five agents building on this machine.
   Passes in isolation (`pnpm vitest run --project markdown`, 54 passed).
@@ -390,6 +391,14 @@ The rail's other machine-observed events already use `System`.
 does not render a button whose only outcome is an error. `CANCEL` is relabelled
 "Acknowledge", because withdrawing a request you never made is not what the
 user is doing.
+
+### §7's `execution-board.md` correction
+
+Already made, before this branch was cut. `docs/plans/execution-board.md:185`
+now reads "**'Read side only' does not survive contact with T326**", names the
+`close_conflict`/`close_conflicts_for_lease` exception explicitly, and points at
+§§6–8. Nothing was left for this task to correct there, so
+`execution-board.md` is untouched by this branch.
 
 ### §2 against the shape T223 actually landed with
 
