@@ -97,6 +97,14 @@ jobs:
         with:
           clean: false
 
+      # CI-RUNNER-GC: `clean: false` above is why this has to exist. Refuse
+      # loudly, before pnpm/cargo touch the disk, rather than let a build die
+      # forty minutes in with an opaque "No space left on device". The floor
+      # is dated evidence, not a guess — see the script's --floor-gb comment
+      # and the task file's completion report for how it was measured.
+      - name: Disk guard (refuse to start if target/ has eaten the disk)
+        run: python3 scripts/runner-gc.py guard --floor-gb 25
+
       - uses: pnpm/action-setup@v6
 
       - uses: actions/setup-node@v7
@@ -129,3 +137,15 @@ jobs:
           name: Gritty.app-macos-arm64
           path: target/release/bundle/macos/Gritty.app
           retention-days: 7
+
+      # CI-RUNNER-GC: strictly after the upload above, and `if: always()` so a
+      # failed build (which still leaves incremental/deps/build state behind)
+      # gets swept too — a failed job is exactly when nobody is watching the
+      # disk. Sweeps every target/ this machine has (this checkout and every
+      # `.claude/worktrees/*` lane), not just this job's own, and detects a
+      # live build (a local `cargo` invocation, or another concurrent job) and
+      # skips that directory rather than deleting under it — see
+      # scripts/runner-gc.py and the task file's Failure behavior section.
+      - name: Prune target/ and stale bundles (skips anything a live build holds)
+        if: always()
+        run: python3 scripts/runner-gc.py sweep --apply

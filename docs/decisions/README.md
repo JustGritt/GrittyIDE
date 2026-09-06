@@ -28,6 +28,7 @@ requires updating the relevant ADR.
 | [ADR-020](ADR-020-agent-permission-verdicts.md) | A hook may wait for Gritty's verdict on a permission prompt, bounded and fail-open | Accepted |
 | [ADR-022](ADR-022-search-engine.md) | Search runs in-process on ripgrep's own crates, and "ignored" keeps its current, narrower meaning | Proposed |
 | [ADR-023](ADR-023-git-library.md) | Git is read in-process through `gix`, with no `git` process and no configuration that can run one | Proposed |
+| [ADR-024](ADR-024-target-dir-retention.md) | One `target/` per checkout, swept by budget and age — not a shared `CARGO_TARGET_DIR` | Accepted |
 
 Template:
 
