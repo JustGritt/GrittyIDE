@@ -5,7 +5,7 @@ policy that everything crossing the UI/core boundary obeys, a lister that reads
 exactly one directory level per call, and — since T070 — a watch that keeps
 both of those from going stale. Decisions are in
 [ADR-010](../decisions/ADR-010-workspace-paths.md) (root, paths, listing) and
-[ADR-024](../decisions/ADR-024-filesystem-watching.md) (watching); this
+[ADR-025](../decisions/ADR-025-filesystem-watching.md) (watching); this
 document is the map.
 
 ## Layers

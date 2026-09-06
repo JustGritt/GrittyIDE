@@ -1,4 +1,4 @@
-//! Watching the open workspace (T070, ADR-024).
+//! Watching the open workspace (T070, ADR-025).
 //!
 //! A watch turns two on-demand checks proactive — the external-modification
 //! check ADR-011 runs on `documents.status`, and the explorer's listing — and

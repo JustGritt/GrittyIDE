@@ -1,4 +1,4 @@
-//! The open workspace's filesystem watch (T070, ADR-024), wired to the event
+//! The open workspace's filesystem watch (T070, ADR-025), wired to the event
 //! bus.
 //!
 //! `gritty-workspace` owns the backend, the coalescing and the bounds; this

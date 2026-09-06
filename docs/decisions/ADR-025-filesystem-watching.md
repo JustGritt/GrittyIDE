@@ -1,4 +1,4 @@
-# ADR-024: Filesystem watching is one coalesced, bounded, directory-grained signal
+# ADR-025: Filesystem watching is one coalesced, bounded, directory-grained signal
 
 - **Status:** Proposed
 - **Date:** 2026-09-06

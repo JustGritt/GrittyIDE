@@ -252,7 +252,7 @@ pnpm check
 
 ## Completion report
 
-**ADR-024 was written before the code**, as "Motivation" asked, and the spec was
+**ADR-025 was written before the code**, as "Motivation" asked, and the spec was
 accepted rather than revised — except in one place, §9, where the ADR records
 *how* the ignore pruning is achieved (see "Architectural decisions").
 
@@ -289,7 +289,7 @@ the next command.
 | `apps/desktop/src/features/explorer/use-explorer-watch.dom.test.tsx` (new) | 3 tests: the batch actually re-lists, counted per path — a loaded directory once, an unopened one never, every loaded node on `overflowed` |
 | `apps/desktop/src/features/documents/use-documents.ts` | the branch (§13); `checkStatus` moved above the subscription that now uses it |
 | `apps/desktop/src/features/documents/use-documents-watch.dom.test.tsx` (new) | 2 tests: the branch calls `documents.status` once per batch |
-| `docs/decisions/ADR-024-filesystem-watching.md` (new), `docs/decisions/README.md` | the decision |
+| `docs/decisions/ADR-025-filesystem-watching.md` (new), `docs/decisions/README.md` | the decision |
 | `docs/architecture/workspace.md` (new) | the domain had no page; it does now |
 | `docs/architecture/documents.md` | the stale "it is not watched (T070)" line, corrected |
 | `docs/plans/phase-0-spike.md` | A6 and B5, filled with measurements |
@@ -355,7 +355,7 @@ re-lists all of those — never the storm's size. Asserted in
 
 ### Architectural decisions
 
-1. **Directories, not entries** (ADR-024). FSEvents coalesces by directory and
+1. **Directories, not entries** (ADR-025). FSEvents coalesces by directory and
    cannot say which entry moved across a rename, so a per-entry protocol would
    be a promise one platform cannot keep. The cost is the accepted non-goal: a
    file changed in place leaves a stale `size`/`modifiedAt` in its explorer row
