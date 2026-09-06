@@ -3,6 +3,7 @@ import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
 import { AgentsSection, agentsPillLabel } from '../agents/agents-panel';
 import type { AgentsController } from '../agents/use-agents';
+import { AgentLinkSection, linkedRowLabel } from './agent-link-panel';
 import {
   type AttentionItem,
   attentionItems,
@@ -158,7 +159,12 @@ export function AgentIsland({
               </p>
             ) : (
               rosterOrder(workstreams).map((workstream) => (
-                <RosterRow key={workstream.id} workstream={workstream} controller={controller} />
+                <RosterRow
+                  key={workstream.id}
+                  workstream={workstream}
+                  controller={controller}
+                  agents={agents}
+                />
               ))
             )}
           </div>
@@ -168,6 +174,11 @@ export function AgentIsland({
           {/* Who may write where (T325). Under the roster, because a claim is
               made on behalf of a workstream that is already in it. */}
           <OwnershipSection controller={controller} />
+
+          {/* Which observed session is working on which of them (T223). Next
+              to ownership because both are statements about a workstream made
+              from outside it, and neither is control. */}
+          <AgentLinkSection controller={controller} agents={agents} />
 
           {/* Below the user's own work, because it is not the user's own work:
               these are sessions Gritty observes but does not own (T220). */}
@@ -378,10 +389,14 @@ function isTypingInField(target: EventTarget | null): boolean {
 function RosterRow({
   workstream,
   controller,
+  agents,
 }: {
   workstream: Workstream;
   controller: WorkstreamsController;
+  /** The same roster the rail reads, so the two cannot disagree (T223 §17). */
+  agents: AgentsController;
 }) {
+  const linked = linkedRowLabel(controller, agents, workstream.id);
   return (
     <div className="island__row">
       <span
@@ -400,6 +415,10 @@ function RosterRow({
       {ownsLabel(controller.ownership, workstream.id) && (
         <span className="island__row-owns">{ownsLabel(controller.ownership, workstream.id)}</span>
       )}
+      {/* What is working on it, live when it is in the roster and "not
+          running" when it is not — never dropped, because the link is what
+          happened (T223 §12). */}
+      {linked && <span className="island__row-agents">{linked}</span>}
       <span className="island__spacer" />
       {/* Exactly the moves the core allows, straight from the wire: the
           renderer keeps no copy of the state machine (T200). */}

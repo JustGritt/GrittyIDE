@@ -1,4 +1,5 @@
 import {
+  type AgentProvider,
   type ConflictId,
   type ConflictResolution,
   type CoreError,
@@ -13,6 +14,7 @@ import {
   toCoreError,
   type Workspace,
   type Workstream,
+  type WorkstreamAgentLink,
   type WorkstreamId,
   type WorkstreamState,
 } from '@gritty/protocol';
@@ -58,6 +60,23 @@ export interface WorkstreamsController {
   release(leaseId: LeaseId): Promise<void>;
   checkOwnership(target: OwnershipTarget): Promise<OwnershipCheck | undefined>;
   resolveConflict(conflictId: ConflictId, action: ConflictResolution): Promise<void>;
+  /**
+   * Which agent sessions are attached to which workstream (T223).
+   *
+   * Held here rather than beside the roster because the island and the queue
+   * both draw it, and T210's rule is that the two surfaces read one controller.
+   * It is the *stored* link and nothing else: joining it against the live
+   * roster is `agent-links.ts`'s job, so a session that has gone renders as
+   * "not running" instead of vanishing.
+   */
+  readonly agentLinks: WorkstreamAgentLink[];
+  readonly agentLinksLoaded: boolean;
+  linkAgent(workstreamId: WorkstreamId, provider: AgentProvider, sessionId: string): Promise<void>;
+  unlinkAgent(
+    workstreamId: WorkstreamId,
+    provider: AgentProvider,
+    sessionId: string,
+  ): Promise<void>;
 }
 
 /**
@@ -72,6 +91,11 @@ export interface WorkstreamsController {
 export function useWorkstreams(workspace: Workspace | null): WorkstreamsController {
   const [state, dispatch] = useReducer(workstreamsReducer, initialWorkstreamsState);
   const [ownership, dispatchOwnership] = useReducer(ownershipReducer, initialOwnershipState);
+  // A plain list rather than a reducer: nothing emits an event for a link, so
+  // there is nothing to reconcile — the command that changed it returns the
+  // fresh set, and this replaces that workstream's slice with it (T223 §14).
+  const [links, setLinks] = useState<WorkstreamAgentLink[]>([]);
+  const [linksLoaded, setLinksLoaded] = useState(false);
   const [error, setError] = useState<CoreError | null>(null);
   const [inFlight, setInFlight] = useState(0);
   const workspaceId = workspace?.id ?? null;
@@ -92,20 +116,25 @@ export function useWorkstreams(workspace: Workspace | null): WorkstreamsControll
   useEffect(() => {
     dispatch({ type: 'workspace', workspace });
     dispatchOwnership({ type: 'workspace', workspace });
+    setLinks([]);
+    setLinksLoaded(false);
     if (!workspace) return;
     let active = true;
-    // All three in one pass: the queue needs decisions and conflicts, and
+    // All four in one pass: the queue needs decisions and conflicts, and
     // asking for them separately would show a roster with no reason for its
     // BLOCKED rows.
     Promise.all([
       core.workstreams.list({ workspaceId: workspace.id }),
       core.decisions.list({ workspaceId: workspace.id }),
       core.ownership.list({ workspaceId: workspace.id }),
+      core.workstreams.agentLinks({ workspaceId: workspace.id }),
     ]).then(
-      ([workstreams, decisions, map]) => {
+      ([workstreams, decisions, map, agentLinks]) => {
         if (!active) return;
         dispatch({ type: 'loaded', workstreams, decisions });
         dispatchOwnership({ type: 'loaded', map });
+        setLinks(agentLinks);
+        setLinksLoaded(true);
       },
       (cause: unknown) => {
         if (active) setError(toCoreError(cause));
@@ -183,7 +212,12 @@ export function useWorkstreams(workspace: Workspace | null): WorkstreamsControll
         await core.workstreams.remove({ workspaceId: id, workstreamId });
         return true;
       });
-      if (done) dispatch({ type: 'removed', workstreamId });
+      if (done) {
+        dispatch({ type: 'removed', workstreamId });
+        // The database cascaded its links away; this is the renderer catching
+        // up, not a second source of truth.
+        setLinks((current) => current.filter((link) => link.workstreamId !== workstreamId));
+      }
     },
     [run],
   );
@@ -263,6 +297,43 @@ export function useWorkstreams(workspace: Workspace | null): WorkstreamsControll
     [run],
   );
 
+  /** Replace one workstream's slice with what the core just read back. */
+  const applyLinks = useCallback(
+    (workstreamId: WorkstreamId, fresh: readonly WorkstreamAgentLink[]) => {
+      setLinks((current) => [
+        ...current.filter((link) => link.workstreamId !== workstreamId),
+        ...fresh,
+      ]);
+    },
+    [],
+  );
+
+  const linkAgent = useCallback(
+    async (workstreamId: WorkstreamId, provider: AgentProvider, sessionId: string) => {
+      const id = workspaceRef.current;
+      if (!id) return;
+      const change = await run(() =>
+        core.workstreams.linkAgent({ workspaceId: id, workstreamId, provider, sessionId }),
+      );
+      // Nothing optimistic (T210's rule): the core's own snapshot is what
+      // lands, and a duplicate simply returns the set that was already there.
+      if (change) applyLinks(workstreamId, change.links);
+    },
+    [run, applyLinks],
+  );
+
+  const unlinkAgent = useCallback(
+    async (workstreamId: WorkstreamId, provider: AgentProvider, sessionId: string) => {
+      const id = workspaceRef.current;
+      if (!id) return;
+      const change = await run(() =>
+        core.workstreams.unlinkAgent({ workspaceId: id, workstreamId, provider, sessionId }),
+      );
+      if (change) applyLinks(workstreamId, change.links);
+    },
+    [run, applyLinks],
+  );
+
   const resolveConflict = useCallback(
     async (conflictId: ConflictId, action: ConflictResolution) => {
       const id = workspaceRef.current;
@@ -294,5 +365,9 @@ export function useWorkstreams(workspace: Workspace | null): WorkstreamsControll
     release: releaseLease,
     checkOwnership,
     resolveConflict,
+    agentLinks: links,
+    agentLinksLoaded: linksLoaded,
+    linkAgent,
+    unlinkAgent,
   };
 }

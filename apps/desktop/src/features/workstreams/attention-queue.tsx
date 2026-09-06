@@ -1,6 +1,8 @@
 import type { Workstream } from '@gritty/protocol';
 import { useEffect, useState } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
+import type { AgentsController } from '../agents/use-agents';
+import { LinkedSessions } from './agent-link-panel';
 import {
   type AttentionFilter,
   type AttentionItem,
@@ -29,9 +31,15 @@ import type { WorkstreamsController } from './use-workstreams';
  */
 export function AttentionQueue({
   controller,
+  agents,
   onClose,
 }: {
   controller: WorkstreamsController;
+  /**
+   * The roster, so an item can say which agent sessions are working on it
+   * (T223 §17). Read-only here: the queue links nothing, the island does.
+   */
+  agents: AgentsController;
   onClose(): void;
 }) {
   const { workstreams, decisions, ownership } = controller;
@@ -104,7 +112,7 @@ export function AttentionQueue({
 
         <aside className="queue__detail">
           {selected ? (
-            <QueueDetail item={selected} controller={controller} />
+            <QueueDetail item={selected} controller={controller} agents={agents} />
           ) : (
             <div className="queue__detail-empty">
               <p>Everything that needs you shows up here.</p>
@@ -190,9 +198,11 @@ function rowBody(item: AttentionItem): string {
 function QueueDetail({
   item,
   controller,
+  agents,
 }: {
   item: AttentionItem;
   controller: WorkstreamsController;
+  agents: AgentsController;
 }) {
   return (
     <div className="queue__detail-body">
@@ -265,6 +275,19 @@ function QueueDetail({
           </>
         )}
       </dl>
+
+      {/* What is working on it (T223 §17). Below the facts, because a link is
+          a statement about the work rather than one of its own fields — and a
+          session that has left the roster still shows, as "not running". */}
+      <div className="queue__detail-agents">
+        <span className="label">Agent sessions</span>
+        <LinkedSessions controller={controller} agents={agents} workstreamId={item.workstream.id} />
+        {controller.agentLinks.every((link) => link.workstreamId !== item.workstream.id) && (
+          <p className="queue__meta">
+            Nothing linked. The island is where a session is attached to a piece of work.
+          </p>
+        )}
+      </div>
 
       <div className="queue__detail-moves">
         <span className="label">Move it</span>

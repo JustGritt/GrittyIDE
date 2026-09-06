@@ -251,7 +251,11 @@ export function App() {
           null both before and after that, `phase` is what tells them apart. */}
       {workspace && queueOpen ? (
         <div className="shell__body shell__body--queue">
-          <AttentionQueue controller={workstreams} onClose={() => setQueueOpen(false)} />
+          <AttentionQueue
+            controller={workstreams}
+            agents={agents}
+            onClose={() => setQueueOpen(false)}
+          />
         </div>
       ) : workspace ? (
         <div className={`shell__body shell__body--rail${rail.open ? '' : '-collapsed'}`}>
