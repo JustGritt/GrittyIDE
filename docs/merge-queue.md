@@ -86,12 +86,23 @@ file decides.
 | `PROTOCOL_VERSION` | **2.11.0** | `t223-agent-attention` |
 | `SCHEMA_VERSION` | **4** | `t223-agent-attention` |
 | migration `0004` | `0004_agent_links.sql` | `t223-agent-attention` |
+| `PROTOCOL_VERSION` | **2.12.0** | `t335-agent-permissions` |
+| `SCHEMA_VERSION` | **5** | `t335-agent-permissions` |
+| migration `0005` | `0005_agent_permissions.sql` | `t335-agent-permissions` |
 
 `PROTOCOL_VERSION` **2.10.0**, `SCHEMA_VERSION` **3** and migration `0003` were
 #21's and are now on `main`. `t223-agent-attention` is spending 2.11.0, 4 and
 `0004`, so the next free values after it are **2.12.0**, **5** and **`0005`**.
 The per-lane minors in `execution-board.md` are a planning hint and are already
 wrong: 2.11 was reserved there for T070 and T223 took it.
+
+T335 is spending 2.12.0, 5 and `0005`, so the next free values after it are
+**2.13.0**, **6** and **`0006`**. Its other seams, for whoever lands beside it:
+`crates/agents/src/hook.rs` (the state-file format, version 1 → 2),
+`crates/gritty-core/src/protocol/export.rs`, `crates/persistence/src/store.rs`,
+`packages/protocol/src/{client,commands,types}.ts` and
+`docs/architecture/agent-sessions.md` — the same set T223 lists, so the two must
+not be in flight together. It **adds** a `CoreEvent` variant.
 
 T223's other seams, for whoever lands beside it:
 `docs/architecture/{agent-sessions,workstreams,persistence}.md`,
