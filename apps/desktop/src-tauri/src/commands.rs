@@ -13,8 +13,9 @@ use std::time::Instant;
 
 use gritty_core::agent_session::{
     AgentIntegration, AgentIntegrationChange, AgentIntegrationChangeRequest,
-    AgentIntegrationRequest, AgentNotificationSettings, AgentRoster, AgentTimeline,
-    AgentTimelineRequest, ListAgentSessionsRequest, SetAgentNotificationsRequest,
+    AgentIntegrationRequest, AgentNotificationSettings, AgentPermissionGrants, AgentRoster,
+    AgentTimeline, AgentTimelineRequest, AnswerPermissionRequest, ListAgentSessionsRequest,
+    RevokeGrantRequest, SetAgentNotificationsRequest,
 };
 use gritty_core::document::{
     CloseDocumentRequest, Document, DocumentContent, DocumentStatusRequest, OpenDocumentRequest,
@@ -707,6 +708,63 @@ pub async fn agents_set_notifications(
     guard("agents.setNotifications", move |_| async move {
         let request: SetAgentNotificationsRequest = parse_request(request)?;
         Ok(agents.set_notifications(request.enabled))
+    })
+    .await
+}
+
+/// `agents.answerPermission`
+///
+/// The one command in the agent surface that acts on a session rather than
+/// reporting on it (T335, ADR-020), and it carries a decision the user just
+/// took rather than one the core derived.
+///
+/// Answering an ask that has already gone is deliberately **not** an error: the
+/// user may have answered in the terminal first, and ADR-020 says both paths
+/// are live at once. The fresh roster comes back either way, which is what the
+/// caller needs in order to stop drawing a prompt that is no longer there.
+#[tauri::command]
+pub async fn agents_answer_permission(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentRoster, CoreError> {
+    let agents = core.agents.clone();
+    guard("agents.answerPermission", move |_| async move {
+        let request: AnswerPermissionRequest = parse_request(request)?;
+        Ok(agents
+            .answer_permission(&request.ask_id, request.verdict)
+            .await)
+    })
+    .await
+}
+
+/// `agents.permissionGrants`
+#[tauri::command]
+pub async fn agents_permission_grants(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentPermissionGrants, CoreError> {
+    let agents = core.agents.clone();
+    guard("agents.permissionGrants", move |_| async move {
+        let _: ListAgentSessionsRequest = parse_request(request)?;
+        Ok(agents.permission_grants())
+    })
+    .await
+}
+
+/// `agents.revokeGrant`
+///
+/// What Undo calls, and the standing-rules row. Not a rollback: the tool the
+/// grant allowed has already run, and what is taken back is only the standing
+/// part, so the next matching ask returns to the user.
+#[tauri::command]
+pub async fn agents_revoke_grant(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentRoster, CoreError> {
+    let agents = core.agents.clone();
+    guard("agents.revokeGrant", move |_| async move {
+        let request: RevokeGrantRequest = parse_request(request)?;
+        Ok(agents.revoke_grant(&request.grant_id).await)
     })
     .await
 }

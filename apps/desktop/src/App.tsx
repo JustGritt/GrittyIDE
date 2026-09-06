@@ -4,6 +4,11 @@ import { Splitter } from './components/splitter';
 import { boundsWithin } from './components/splitter-geometry';
 import { core } from './core/client';
 import { AgentRail } from './features/agents/agent-rail';
+import {
+  askingSessions,
+  isPermissionQueueChord,
+  PermissionBanner,
+} from './features/agents/permission-banner';
 import { useAgentRail } from './features/agents/use-agent-rail';
 import { useAgents } from './features/agents/use-agents';
 import { activeTab } from './features/documents/documents-reducer';
@@ -114,6 +119,23 @@ export function App() {
       setIslandOpen(false);
     }
   }, [workspace]);
+
+  // ⌥⌘A opens the queue on its permissions (artboard 12b). A fourth hand-gated
+  // listener, because there is still no shortcut registry — the same apology
+  // `agent-rail.tsx`, `island.tsx` and `terminal-panel.tsx` each make. It does
+  // not collide with the island's ⌥A: every existing matcher rejects `metaKey`.
+  useEffect(() => {
+    if (!workspace) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!isPermissionQueueChord(event)) return;
+      event.preventDefault();
+      setIslandOpen(false);
+      setQueueOpen(true);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [workspace]);
+
   const active = activeTab(documents.state);
   const activeEol = active ? (editor.eols[active.document.id] ?? null) : null;
   const session = useSession({
@@ -244,6 +266,19 @@ export function App() {
         }
       />
       <SessionNotices session={session} />
+      {/* Above the panes and never over them: a background ask states itself
+          and gets out of the way (artboard 12b). Not while the queue is open —
+          the queue is where it is going, and a banner pointing at the surface
+          you are already looking at is noise. */}
+      {workspace && !queueOpen && (
+        <PermissionBanner
+          sessions={agents.roster.sessions}
+          onOpenQueue={() => {
+            setIslandOpen(false);
+            setQueueOpen(true);
+          }}
+        />
+      )}
       <DropOverlay drop={drop} />
       {/* The panels are hidden until a workspace exists (T049, artboard 3a),
           and the launcher waits for the session to settle rather than
@@ -396,6 +431,7 @@ export function App() {
         subscribeCursor={editor.subscribeCursor}
         documents={documents}
         onClose={closeFlow.request}
+        permissionsWaiting={askingSessions(agents.roster.sessions).length}
       />
       {closeFlow.tab && (
         <CloseDialog

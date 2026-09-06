@@ -22,6 +22,7 @@ export function StatusBar({
   subscribeCursor,
   documents,
   onClose,
+  permissionsWaiting,
 }: {
   health: HealthState;
   workspace: Workspace | null;
@@ -30,6 +31,15 @@ export function StatusBar({
   subscribeCursor: (listener: (position: CursorPosition) => void) => () => void;
   documents: DocumentsController;
   onClose: (documentId: DocumentId) => void;
+  /**
+   * Agents stopped at a permission prompt (T335, artboard 12b).
+   *
+   * The one thing from 12b's status bar that is earned: `step 4/6` needs runs
+   * Gritty owns (T300) and `files held` needs T223's opt-in link, so neither is
+   * drawn. This is a *count*, not a name — the bar says something needs you and
+   * the queue says what.
+   */
+  permissionsWaiting: number;
 }) {
   const [cursor, setCursor] = useState<CursorPosition | null>(null);
   useEffect(() => subscribeCursor(setCursor), [subscribeCursor]);
@@ -39,6 +49,13 @@ export function StatusBar({
       <span className={`statusbar__build statusbar__build--${health.status}`}>
         {buildLabel(health)}
       </span>
+      {permissionsWaiting > 0 && (
+        <span className="statusbar__permissions">
+          {permissionsWaiting === 1
+            ? '1 permission waiting'
+            : `${permissionsWaiting} permissions waiting`}
+        </span>
+      )}
       {tab ? (
         <DocumentFacts
           tab={tab}

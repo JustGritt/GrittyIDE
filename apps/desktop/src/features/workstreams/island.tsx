@@ -2,6 +2,7 @@ import type { Decision, Workstream } from '@gritty/protocol';
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
 import { AgentsSection, agentsPillLabel } from '../agents/agents-panel';
+import { verbLabel } from '../agents/permission-model';
 import type { AgentsController } from '../agents/use-agents';
 import { AgentLinkSection, linkedRowLabel } from './agent-link-panel';
 import {
@@ -47,7 +48,7 @@ export function AgentIsland({
   onOpenQueue(): void;
 }) {
   const { workstreams, decisions, ownership } = controller;
-  const items = attentionItems(workstreams, decisions, ownership);
+  const items = attentionItems(workstreams, decisions, ownership, agents.roster.sessions);
   const sheet = useRef<HTMLDivElement | null>(null);
   const island = useRef<HTMLDivElement | null>(null);
   const labelId = useId();
@@ -231,6 +232,29 @@ function IslandAttention({
             Release {item.owner.title}'s claim
           </button>
         </div>
+      </div>
+    );
+  }
+  if (item.kind === 'permission') {
+    // The island is a strip in the top bar; a permission ask needs a diff, a
+    // blast radius and three answers, and artboard 12b gives it the queue for
+    // exactly that reason. So this says what is waiting and where it is
+    // answered, rather than offering a cramped copy of the card — and the count
+    // beside it is what actually earns the strip.
+    return (
+      <div className="island__card island__card--permission">
+        <div className="island__card-head">
+          <span className="island__dot island__dot--blocked" aria-hidden="true" />
+          <span className="label">Permission</span>
+          <span className="island__spacer" />
+          <span className="island__meta">{waitedFor(item.since, Date.now())}</span>
+        </div>
+        <div className="island__card-body">
+          {verbLabel(item.request.verb)} · {item.request.target}
+        </div>
+        <p className="island__meta">
+          Answer it in the queue, where the change it would make is shown in full.
+        </p>
       </div>
     );
   }

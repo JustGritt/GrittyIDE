@@ -40,7 +40,13 @@ use crate::transcript::MAX_TOOL_DETAIL;
 /// A file carrying a *newer* version than this build understands is skipped
 /// rather than guessed at: forward compatibility over a hard failure, and over
 /// a confident misreading of fields that may have changed meaning.
-pub const HOOK_STATE_VERSION: u32 = 1;
+///
+/// **2** added [`HookState::ask`] (T335, ADR-020). An older file still parses:
+/// every field the version added is optional, and a state file with no ask is
+/// exactly what version 1 always wrote. The bump exists so a *newer* hook left
+/// behind by an upgrade is skipped rather than half-read, not to strand an
+/// older one.
+pub const HOOK_STATE_VERSION: u32 = 2;
 
 /// Longest session id kept. A UUID is 36 characters; anything appreciably
 /// longer is not an id this build can join on anyway.
@@ -51,6 +57,20 @@ pub const MAX_HOOK_EVENT: usize = 64;
 pub const MAX_HOOK_TOOL: usize = MAX_TOOL_DETAIL;
 /// Longest working directory kept. Display only; never resolved as a path.
 pub const MAX_HOOK_CWD: usize = 240;
+
+/// Longest ask id kept. Minted by the hook, and long enough that a verdict
+/// file cannot be guessed by another process on the machine.
+pub const MAX_HOOK_ASK_ID: usize = 64;
+/// Longest ask target kept — a path, or the command a `Bash` ask is about.
+pub const MAX_HOOK_TARGET: usize = 400;
+/// Longest blast-radius line kept: "network access · reaches crates.io".
+pub const MAX_HOOK_DETAIL: usize = 240;
+/// Longest single diff line kept. A permission prompt shows the shape of a
+/// change, never the whole of it.
+pub const MAX_HOOK_DIFF_LINE: usize = 200;
+/// Most diff lines kept. Three either side of a hunk header is what the ask
+/// needs to be judgeable; more is a diff view's job (T030), not a prompt's.
+pub const MAX_HOOK_DIFF_LINES: usize = 8;
 
 /// What the *agent* said it was doing. Not an activity.
 ///
@@ -112,6 +132,86 @@ pub fn phase_of_event(event: &str) -> Option<HookPhase> {
     }
 }
 
+/// What kind of thing an ask is about.
+///
+/// Four values, because four is what a bounded classifier can defend. The
+/// point is not taxonomy: it is that "write file" and "run command" carry
+/// different consequences, and a person answering in a hurry should not have
+/// to read a path to tell which one they are looking at. Anything the
+/// classifier is unsure of is [`AskVerb::Other`] and shows the tool's own
+/// name — an honest shrug rather than a confident miscategorisation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AskVerb {
+    WriteFile,
+    RunCommand,
+    InstallDependency,
+    Other,
+}
+
+impl AskVerb {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::WriteFile => "WRITE_FILE",
+            Self::RunCommand => "RUN_COMMAND",
+            Self::InstallDependency => "INSTALL_DEPENDENCY",
+            Self::Other => "OTHER",
+        }
+    }
+
+    fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "WRITE_FILE" => Some(Self::WriteFile),
+            "RUN_COMMAND" => Some(Self::RunCommand),
+            "INSTALL_DEPENDENCY" => Some(Self::InstallDependency),
+            "OTHER" => Some(Self::Other),
+            _ => None,
+        }
+    }
+}
+
+/// The subject of a permission prompt: what, where, and how much.
+///
+/// T221 deliberately recorded none of this — its own test was called
+/// `the_tool_input_is_never_recorded` — because a phase was all a roster row
+/// needed and a tool's input is the most sensitive thing a hook ever sees.
+/// ADR-020 changes the requirement, not the caution: an ask a person is asked
+/// to *answer* has to say what it would do, so the input is now recorded
+/// **bounded, and redacted where the target's content is presumed secret**.
+///
+/// Every field is clipped by the hook before it reaches the disk and clipped
+/// again by [`scan`] on the way back, exactly as the rest of [`HookState`] is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookAsk {
+    /// Names the verdict file, so it must be unguessable by another process on
+    /// the machine and unusable as a path (see [`sanitize_id`]).
+    pub ask_id: String,
+    pub verb: AskVerb,
+    /// The path being written, or the command being run. Display only: like
+    /// [`HookState::cwd`], it is never resolved, opened or executed.
+    pub target: String,
+    /// The blast radius in one line — "network access · reaches crates.io",
+    /// "writes package.json + pnpm-lock.yaml". Absent when nothing beyond the
+    /// target is worth saying.
+    pub detail: Option<String>,
+    /// A few sign-prefixed lines (`+`, `-`, or a leading space) showing the
+    /// shape of the change. Empty when there is nothing to show, and empty
+    /// *deliberately* when [`HookAsk::sensitive`] is set.
+    pub diff: Vec<String>,
+    pub added: u32,
+    pub removed: u32,
+    /// Whether the target lies outside the session's own working directory.
+    ///
+    /// Computed **in the hook**, which is the only place that knows both the
+    /// session's real root and the real target. Neither ever crosses the
+    /// protocol (ADR-010); this boolean is what 12a draws as "outside its
+    /// worktree", and it costs no path.
+    pub outside_root: bool,
+    /// The target's content is presumed secret, so no diff was captured. Said
+    /// out loud rather than left as an empty diff, because "we did not look"
+    /// and "there was nothing to see" are different answers.
+    pub sensitive: bool,
+}
+
 /// One session's current phase, as the agent reported it.
 ///
 /// Every string in here has been through [`bounded`] twice: once in the hook
@@ -141,6 +241,11 @@ pub struct HookState {
     /// The session's working directory, for display and for nothing else.
     /// Never resolved, never opened, never joined on.
     pub cwd: Option<String>,
+    /// What the session is asking permission to do, when the event was one
+    /// that asks. Only ever set alongside [`HookPhase::Blocked`]: an ask
+    /// attached to any other phase would be describing something that already
+    /// happened (T335, ADR-020).
+    pub ask: Option<HookAsk>,
 }
 
 impl HookState {
@@ -178,6 +283,14 @@ impl HookState {
                 .as_deref()
                 .map(|tool| bounded(tool, MAX_HOOK_TOOL)),
             cwd: self.cwd.as_deref().map(|cwd| bounded(cwd, MAX_HOOK_CWD)),
+            // An ask only ever describes a session that is *stopped*. Dropping
+            // it on any other phase is not tidying: a `PostToolUse` carrying an
+            // ask would leave a prompt on screen for something already done.
+            ask: self
+                .ask
+                .as_ref()
+                .filter(|_| self.phase == HookPhase::Blocked)
+                .map(HookAsk::clipped),
         }
     }
 
@@ -194,6 +307,9 @@ impl HookState {
         }
         if let Some(cwd) = &self.cwd {
             object.insert("cwd".to_owned(), Value::from(cwd.clone()));
+        }
+        if let Some(ask) = &self.ask {
+            object.insert("ask".to_owned(), ask.to_json());
         }
         Value::Object(object).to_string()
     }
@@ -235,8 +351,138 @@ impl HookState {
                 .get("cwd")
                 .and_then(Value::as_str)
                 .map(|cwd| bounded(cwd, MAX_HOOK_CWD)),
+            // Absent in every version-1 file, and absent in a version-2 file
+            // for every phase but `BLOCKED`. Unreadable is the same as absent:
+            // losing an ask costs a prompt its detail, never the phase that
+            // says a session is waiting at all.
+            ask: object.get("ask").and_then(HookAsk::from_json),
         })
     }
+}
+
+impl HookAsk {
+    fn clipped(&self) -> Self {
+        Self {
+            ask_id: bounded(&self.ask_id, MAX_HOOK_ASK_ID),
+            verb: self.verb,
+            target: bounded(&self.target, MAX_HOOK_TARGET),
+            detail: self
+                .detail
+                .as_deref()
+                .map(|detail| bounded(detail, MAX_HOOK_DETAIL))
+                .filter(|detail| !detail.is_empty()),
+            // Sensitive targets carry no diff at all — the bound is not what
+            // protects them, the refusal to look is.
+            diff: if self.sensitive {
+                Vec::new()
+            } else {
+                self.diff
+                    .iter()
+                    .take(MAX_HOOK_DIFF_LINES)
+                    .map(|line| clipped_diff_line(line))
+                    .collect()
+            },
+            added: self.added,
+            removed: self.removed,
+            outside_root: self.outside_root,
+            sensitive: self.sensitive,
+        }
+    }
+
+    fn to_json(&self) -> Value {
+        let mut object = serde_json::Map::new();
+        object.insert("id".to_owned(), Value::from(self.ask_id.clone()));
+        object.insert("verb".to_owned(), Value::from(self.verb.as_str()));
+        object.insert("target".to_owned(), Value::from(self.target.clone()));
+        if let Some(detail) = &self.detail {
+            object.insert("detail".to_owned(), Value::from(detail.clone()));
+        }
+        if !self.diff.is_empty() {
+            object.insert("diff".to_owned(), Value::from(self.diff.clone()));
+        }
+        if self.added > 0 || self.removed > 0 {
+            object.insert("added".to_owned(), Value::from(self.added));
+            object.insert("removed".to_owned(), Value::from(self.removed));
+        }
+        if self.outside_root {
+            object.insert("outsideRoot".to_owned(), Value::from(true));
+        }
+        if self.sensitive {
+            object.insert("sensitive".to_owned(), Value::from(true));
+        }
+        Value::Object(object)
+    }
+
+    /// An ask that cannot name itself is no ask at all: without an id there is
+    /// nothing to write a verdict against, so the whole value is dropped
+    /// rather than half-kept.
+    fn from_json(raw: &Value) -> Option<Self> {
+        let object = raw.as_object()?;
+        let ask_id = bounded(object.get("id")?.as_str()?, MAX_HOOK_ASK_ID);
+        if sanitize_id(&ask_id).as_deref() != Some(ask_id.as_str()) {
+            return None;
+        }
+        let sensitive = object
+            .get("sensitive")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        Some(Self {
+            ask_id,
+            verb: AskVerb::parse(object.get("verb")?.as_str()?)?,
+            target: bounded(object.get("target")?.as_str()?, MAX_HOOK_TARGET),
+            detail: object
+                .get("detail")
+                .and_then(Value::as_str)
+                .map(|detail| bounded(detail, MAX_HOOK_DETAIL))
+                .filter(|detail| !detail.is_empty()),
+            diff: if sensitive {
+                Vec::new()
+            } else {
+                object
+                    .get("diff")
+                    .and_then(Value::as_array)
+                    .map(|lines| {
+                        lines
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .take(MAX_HOOK_DIFF_LINES)
+                            .map(clipped_diff_line)
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            },
+            added: object
+                .get("added")
+                .and_then(Value::as_u64)
+                .and_then(|n| u32::try_from(n).ok())
+                .unwrap_or(0),
+            removed: object
+                .get("removed")
+                .and_then(Value::as_u64)
+                .and_then(|n| u32::try_from(n).ok())
+                .unwrap_or(0),
+            outside_root: object
+                .get("outsideRoot")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            sensitive,
+        })
+    }
+}
+
+/// Clips a diff line while keeping the sign that gives it meaning.
+///
+/// [`bounded`] trims, which would eat the leading space that marks a context
+/// line and turn it into something the renderer draws as an addition. So the
+/// sign is taken off, the text is bounded, and the sign goes back on.
+fn clipped_diff_line(line: &str) -> String {
+    // A line that arrived without a sign is context, and saying so is safer
+    // than letting the renderer guess from the first character.
+    let (sign, rest) = match line.split_at_checked(1) {
+        Some((sign @ ("+" | "-" | " "), rest)) => (sign, rest),
+        _ => (" ", line),
+    };
+    format!("{sign}{}", bounded(rest, MAX_HOOK_DIFF_LINE))
 }
 
 /// The directory the state files live in, under Gritty's own app-data
@@ -261,7 +507,7 @@ pub fn state_path(state_dir: &Path, session_id: &str) -> Option<PathBuf> {
 
 /// Keeps the characters an agent session id is actually made of and refuses
 /// everything else, so nothing in a payload can steer the write.
-fn sanitize_id(session_id: &str) -> Option<String> {
+pub(crate) fn sanitize_id(session_id: &str) -> Option<String> {
     let kept: String = session_id
         .chars()
         .take(MAX_HOOK_SESSION_ID)
@@ -510,6 +756,7 @@ mod tests {
             event: "PermissionRequest".to_owned(),
             tool: Some("Bash".to_owned()),
             cwd: Some("/Users/someone/code/gritty".to_owned()),
+            ask: None,
         }
     }
 

@@ -60,7 +60,7 @@ the workflow below are hand-maintained.
 | [T325](T325-workspace-ownership.md) | Workspace ownership registry | 4 | T200, T210, ADR-019 | done |
 | [T326](T326-ownership-violations.md) | Observed ownership violations | 4 | T223, T230, T325 | todo |
 | T330 | Write interception (enforced ownership) | 4 | T325, ADR-018 amendment | unspec |
-| T335 | Decision interruption | 4 | T300, T200 | unspec |
+| [T335](T335-agent-permissions.md) | Permissions: asked in place, answered in a queue (12a/12b) | 4 | T210, T221, T232, ADR-020 | review |
 | T400 | Worktree isolation | 5 | T100, T325 | unspec |
 | T405 | Ownership-aware scheduler | 5 | T325, T300 | unspec |
 | T410 | Attention queue | 5 | T210, T325, T335 | unspec |
@@ -93,7 +93,9 @@ T200 Workstream model (done: state machine, decisions, persistence)
      │    ├─ T230 Agent timeline (follower, domain, protocol — no UI)
      │    │    ├─ T221 Hook bridge → BLOCKED (ADR-018; needs T230's fast loop)
      │    │    │    ├─ T222 More providers (Codex …)
-     │    │    │    └─ T223 Notifications + workstream link
+     │    │    │    ├─ T223 Notifications + workstream link
+     │    │    │    └─ T335 Permissions answered (ADR-020 amends ADR-018 §5;
+     │    │    │         the hook may wait for a verdict, bounded, fail-open)
      │    │    └─ T231 Agent rail (third region, status colours)
      │    │         └─ T232 Timeline view + files touched
      │    └─ T224 Reveal the terminal (independent of the rest)
@@ -101,12 +103,11 @@ T200 Workstream model (done: state machine, decisions, persistence)
      │    ├─ T305 Capability model
      │    │    └─ T310 First real adapter
      │    │         └─ T315 Live agent activity — already built by T220–T232
-     │    ├─ T320 Context manifest
-     │    └─ T335 Decision interruption
+     │    └─ T320 Context manifest
      └─ T325 Workspace ownership registry (observed; holds a workstream's
           │   claims, refuses a second one — it does not stop a write)
           ├─ T326 Observed violations (needs T223's session↔workstream link)
-          ├─ T330 Write interception (needs an ADR-018 amendment)
+          ├─ T330 Write interception (ADR-020 is the amendment it needed)
           ├─ T400 Worktree isolation
           ├─ T405 Ownership-aware scheduler
           └─ T410 Attention queue
@@ -116,6 +117,12 @@ The Phase 4–5 numbering follows `docs/plans/Gritty Agent Runtime
 Coordination.md` §36, adopted by ADR-019. **`T330` means write interception
 here**; decision interruption, which older documents call T330, is `T335`.
 Completion reports keep the number they were written with.
+
+**`T335` did not wait for T300.** It was written as permission prompts, and it
+sits under T221's hook bridge rather than under agent runs, because ADR-020
+established that a hook may be answered — which is the mechanism T330 was also
+waiting for. What still belongs to T300 is a run Gritty *starts*: typing into an
+agent, cancelling a turn, and the structured questions a run raises.
 
 ## Working a task
 

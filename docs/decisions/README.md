@@ -25,6 +25,7 @@ requires updating the relevant ADR.
 | [ADR-017](ADR-017-terminal-command-blocks.md) | Terminal command blocks are a renderer-side view of xterm's scrollback | Proposed |
 | [ADR-018](ADR-018-agent-integration-bridge.md) | Gritty may install a hook into another tool's configuration, additively and with consent | Accepted |
 | [ADR-019](ADR-019-workspace-ownership.md) | Write ownership is a logical lease held by a workstream, and it is observed rather than enforced | Accepted |
+| [ADR-020](ADR-020-agent-permission-verdicts.md) | A hook may wait for Gritty's verdict on a permission prompt, bounded and fail-open | Accepted |
 
 Template:
 

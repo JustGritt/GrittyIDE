@@ -33,12 +33,20 @@
 //! Hook state is *evidence, not authority*: it joins onto a session the other
 //! two sources already found, never creates one on its own, and never outranks
 //! the absence of a process.
+//!
+//! One thing travels the other way, and only one (T335, ADR-020). When the
+//! user answers a permission prompt, [`verdict`] carries that answer back to
+//! the waiting hook. It is the single exception to the sentence above, and it
+//! is narrow on purpose: a verdict is not something this crate derived, it is
+//! a decision a person took. Everything else here still starts nothing, stops
+//! nothing and answers nothing.
 
 pub mod hook;
 pub mod integration;
 pub mod json;
 pub mod probe;
 pub mod transcript;
+pub mod verdict;
 
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};

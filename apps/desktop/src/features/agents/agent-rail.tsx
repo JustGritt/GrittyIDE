@@ -169,6 +169,10 @@ export function AgentRail({
               openingPath={rail.openingPath}
               canOpenFiles={rail.canOpenFiles}
               onOpenFile={rail.openFile}
+              answering={agents.answering}
+              onAnswerPermission={(askId, verdict) => {
+                void agents.answerPermission(askId, verdict);
+              }}
             />
           )}
         </div>

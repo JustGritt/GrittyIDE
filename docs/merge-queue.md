@@ -86,12 +86,31 @@ file decides.
 | `PROTOCOL_VERSION` | **2.11.0** | `t223-agent-attention` |
 | `SCHEMA_VERSION` | **4** | `t223-agent-attention` |
 | migration `0004` | `0004_agent_links.sql` | `t223-agent-attention` |
+| `PROTOCOL_VERSION` | **2.12.0** | `t335-agent-permissions` |
 
 `PROTOCOL_VERSION` **2.10.0**, `SCHEMA_VERSION` **3** and migration `0003` were
 #21's and are now on `main`. `t223-agent-attention` is spending 2.11.0, 4 and
 `0004`, so the next free values after it are **2.12.0**, **5** and **`0005`**.
 The per-lane minors in `execution-board.md` are a planning hint and are already
 wrong: 2.11 was reserved there for T070 and T223 took it.
+
+T335 is spending 2.12.0 **and nothing else**. It claimed `SCHEMA_VERSION` 5 and
+migration `0005` while it was being planned and has **released both**: permission
+grants turned out to belong in memory rather than in the database — a standing
+"yes" that outlived the process that took it would be authority nobody remembers
+granting — so nothing here is persisted. **`SCHEMA_VERSION` 5 and migration
+`0005` are free.** That matters more than a released protocol minor would: a
+protocol gap costs nothing, and a migration gap breaks the build.
+
+Its other seams, for whoever lands beside it:
+`crates/agents/src/hook.rs` (the state-file format, version 1 → 2),
+`crates/gritty-core/src/protocol/export.rs`,
+`packages/protocol/src/{client,commands,types}.ts`,
+`crates/agents/src/integration.rs` (the installed command line gains
+`--ask-timeout`, and the `PermissionRequest` entry gains a `timeout`) and
+`docs/architecture/agent-sessions.md`. It adds **no** `CoreEvent` variant — its
+commands return a fresh roster, the way T223's do — and touches
+`crates/persistence` not at all.
 
 T223's other seams, for whoever lands beside it:
 `docs/architecture/{agent-sessions,workstreams,persistence}.md`,

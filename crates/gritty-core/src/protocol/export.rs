@@ -13,8 +13,9 @@ use super::{CORE_EVENT_CHANNEL, PROTOCOL_VERSION};
 use crate::agent_session::attention::{AgentNotificationSettings, SetAgentNotificationsRequest};
 use crate::agent_session::wire::{
     AgentIntegration, AgentIntegrationChange, AgentIntegrationChangeRequest,
-    AgentIntegrationRequest, AgentRoster, AgentSession, AgentTimeline,
-    AgentTimelineAppendedPayload, AgentTimelineRequest, ListAgentSessionsRequest,
+    AgentIntegrationRequest, AgentPermissionAnswer, AgentPermissionGrant, AgentPermissionGrants,
+    AgentPermissionRequest, AgentRoster, AgentSession, AgentTimeline, AgentTimelineAppendedPayload,
+    AgentTimelineRequest, AnswerPermissionRequest, ListAgentSessionsRequest, RevokeGrantRequest,
 };
 use crate::document::{
     CloseDocumentRequest, DocumentContent, DocumentStatusRequest, OpenDocumentRequest,
@@ -86,6 +87,12 @@ fn export_bindings() {
     AgentIntegrationChange::export_all(&cfg).expect("export AgentIntegrationChange");
     AgentNotificationSettings::export_all(&cfg).expect("export AgentNotificationSettings");
     SetAgentNotificationsRequest::export_all(&cfg).expect("export SetAgentNotificationsRequest");
+    AgentPermissionRequest::export_all(&cfg).expect("export AgentPermissionRequest");
+    AgentPermissionAnswer::export_all(&cfg).expect("export AgentPermissionAnswer");
+    AgentPermissionGrant::export_all(&cfg).expect("export AgentPermissionGrant");
+    AgentPermissionGrants::export_all(&cfg).expect("export AgentPermissionGrants");
+    AnswerPermissionRequest::export_all(&cfg).expect("export AnswerPermissionRequest");
+    RevokeGrantRequest::export_all(&cfg).expect("export RevokeGrantRequest");
     CoreError::export_all(&cfg).expect("export CoreError");
     Operation::export_all(&cfg).expect("export Operation");
     CoreEvent::export_all(&cfg).expect("export CoreEvent");

@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use gritty_agents::hook::{HookPhase, HookState};
+use gritty_agents::hook::{AskVerb, HookAsk, HookPhase, HookState};
 use gritty_agents::{
     CommandRunner, DiscoveredSession, Discovery, Evidence, ProcessFacts, Provider, ToolCall,
 };
@@ -62,6 +62,7 @@ fn hook(phase: HookPhase, age_ms: i64, tool: Option<&str>) -> HookState {
         event: "PermissionRequest".to_owned(),
         tool: tool.map(str::to_owned),
         cwd: None,
+        ask: None,
     }
 }
 
@@ -292,6 +293,17 @@ fn manager_with_hooks(
     manager_with(runner, hooks, None)
 }
 
+/// Verdicts and the liveness marker go beside whatever state directory a test
+/// gave the manager, so answering is exercised against real files rather than
+/// stubbed out. Nothing here touches a real application-data directory.
+fn permission_paths(state_dir: &Path) -> PermissionPaths {
+    let parent = state_dir.parent().unwrap_or(state_dir);
+    PermissionPaths {
+        verdicts: parent.join("verdicts"),
+        marker: parent.join("live"),
+    }
+}
+
 /// The same, with an injected attention notifier (T223). Nothing in this file
 /// reaches a real notification centre.
 fn manager_with(
@@ -316,6 +328,7 @@ fn manager_with(
             timeline_interval: Duration::from_secs(3_600),
             idle_after: DEFAULT_IDLE_AFTER,
             home: Some(PathBuf::from("/Users/someone")),
+            permissions: hooks.as_deref().map(permission_paths),
             hooks: hooks.map(gritty_agents::HookScanOptions::rooted_at),
             hook_binary: None,
             notifier,
@@ -426,6 +439,7 @@ fn ranked(activity: AgentActivity, in_workspace: bool, last_active_ms: u64) -> A
         pid: None,
         tty: None,
         last_active_at: Some(Timestamp::from_millis(last_active_ms)),
+        pending: None,
     }
 }
 
@@ -571,6 +585,11 @@ impl TempTranscripts {
         Some(gritty_agents::HookScanOptions::rooted_at(self.hook_dir()))
     }
 
+    /// Where the hook would look for a verdict, given where it writes state.
+    fn verdicts(&self) -> PathBuf {
+        self.0.join("verdicts")
+    }
+
     /// Write what the agent's hook would have written for this session.
     fn record_phase(&self, session: &str, phase: HookPhase, tool: Option<&str>) {
         let state = HookState {
@@ -582,11 +601,45 @@ impl TempTranscripts {
             event: "PermissionRequest".to_owned(),
             tool: tool.map(str::to_owned),
             cwd: Some("/Users/a/p".to_owned()),
+            ask: None,
         };
         assert_eq!(
             gritty_agents::hook::write(&self.hook_dir(), &state),
             gritty_agents::WriteOutcome::Written
         );
+    }
+
+    /// The same, carrying the ask a permission prompt is about (T335).
+    fn record_ask(&self, session: &str, ask_id: &str, verb: AskVerb, target: &str) {
+        let state = HookState {
+            version: gritty_agents::hook::HOOK_STATE_VERSION,
+            session_id: session.to_owned(),
+            provider: Provider::ClaudeCode,
+            phase: HookPhase::Blocked,
+            since_ms: gritty_agents::now_ms(),
+            event: "PermissionRequest".to_owned(),
+            tool: Some("Write".to_owned()),
+            cwd: Some("/Users/a/p".to_owned()),
+            ask: Some(HookAsk {
+                ask_id: ask_id.to_owned(),
+                verb,
+                target: target.to_owned(),
+                detail: None,
+                diff: vec!["+fn main() {}".to_owned()],
+                added: 1,
+                removed: 0,
+                outside_root: false,
+                sensitive: false,
+            }),
+        };
+        assert_eq!(
+            gritty_agents::hook::write(&self.hook_dir(), &state),
+            gritty_agents::WriteOutcome::Written
+        );
+    }
+
+    fn verdict_for(&self, ask_id: &str) -> Option<gritty_agents::verdict::Verdict> {
+        gritty_agents::verdict::take(&self.verdicts(), ask_id)
     }
 
     fn forget_phase(&self, session: &str) {
@@ -665,6 +718,7 @@ fn manager_over_with(
             timeline_interval: Duration::from_secs(3_600),
             idle_after: DEFAULT_IDLE_AFTER,
             home: Some(PathBuf::from("/Users/someone")),
+            permissions: Some(permission_paths(&root.hook_dir())),
             hooks: root.hooks(),
             hook_binary: None,
             notifier: None,
@@ -1247,6 +1301,7 @@ impl TempHome {
                 timeline_interval: Duration::from_secs(3_600),
                 idle_after: DEFAULT_IDLE_AFTER,
                 home: Some(self.0.clone()),
+                permissions: None,
                 hooks: Some(gritty_agents::HookScanOptions::rooted_at(
                     self.0.join("data/agents/state"),
                 )),
@@ -1588,6 +1643,213 @@ async fn nothing_is_raised_while_the_window_has_focus() {
     assert!(
         notifier.shown().is_empty(),
         "a manager starts focused, and while it is focused the island is the notification"
+    );
+    manager.shutdown();
+}
+
+// ---------------------------------------------------------------------------
+// Permissions (T335, ADR-020)
+//
+// The one place this module acts rather than reports. What these assert is not
+// that a verdict file appears — the hook's own tests do that end to end — but
+// the domain rules around it: that an ask reaches the roster where a background
+// agent's prompt is visible, that answering removes it everywhere at once, and
+// that "for this run" means exactly that.
+// ---------------------------------------------------------------------------
+
+/// A live session with a prompt the hook described.
+async fn asking(
+    root: &TempTranscripts,
+    ask_id: &str,
+    target: &str,
+) -> (Arc<AgentSessionManager>, String) {
+    let id = root.seed(TEST_SESSION);
+    let (manager, _sink) = manager_over_running(root, live_claude());
+    manager.refresh().await;
+    root.record_ask(TEST_SESSION, ask_id, AskVerb::WriteFile, target);
+    manager.follow_once().await;
+    (manager, id)
+}
+
+#[tokio::test]
+async fn an_ask_reaches_the_roster_so_an_unwatched_agent_is_still_visible() {
+    // The structural reason this lives on the session and not only on the
+    // timeline: only one timeline is followed at a time, and artboard 12b is
+    // about the agents nobody is watching.
+    let root = TempTranscripts::new("ask-roster");
+    let (manager, id) = asking(
+        &root,
+        "ask-1",
+        "/Users/someone/p/crates/terminal/src/pty.rs",
+    )
+    .await;
+
+    let roster = manager.list().await;
+    let row = roster
+        .sessions
+        .iter()
+        .find(|s| s.id == id)
+        .expect("the row");
+    let pending = row.pending.clone().expect("the ask");
+    assert_eq!(pending.ask_id, "ask-1");
+    assert_eq!(pending.verb, AgentPermissionVerb::WriteFile);
+    assert_eq!(
+        pending.target, "~/p/crates/terminal/src/pty.rs",
+        "shortened by the core, because the renderer has no home directory"
+    );
+    assert_eq!(
+        pending.suggested_scope.as_deref(),
+        Some("~/p/crates/terminal/src"),
+        "and it can say what \"for this run\" would cover"
+    );
+    manager.shutdown();
+}
+
+#[tokio::test]
+async fn answering_writes_the_verdict_the_hook_is_waiting_for_and_clears_the_row() {
+    let root = TempTranscripts::new("ask-answer");
+    let (manager, id) = asking(&root, "ask-1", "/Users/someone/p/src/main.rs").await;
+
+    let roster = manager
+        .answer_permission("ask-1", AgentPermissionVerdict::Deny)
+        .await;
+    let verdict = root.verdict_for("ask-1").expect("a verdict on disk");
+    assert_eq!(verdict.behavior, gritty_agents::verdict::Behavior::Deny);
+    assert!(
+        verdict.message.is_some(),
+        "a denial says who decided, because the message reaches the model"
+    );
+
+    let row = roster
+        .sessions
+        .iter()
+        .find(|s| s.id == id)
+        .expect("the row");
+    assert_eq!(
+        row.pending, None,
+        "the card, the row and the count go together"
+    );
+    assert_eq!(roster.recent_answers.len(), 1);
+    assert_eq!(
+        roster.recent_answers[0].grant_id, None,
+        "a denial grants nothing, so there is nothing to undo"
+    );
+    manager.shutdown();
+}
+
+#[tokio::test]
+async fn allowing_for_the_run_answers_the_next_ask_without_anyone_seeing_it() {
+    let root = TempTranscripts::new("ask-grant");
+    let (manager, id) = asking(&root, "ask-1", "/Users/someone/p/src/main.rs").await;
+    manager
+        .answer_permission("ask-1", AgentPermissionVerdict::AllowForRun)
+        .await;
+    assert!(root.verdict_for("ask-1").is_some());
+
+    // The agent asks again, in the same place. Nobody is troubled by it.
+    root.record_ask(
+        TEST_SESSION,
+        "ask-2",
+        AskVerb::WriteFile,
+        "/Users/someone/p/src/lib.rs",
+    );
+    manager.follow_once().await;
+    let roster = manager.list().await;
+    let row = roster
+        .sessions
+        .iter()
+        .find(|s| s.id == id)
+        .expect("the row");
+    assert_eq!(row.pending, None, "the grant answered it");
+    assert_eq!(
+        root.verdict_for("ask-2").expect("a verdict").behavior,
+        gritty_agents::verdict::Behavior::Allow
+    );
+
+    let grants = manager.permission_grants().grants;
+    assert_eq!(grants.len(), 1);
+    assert_eq!(grants[0].used, 1, "and the standing rule says how often");
+    manager.shutdown();
+}
+
+#[tokio::test]
+async fn undoing_a_grant_brings_the_question_back() {
+    let root = TempTranscripts::new("ask-undo");
+    let (manager, id) = asking(&root, "ask-1", "/Users/someone/p/src/main.rs").await;
+    let roster = manager
+        .answer_permission("ask-1", AgentPermissionVerdict::AllowForRun)
+        .await;
+    let grant_id = roster.recent_answers[0]
+        .grant_id
+        .clone()
+        .expect("an undoable answer");
+
+    manager.revoke_grant(&grant_id).await;
+    assert!(manager.permission_grants().grants.is_empty());
+
+    root.record_ask(
+        TEST_SESSION,
+        "ask-2",
+        AskVerb::WriteFile,
+        "/Users/someone/p/src/lib.rs",
+    );
+    manager.follow_once().await;
+    let roster = manager.list().await;
+    let row = roster
+        .sessions
+        .iter()
+        .find(|s| s.id == id)
+        .expect("the row");
+    assert_eq!(
+        row.pending.as_ref().map(|ask| ask.ask_id.as_str()),
+        Some("ask-2"),
+        "revoking a grant is what makes it a question again"
+    );
+    assert!(root.verdict_for("ask-2").is_none());
+    manager.shutdown();
+}
+
+#[tokio::test]
+async fn an_ask_answered_in_the_terminal_simply_goes() {
+    // ADR-020: both answer paths are live at once and the first one wins. The
+    // prompt vanishing without Gritty's verdict is normal, not an error.
+    let root = TempTranscripts::new("ask-elsewhere");
+    let (manager, id) = asking(&root, "ask-1", "/Users/someone/p/src/main.rs").await;
+
+    root.record_phase(TEST_SESSION, HookPhase::Active, Some("Write"));
+    manager.follow_once().await;
+    let roster = manager.list().await;
+    let row = roster
+        .sessions
+        .iter()
+        .find(|s| s.id == id)
+        .expect("the row");
+    assert_eq!(row.pending, None);
+
+    // And answering it now is not an error, it is a no-op with a fresh roster.
+    let roster = manager
+        .answer_permission("ask-1", AgentPermissionVerdict::AllowOnce)
+        .await;
+    assert!(root.verdict_for("ask-1").is_none(), "nothing was written");
+    assert!(roster.recent_answers.is_empty());
+    manager.shutdown();
+}
+
+#[tokio::test]
+async fn the_liveness_marker_is_what_lets_a_hook_wait_at_all() {
+    // Without it every hook returns instantly and no prompt is ever answerable
+    // in Gritty, so its absence is a silent, total loss of the feature —
+    // exactly the kind of thing worth one test.
+    let root = TempTranscripts::new("marker");
+    root.seed(TEST_SESSION);
+    let (manager, _sink) = manager_over_running(&root, live_claude());
+    let marker = root.0.join("live");
+    assert!(!marker.exists(), "nothing before the loop has run");
+
+    manager.follow_once().await;
+    assert!(
+        gritty_agents::verdict::is_live(&marker, gritty_agents::now_ms()),
+        "the fast loop refreshes it"
     );
     manager.shutdown();
 }

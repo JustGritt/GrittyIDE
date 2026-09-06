@@ -2,6 +2,7 @@
 import type { AgentActivity } from "./AgentActivity";
 import type { AgentActivitySource } from "./AgentActivitySource";
 import type { AgentEvidence } from "./AgentEvidence";
+import type { AgentPermissionRequest } from "./AgentPermissionRequest";
 import type { AgentProvider } from "./AgentProvider";
 import type { AgentToolCall } from "./AgentToolCall";
 import type { Timestamp } from "./Timestamp";
@@ -60,4 +61,17 @@ tty?: string,
  * When the transcript was last written. Absent for a session with no
  * readable transcript: Gritty knows it is running, not for how long.
  */
-lastActiveAt?: Timestamp, };
+lastActiveAt?: Timestamp, 
+/**
+ * The permission prompt this session is stopped at, if any (T335).
+ *
+ * **On the session rather than only on the timeline**, and that placement
+ * is the whole of what makes artboard 12b possible: only one timeline is
+ * followed at a time, so an ask that lived only there would be invisible
+ * for every agent the user is *not* watching — which is precisely the set
+ * the queue exists for.
+ *
+ * At most one per session. A second ask cannot exist while the first is
+ * unanswered, because the agent is stopped.
+ */
+pending?: AgentPermissionRequest, };

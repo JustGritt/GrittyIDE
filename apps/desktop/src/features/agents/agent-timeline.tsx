@@ -1,4 +1,9 @@
-import type { AgentSession, AgentTimeline, WorkspacePath } from '@gritty/protocol';
+import type {
+  AgentPermissionVerdict,
+  AgentSession,
+  AgentTimeline,
+  WorkspacePath,
+} from '@gritty/protocol';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { AgentStatusBadge } from './agent-status-badge';
 import {
@@ -10,6 +15,7 @@ import {
   touchedFiles,
 } from './agent-timeline-model';
 import { taskLine } from './agents-reducer';
+import { PermissionPrompt } from './permission-prompt';
 
 /**
  * The selected session's timeline (T232): what it has been doing, and the files
@@ -34,6 +40,8 @@ export function AgentTimelinePanel({
   openingPath,
   canOpenFiles,
   onOpenFile,
+  answering,
+  onAnswerPermission,
 }: {
   session: AgentSession;
   /** `null` only in the instant between selecting a row and the core answering. */
@@ -43,8 +51,19 @@ export function AgentTimelinePanel({
   /** False with no workspace open: there is nothing for a path to be inside. */
   canOpenFiles: boolean;
   onOpenFile(path: WorkspacePath): void;
+  /** The ask being answered right now, if any (T335). */
+  answering: string | null;
+  onAnswerPermission(askId: string, verdict: AgentPermissionVerdict): void;
 }) {
-  const rows = useMemo(() => (timeline ? timelineRows(timeline) : []), [timeline]);
+  const pending = session.pending ?? null;
+  const rows = useMemo(() => {
+    if (!timeline) return [];
+    const all = timelineRows(timeline);
+    // The card below says everything the feed's own permission row said, and
+    // says it in a form that can be answered. Two of them would be the same
+    // prompt twice (T335).
+    return pending ? all.filter((row) => row.tone !== 'permission') : all;
+  }, [timeline, pending]);
   const files = useMemo(() => (timeline ? touchedFiles(timeline.entries) : []), [timeline]);
   const pinKey = pendingPinKey(timeline);
   const title = taskLine(session);
@@ -90,6 +109,18 @@ export function AgentTimelinePanel({
         )
       ) : (
         <Feed key={session.id} rows={rows} pinKey={pinKey} />
+      )}
+
+      {/* The ask lands where the work is — framed, at the foot of the feed,
+          never a modal over the whole IDE (artboard 12a). */}
+      {pending && (
+        <PermissionPrompt
+          request={pending}
+          sessionLabel={title ?? session.id}
+          now={Date.now()}
+          busy={answering === pending.askId}
+          onAnswer={(verdict) => onAnswerPermission(pending.askId, verdict)}
+        />
       )}
 
       {/* The feed stopped growing; nothing was removed (§6, and the failure

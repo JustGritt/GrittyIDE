@@ -73,6 +73,9 @@ const agents: AgentsController = {
   clearError: () => {},
   busy: false,
   refresh: async () => {},
+  answerPermission: async () => {},
+  revokeGrant: async () => {},
+  answering: null,
 };
 
 function renderForm(): string {

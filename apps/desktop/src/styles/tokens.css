@@ -44,6 +44,10 @@
   --ok: #7bd88f;
   --ok-fill: #1f3b2a;
   --ok-text: #9ce6ae;
+  /* The third wash, added by T335 so a diff's added lines are a token like its
+     removed ones. `--warn-wash` and `--error-wash` were the only two until a
+     surface needed to draw both halves of a change. */
+  --ok-wash: rgba(123, 216, 143, 0.1);
   --warn: oklch(0.78 0.13 85);
   --warn-text: oklch(0.82 0.11 85);
   --warn-wash: rgba(232, 181, 74, 0.1);
@@ -145,6 +149,7 @@
     --ok: #1a7f37;
     --ok-fill: #dafbe1;
     --ok-text: #116329;
+    --ok-wash: rgba(26, 127, 55, 0.08);
     --warn: oklch(0.68 0.13 75);
     --warn-text: oklch(0.52 0.11 75);
     --warn-wash: rgba(154, 103, 0, 0.1);

@@ -226,3 +226,73 @@ describe('labels', () => {
     expect(waitedFor(2_000, 1_000)).toBe('0:00');
   });
 });
+
+// ---------------------------------------------------------------------------
+// The fourth kind (T335, artboard 12b)
+// ---------------------------------------------------------------------------
+
+function asking(id: string, askedAt: number): import('@gritty/protocol').AgentSession {
+  return {
+    id,
+    provider: 'CLAUDE_CODE',
+    activity: 'BLOCKED',
+    activitySource: 'HOOK',
+    evidence: 'BOTH',
+    inWorkspace: true,
+    title: `session ${id}`,
+    pending: {
+      askId: `ask-${id}`,
+      sessionId: id,
+      verb: 'RUN_COMMAND',
+      target: 'cargo publish --dry-run',
+      diff: [],
+      added: 0,
+      removed: 0,
+      outsideRoot: false,
+      sensitive: false,
+      askedAt,
+    },
+  } as import('@gritty/protocol').AgentSession;
+}
+
+describe('a permission prompt is something waiting on you', () => {
+  it('joins the queue in the same oldest-first order as everything else', () => {
+    const items = attentionItems(
+      [workstream('a', { state: 'IN_REVIEW', updatedAt: 500 })],
+      [],
+      NO_OWNERSHIP,
+      [asking('s1', 100)],
+    );
+    expect(items.map((item) => item.kind)).toEqual(['permission', 'review']);
+  });
+
+  it('needs no workstream, because the link to one is opt-in and usually absent', () => {
+    // The failure this guards against would be the worst one in the queue: the
+    // most urgent item also being the one most often missing from it.
+    const items = attentionItems([], [], NO_OWNERSHIP, [asking('s1', 100)]);
+    expect(items).toHaveLength(1);
+    expect(items[0]?.kind).toBe('permission');
+  });
+
+  it('counts toward the header, which is what the chip beside ⌥⌘A says', () => {
+    expect(attentionCount([], [], NO_OWNERSHIP, [asking('s1', 1), asking('s2', 2)])).toBe(2);
+    // And a session that is merely working is not waiting on anyone.
+    const busy = { ...asking('s3', 3), pending: undefined };
+    expect(attentionCount([], [], NO_OWNERSHIP, [busy])).toBe(0);
+  });
+
+  it('has its own filter, so triaging permissions does not mean reading past reviews', () => {
+    const items = attentionItems([workstream('a', { state: 'IN_REVIEW' })], [], NO_OWNERSHIP, [
+      asking('s1', 100),
+    ]);
+    expect(filterItems(items, 'permission').map((item) => item.id)).toEqual(['permission:ask-s1']);
+    expect(filterItems(items, 'review')).toHaveLength(1);
+    expect(filterItems(items, 'all')).toHaveLength(2);
+  });
+
+  it('keeps counting nothing when no sessions are passed at all', () => {
+    // The island and the queue call this with and without the roster; the
+    // default must be "no permissions", never a crash.
+    expect(attentionItems([], [], NO_OWNERSHIP)).toEqual([]);
+  });
+});

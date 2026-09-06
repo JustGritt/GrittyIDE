@@ -224,6 +224,156 @@ pub struct AgentSession {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub last_active_at: Option<Timestamp>,
+    /// The permission prompt this session is stopped at, if any (T335).
+    ///
+    /// **On the session rather than only on the timeline**, and that placement
+    /// is the whole of what makes artboard 12b possible: only one timeline is
+    /// followed at a time, so an ask that lived only there would be invisible
+    /// for every agent the user is *not* watching — which is precisely the set
+    /// the queue exists for.
+    ///
+    /// At most one per session. A second ask cannot exist while the first is
+    /// unanswered, because the agent is stopped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub pending: Option<AgentPermissionRequest>,
+}
+
+/// What kind of thing an agent is asking permission to do.
+///
+/// Translated from the adapter's own classification rather than passed through
+/// (ADR-005). A second provider classifies into these same four; none of them
+/// is provider-shaped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AgentPermissionVerb {
+    WriteFile,
+    RunCommand,
+    InstallDependency,
+    Other,
+}
+
+/// One permission prompt, with everything needed to answer it without going to
+/// look somewhere else (artboards 12a and 12b).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPermissionRequest {
+    /// Names the ask, and names the verdict written back to it. Unguessable by
+    /// construction: another local process must not be able to answer a prompt
+    /// on the user's behalf.
+    pub ask_id: String,
+    pub session_id: String,
+    pub verb: AgentPermissionVerb,
+    /// The path being written or the command being run. Bounded and display
+    /// only — the renderer has no filesystem, and nothing resolves this.
+    pub target: String,
+    /// The blast radius in one line, when there is one worth saying.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub detail: Option<String>,
+    /// A few sign-prefixed lines (`+`, `-`, leading space). Empty when there is
+    /// nothing to show — or, with [`Self::sensitive`], because nothing was
+    /// looked at.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diff: Vec<String>,
+    /// Lines added and removed by the whole change, not by the clipped diff
+    /// above. "+64 −11" beside three lines says both what is happening and that
+    /// you are not seeing all of it.
+    pub added: u32,
+    pub removed: u32,
+    /// The target lies outside the session's own working directory.
+    pub outside_root: bool,
+    /// The target's content is presumed secret, so no diff was captured. Said
+    /// out loud, because "we did not look" and "there was nothing to see" are
+    /// different answers.
+    pub sensitive: bool,
+    pub asked_at: Timestamp,
+    /// What [`AgentPermissionVerdict::AllowForRun`] would cover — the directory
+    /// a write would be allowed in, or the program a command would be allowed
+    /// to run. Absent when nothing narrower than "this exact ask" can honestly
+    /// be offered, and then the middle answer is not offered either.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub suggested_scope: Option<String>,
+}
+
+/// The three answers, which are two answers and a memory.
+///
+/// The agent only ever learns yes or no. The difference between the first two
+/// is entirely Gritty's own: whether the next matching ask from this session is
+/// answered the same way without troubling the user again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AgentPermissionVerdict {
+    AllowOnce,
+    AllowForRun,
+    Deny,
+}
+
+/// `agents.answerPermission`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AnswerPermissionRequest {
+    pub ask_id: String,
+    pub verdict: AgentPermissionVerdict,
+}
+
+/// What was answered, kept briefly so the queue can offer to take it back.
+///
+/// **Undo is a grant revocation, never a rollback.** By the time a verdict is
+/// read the tool has run; what can still be taken back is the *standing* part
+/// of the answer, so the next matching ask returns to the user. The label in
+/// the UI has to say that, and this type is why it can.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPermissionAnswer {
+    pub ask_id: String,
+    pub session_id: String,
+    pub verb: AgentPermissionVerb,
+    pub target: String,
+    pub verdict: AgentPermissionVerdict,
+    pub answered_at: Timestamp,
+    /// The standing grant this answer created, when it created one. Its
+    /// presence is exactly what makes the answer undoable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub grant_id: Option<String>,
+}
+
+/// A standing "yes" for the rest of one agent session.
+///
+/// **Held in memory and never persisted, deliberately.** A permission grant
+/// that outlived the process that took it would be a security surface with no
+/// owner: nobody would remember granting it, and nothing on screen would say it
+/// existed. Losing them on restart fails closed — the user is asked again —
+/// which is the direction this kind of state should fail in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPermissionGrant {
+    pub id: String,
+    pub session_id: String,
+    pub verb: AgentPermissionVerb,
+    /// The directory a write is allowed in, or the program a command may run.
+    pub scope: String,
+    pub granted_at: Timestamp,
+    /// How many later asks this grant has answered without troubling the user.
+    /// Shown so a standing rule is inspectable rather than invisible
+    /// (architecture addendum §8: "permission grants should be inspectable").
+    pub used: u32,
+}
+
+/// `agents.revokeGrant` — what Undo, and the standing-rules row, both call.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RevokeGrantRequest {
+    pub grant_id: String,
+}
+
+/// `agents.permissionGrants`: every standing grant, for the rules row.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPermissionGrants {
+    pub grants: Vec<AgentPermissionGrant>,
 }
 
 /// `agents.list` / `agents.refresh`. No fields yet: the roster is
@@ -248,6 +398,13 @@ pub struct AgentRoster {
     /// is transcript-only, so every session reads as `ENDED` and the UI should
     /// say why rather than claim nothing is running.
     pub process_evidence: bool,
+    /// The last few permission answers, newest first, so the queue can show
+    /// "answered just now" and offer to take the standing part back (T335).
+    ///
+    /// Bounded and short-lived: this is an undo affordance, not a history. The
+    /// durable record of what an agent did is its own transcript.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_answers: Vec<AgentPermissionAnswer>,
 }
 
 // ---------------------------------------------------------------------------

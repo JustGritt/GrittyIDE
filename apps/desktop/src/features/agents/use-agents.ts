@@ -1,4 +1,9 @@
-import { type AgentRoster, type CoreError, toCoreError } from '@gritty/protocol';
+import {
+  type AgentPermissionVerdict,
+  type AgentRoster,
+  type CoreError,
+  toCoreError,
+} from '@gritty/protocol';
 import { useCallback, useEffect, useReducer, useState } from 'react';
 import { core } from '../../core/client';
 import { agentsReducer, initialAgentsState } from './agents-reducer';
@@ -11,6 +16,23 @@ export interface AgentsController {
   readonly busy: boolean;
   /** Force a rescan now, rather than waiting for the core's next poll. */
   refresh(): Promise<void>;
+  /**
+   * Answer a permission prompt an agent is stopped at (T335).
+   *
+   * The roster comes back from the core rather than being patched here, so the
+   * card, the row, the banner, the header count and the status bar stop saying
+   * "waiting" in the same render. An ask that has already gone answers
+   * successfully and changes nothing: the user may have answered in the
+   * terminal first, and both paths are live at once (ADR-020).
+   */
+  answerPermission(askId: string, verdict: AgentPermissionVerdict): Promise<void>;
+  /**
+   * Take back a standing grant, so the next matching ask returns to the user.
+   * What Undo calls — a revocation, never a rollback.
+   */
+  revokeGrant(grantId: string): Promise<void>;
+  /** The ask being answered right now, so its card can go quiet. */
+  readonly answering: string | null;
 }
 
 /**
@@ -30,6 +52,7 @@ export function useAgents(): AgentsController {
   const [state, dispatch] = useReducer(agentsReducer, initialAgentsState);
   const [error, setError] = useState<CoreError | null>(null);
   const [inFlight, setInFlight] = useState(0);
+  const [answering, setAnswering] = useState<string | null>(null);
 
   useEffect(() => {
     // Typed subscription rather than `subscribeAll`: this feature reads exactly
@@ -67,6 +90,32 @@ export function useAgents(): AgentsController {
     }
   }, []);
 
+  const answerPermission = useCallback(async (askId: string, verdict: AgentPermissionVerdict) => {
+    setAnswering(askId);
+    try {
+      const roster = await core.agents.answerPermission({ askId, verdict });
+      dispatch({ type: 'loaded', roster });
+      setError(null);
+    } catch (cause: unknown) {
+      // The prompt stays on screen with the error beside it. Guessing that a
+      // failed answer meant "deny" would be inventing a decision the user did
+      // not take.
+      setError(toCoreError(cause));
+    } finally {
+      setAnswering(null);
+    }
+  }, []);
+
+  const revokeGrant = useCallback(async (grantId: string) => {
+    try {
+      const roster = await core.agents.revokeGrant({ grantId });
+      dispatch({ type: 'loaded', roster });
+      setError(null);
+    } catch (cause: unknown) {
+      setError(toCoreError(cause));
+    }
+  }, []);
+
   return {
     roster: state.roster,
     loaded: state.loaded,
@@ -74,5 +123,8 @@ export function useAgents(): AgentsController {
     clearError: useCallback(() => setError(null), []),
     busy: inFlight > 0,
     refresh,
+    answerPermission,
+    revokeGrant,
+    answering,
   };
 }

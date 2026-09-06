@@ -6,11 +6,20 @@
 //! polls for them, translates the evidence into domain state, and publishes a
 //! roster.
 //!
-//! It reads and nothing else. There is no command here that starts, stops,
-//! answers or approves a session, because Gritty does not own these sessions:
-//! another terminal does. When T300 brings runs Gritty *does* own, they get
-//! their own type and their own lifecycle; this one keeps meaning "someone
-//! else's work, visible".
+//! It reads, and does exactly one other thing. There is no command here that
+//! starts a session, stops one, types into one or cancels a turn, because
+//! Gritty does not own these sessions: another terminal does. When T300 brings
+//! runs Gritty *does* own, they get their own type and their own lifecycle;
+//! this one keeps meaning "someone else's work, visible".
+//!
+//! The exception is [`AgentSessionManager::answer_permission`] (T335, ADR-020),
+//! and it is narrower than it looks. Answering a question the agent asked is
+//! not driving the agent — the prompt exists whether or not Gritty is running,
+//! and if Gritty says nothing the user answers it in the terminal instead.
+//! What travels back is not a derivation this module made; it is a decision a
+//! person took, in a UI that named the verb, the target and the blast radius.
+//! Everything about the wait is built to fail open, and [`permission`] is where
+//! that lives.
 //!
 //! **Where the boundary is.** `gritty-agents` reads `ps`, `lsof` and the
 //! agents' own transcripts and reports what it saw. Nothing it returns crosses
@@ -26,6 +35,7 @@
 //! nothing at all.
 
 pub mod attention;
+pub mod permission;
 pub mod timeline;
 pub mod wire;
 
@@ -61,9 +71,11 @@ pub use timeline::MAX_TIMELINE_ENTRIES;
 pub use wire::{
     AgentActivity, AgentActivitySource, AgentEvidence, AgentIntegration, AgentIntegrationChange,
     AgentIntegrationChangeRequest, AgentIntegrationEvent, AgentIntegrationRequest,
-    AgentIntegrationStatus, AgentNoticeLevel, AgentProvider, AgentRoster, AgentSession,
-    AgentTimeline, AgentTimelineAppendedPayload, AgentTimelineEntry, AgentTimelineKind,
-    AgentTimelineRequest, AgentToolCall, ListAgentSessionsRequest,
+    AgentIntegrationStatus, AgentNoticeLevel, AgentPermissionAnswer, AgentPermissionGrant,
+    AgentPermissionGrants, AgentPermissionRequest, AgentPermissionVerb, AgentPermissionVerdict,
+    AgentProvider, AgentRoster, AgentSession, AgentTimeline, AgentTimelineAppendedPayload,
+    AgentTimelineEntry, AgentTimelineKind, AgentTimelineRequest, AgentToolCall,
+    AnswerPermissionRequest, ListAgentSessionsRequest, RevokeGrantRequest,
 };
 
 /// How often the roster is rescanned.
@@ -147,6 +159,18 @@ pub struct AgentDiscoveryConfig {
     /// that cannot raise one. `None` makes the setting *absent* rather than
     /// broken: nothing is offered that would do nothing.
     pub notifier: Option<Arc<dyn AttentionNotifier>>,
+    /// Where a verdict is written back to a waiting hook, and where the
+    /// liveness marker that makes waiting safe is touched (T335, ADR-020).
+    /// `None` alongside `hooks: None`: a build that cannot read an ask has
+    /// nothing to answer.
+    pub permissions: Option<PermissionPaths>,
+}
+
+/// The two paths ADR-020 adds, beside the state directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PermissionPaths {
+    pub verdicts: PathBuf,
+    pub marker: PathBuf,
 }
 
 impl AgentDiscoveryConfig {
@@ -182,6 +206,7 @@ impl AgentDiscoveryConfig {
             hooks: None,
             hook_binary: None,
             notifier: None,
+            permissions: None,
         }
     }
 
@@ -194,6 +219,10 @@ impl AgentDiscoveryConfig {
     pub fn with_data_dir(mut self, data_dir: Option<&Path>) -> Self {
         self.hooks = data_dir.map(|dir| {
             HookScanOptions::rooted_at(gritty_agents::hook::state_dir_from_data_dir(dir))
+        });
+        self.permissions = data_dir.map(|dir| PermissionPaths {
+            verdicts: gritty_agents::verdict::verdict_dir_from_data_dir(dir),
+            marker: gritty_agents::verdict::marker_from_data_dir(dir),
         });
         self
     }
@@ -238,6 +267,11 @@ pub struct AgentSessionManager {
     /// Derived beside the roster, because that is where the hook state and the
     /// transcript's tool preview are both in hand.
     permissions: Mutex<HashMap<String, AgentTimelineEntry>>,
+    /// What is being asked, what was granted, and what was just answered
+    /// (T335). Separate from `permissions` above, which is the *timeline* row
+    /// for the same prompt: that one is a view, this one is the state a verdict
+    /// is written against.
+    asks: permission::Permissions,
     /// Every open timeline, by session id.
     timelines: Mutex<HashMap<String, OpenTimeline>>,
     /// The transcript and working directory behind each roster row, refreshed
@@ -279,6 +313,7 @@ impl AgentSessionManager {
             discovery: Mutex::new(None),
             hooks: Mutex::new(HashMap::new()),
             permissions: Mutex::new(HashMap::new()),
+            asks: permission::Permissions::default(),
             timelines: Mutex::new(HashMap::new()),
             sources: Mutex::new(HashMap::new()),
             metrics: Mutex::new(FollowMetrics::default()),
@@ -538,6 +573,10 @@ impl AgentSessionManager {
     /// per file, bounded exactly as transcripts are — and, with nothing
     /// installed, one failed `read_dir` and nothing else.
     async fn follow_once(&self) {
+        // First, and unconditionally: a hook that is *already waiting* checks
+        // this on every poll, so a tick that scanned before it refreshed would
+        // read as a dead Gritty for the width of the scan (T335, ADR-020).
+        self.touch_marker();
         self.follow_hooks().await;
         let root = self.workspaces.current_open().map(|(_, root)| root);
         let jobs: Vec<(String, PathBuf, u64)> = {
@@ -666,6 +705,10 @@ impl AgentSessionManager {
             .into_iter()
             .map(|state| (state.session_id.clone(), state))
             .collect();
+        // Before anything is published: an ask a standing grant already covers
+        // is answered here, so it never becomes a row, a count or a banner. The
+        // user said yes to this once and asked not to be asked again (T335).
+        self.observe_asks(&found);
         let changed = {
             let mut held = self.hooks.lock().unwrap_or_else(PoisonError::into_inner);
             if *held == found {
@@ -677,6 +720,68 @@ impl AgentSessionManager {
         };
         if changed {
             self.republish().await;
+        }
+    }
+
+    /// Tell the waiting hooks that Gritty is alive (T335, ADR-020).
+    ///
+    /// On the fast loop, because that is the loop whose cadence the marker's
+    /// freshness window was chosen against. Its *absence* is what stops a hook
+    /// waiting at all, so failing to write it is safe in the direction that
+    /// matters: agents keep prompting their own users.
+    fn touch_marker(&self) {
+        let Some(paths) = self.config.permissions.as_ref() else {
+            return;
+        };
+        if let Err(error) = gritty_agents::verdict::touch_marker(&paths.marker) {
+            // Debug, not warn: on a machine where the data directory is not
+            // writable this would otherwise fire several times a second, and
+            // the consequence is only that answering is unavailable.
+            tracing::debug!(%error, "could not refresh the agent liveness marker");
+        }
+    }
+
+    /// Turn this scan's asks into domain requests, and honour any standing
+    /// grant that covers one.
+    fn observe_asks(&self, states: &HashMap<String, HookState>) {
+        let requests: Vec<_> = states
+            .values()
+            .filter(|state| state.phase == gritty_agents::HookPhase::Blocked)
+            .filter_map(|state| {
+                let ask = state.ask.as_ref()?;
+                Some(permission::translate(
+                    &state.session_id,
+                    ask,
+                    state.since_ms,
+                    |target| shorten(Path::new(target), self.config.home.as_deref()),
+                ))
+            })
+            .collect();
+        // "For this run" is only true while the run is: a grant whose session
+        // has left the state directory has nothing left to authorise.
+        self.asks
+            .retain_sessions(&states.keys().cloned().collect::<Vec<_>>());
+        for (request, grant_id) in self.asks.observe(requests) {
+            self.write_verdict(&permission::Permissions::auto_verdict(&request.ask_id));
+            tracing::debug!(
+                ask = %request.ask_id,
+                grant = %grant_id,
+                "a standing grant answered a permission request"
+            );
+        }
+    }
+
+    /// Put a verdict where the waiting hook will find it.
+    ///
+    /// Failing is not an error the user has to see: the hook's own deadline
+    /// runs out and the agent falls back to its own prompt, which is the same
+    /// place they would have answered before Gritty existed.
+    fn write_verdict(&self, verdict: &gritty_agents::verdict::Verdict) {
+        let Some(paths) = self.config.permissions.as_ref() else {
+            return;
+        };
+        if let Err(error) = gritty_agents::verdict::write(&paths.verdicts, verdict) {
+            tracing::warn!(%error, "could not write a permission verdict");
         }
     }
 
@@ -870,6 +975,68 @@ impl AgentSessionManager {
     /// Whether the Gritty window has focus, from the composition root's window
     /// events. Focus that is never reported stays `true`, and Gritty stays
     /// silent (T223 §3, and the failure table's "window focus unknown").
+    /// Answer a permission prompt an agent is stopped at (T335, ADR-020).
+    ///
+    /// The one command in this module that acts rather than reports, and it
+    /// acts only on a decision a person just took. It writes the verdict where
+    /// the waiting hook will find it, records what was answered, and republishes
+    /// so the card, the row, the banner, the count and the status bar all stop
+    /// saying the same thing at the same moment.
+    ///
+    /// An ask that is no longer open is **not an error**. The user may have
+    /// answered in the terminal instead, or the session may have ended holding
+    /// the prompt; ADR-020 says both answer paths are live at once and the
+    /// first one wins. The roster comes back either way, which is what the
+    /// caller needs in order to stop drawing a prompt that is gone.
+    pub async fn answer_permission(
+        &self,
+        ask_id: &str,
+        verdict: AgentPermissionVerdict,
+    ) -> AgentRoster {
+        let now =
+            Timestamp::from_millis(u64::try_from(gritty_agents::now_ms()).unwrap_or_default());
+        let (answered, to_write) = self.asks.answer(ask_id, verdict, now);
+        if let Some(to_write) = &to_write {
+            self.write_verdict(to_write);
+        }
+        match answered {
+            permission::Answered::Written(answer) => tracing::debug!(
+                ask = %answer.ask_id,
+                session = %answer.session_id,
+                "a permission request was answered"
+            ),
+            permission::Answered::Unknown => tracing::debug!(
+                ask = %ask_id,
+                "a permission request was answered after it had already gone"
+            ),
+        }
+        self.republish().await;
+        self.list().await
+    }
+
+    /// Every standing grant, for the queue's "standing rules" row.
+    ///
+    /// The architecture addendum §8 asks that permission grants be
+    /// *inspectable*; this is what makes them so, and it is why a grant carries
+    /// the count of asks it has answered on the user's behalf.
+    pub fn permission_grants(&self) -> AgentPermissionGrants {
+        AgentPermissionGrants {
+            grants: self.asks.grants(),
+        }
+    }
+
+    /// Take back a standing grant, so the next matching ask returns to the user.
+    ///
+    /// What Undo calls. **Not a rollback**: by the time a verdict is read the
+    /// tool has run, and what can still be taken back is only the standing part
+    /// of the answer.
+    pub async fn revoke_grant(&self, grant_id: &str) -> AgentRoster {
+        if self.asks.revoke(grant_id) {
+            self.republish().await;
+        }
+        self.list().await
+    }
+
     pub fn set_window_focused(&self, focused: bool) {
         self.window_focused.store(focused, Ordering::Relaxed);
     }
@@ -973,6 +1140,7 @@ impl AgentSessionManager {
             .unwrap_or(u32::MAX),
             sessions,
             process_evidence: found.process_evidence,
+            recent_answers: self.asks.recent(),
         }
     }
 
@@ -1035,6 +1203,21 @@ impl AgentSessionManager {
                 .last_active_ms
                 .and_then(|millis| u64::try_from(millis).ok())
                 .map(Timestamp::from_millis),
+            // Read, never derived here. `follow_hooks` is what decides an ask
+            // exists — including deciding a standing grant answers it without
+            // anyone seeing it — so by the time a row is built the answer to
+            // "is this session waiting on me" is already settled (T335).
+            //
+            // Looked up by the *agent's* own session id, which is all the hook
+            // knows, and handed out under the domain id, which is the only one
+            // the renderer may act on. Same join `hook_for` makes, same reason.
+            pending: (activity == AgentActivity::Blocked)
+                .then(|| self.asks.pending_for(&found.session_id))
+                .flatten()
+                .map(|mut ask| {
+                    ask.session_id = domain_session_id(found);
+                    ask
+                }),
         }
     }
 

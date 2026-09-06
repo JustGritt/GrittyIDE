@@ -63,6 +63,9 @@ export const COMMANDS = {
   'agents.integrationUninstall': 'agents_integration_uninstall',
   'agents.notifications': 'agents_notifications',
   'agents.setNotifications': 'agents_set_notifications',
+  'agents.answerPermission': 'agents_answer_permission',
+  'agents.permissionGrants': 'agents_permission_grants',
+  'agents.revokeGrant': 'agents_revoke_grant',
 } as const;
 
 export type CommandName = keyof typeof COMMANDS;

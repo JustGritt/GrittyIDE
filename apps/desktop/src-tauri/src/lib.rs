@@ -242,6 +242,9 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::agents_integration_uninstall,
             commands::agents_notifications,
             commands::agents_set_notifications,
+            commands::agents_answer_permission,
+            commands::agents_permission_grants,
+            commands::agents_revoke_grant,
         ])
 }
 

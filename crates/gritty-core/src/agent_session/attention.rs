@@ -302,6 +302,7 @@ mod tests {
             pid: Some(4),
             tty: None,
             last_active_at: None,
+            pending: None,
         }
     }
 
@@ -311,6 +312,7 @@ mod tests {
                 .unwrap(),
             sessions,
             process_evidence: true,
+            recent_answers: Vec::new(),
         }
     }
 

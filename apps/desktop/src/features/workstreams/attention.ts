@@ -1,4 +1,6 @@
 import type {
+  AgentPermissionRequest,
+  AgentSession,
   Decision,
   OwnershipConflict,
   OwnershipMap,
@@ -42,21 +44,46 @@ export type AttentionItem =
       /** The one already holding the ground. */
       readonly owner: Workstream;
       readonly since: number;
+    }
+  | {
+      readonly kind: 'permission';
+      readonly id: string;
+      /** The session that is stopped, so the row can name and reach it. */
+      readonly session: AgentSession;
+      readonly request: AgentPermissionRequest;
+      readonly since: number;
     };
+
+/**
+ * The one kind with no workstream, and deliberately so (T335).
+ *
+ * The other three are all *about* a workstream — the domain object Gritty owns.
+ * A permission prompt is about a session Gritty merely observes, and the link
+ * between the two (T223's `workstream_agent_link`) is opt-in and usually
+ * absent. Requiring one would mean the most urgent item in the queue were the
+ * one most likely to be missing from it.
+ */
+export function isPermission(
+  item: AttentionItem,
+): item is Extract<AttentionItem, { kind: 'permission' }> {
+  return item.kind === 'permission';
+}
 
 /**
  * Everything waiting on the user, oldest first — the order you triage in, and
  * the order artboard 4b sorts by.
  *
- * Three kinds, because three are all the domain can honestly produce: open
- * decisions, work handed back for review, and ownership refusals (T325).
- * Approvals and failures arrive with agent runs (T300); inventing them now
- * would mean showing the user categories that can never have anything in them.
+ * Four kinds, because four are all the domain can honestly produce: open
+ * decisions, work handed back for review, ownership refusals (T325), and
+ * permission prompts an agent is stopped at (T335). Failures still arrive with
+ * agent runs (T300); inventing them now would mean showing the user a category
+ * that can never have anything in it.
  */
 export function attentionItems(
   workstreams: readonly Workstream[],
   decisions: readonly Decision[],
   ownership: OwnershipMap,
+  sessions: readonly AgentSession[] = [],
 ): AttentionItem[] {
   const byId = new Map(workstreams.map((workstream) => [workstream.id as string, workstream]));
   const items: AttentionItem[] = [];
@@ -100,6 +127,16 @@ export function attentionItems(
       since: conflict.createdAt,
     });
   }
+  for (const session of sessions) {
+    if (!session.pending) continue;
+    items.push({
+      kind: 'permission',
+      id: `permission:${session.pending.askId}`,
+      session,
+      request: session.pending,
+      since: Number(session.pending.askedAt),
+    });
+  }
   return items.sort((left, right) => left.since - right.since || left.id.localeCompare(right.id));
 }
 
@@ -108,12 +145,13 @@ export function attentionCount(
   workstreams: readonly Workstream[],
   decisions: readonly Decision[],
   ownership: OwnershipMap,
+  sessions: readonly AgentSession[] = [],
 ): number {
-  return attentionItems(workstreams, decisions, ownership).length;
+  return attentionItems(workstreams, decisions, ownership, sessions).length;
 }
 
 /** The queue's filter tabs, with their counts. */
-export type AttentionFilter = 'all' | 'question' | 'review' | 'conflict';
+export type AttentionFilter = 'all' | 'permission' | 'question' | 'review' | 'conflict';
 
 export function filterItems(
   items: readonly AttentionItem[],
