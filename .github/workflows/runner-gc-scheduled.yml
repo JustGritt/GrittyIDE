@@ -1,0 +1,57 @@
+name: Runner disk GC (scheduled)
+
+# CI-RUNNER-GC's third trigger: independent of any CI job running at all.
+# `ci.yml`'s post-job sweep only fires from inside a `macos` job — but that
+# job runs on demand (`workflow_dispatch` or a `ci:macos`-labelled PR), and
+# the growth this ticket measured (target/debug/incremental at 35G one day,
+# 1.4G a week later, target/debug/deps growing by tens of GB across a week of
+# branch churn) is plausibly ordinary local `cargo`/`pnpm check` work on this
+# same machine, not CI at all — see docs/tasks/CI-RUNNER-GC-disk-retention.md,
+# "What was measured", point 4. This is the backstop that catches growth the
+# job-triggered path never sees.
+#
+# Runs on the same self-hosted Mac as the `macos` CI job (there is only one).
+# A `schedule` trigger on a self-hosted runner only fires if the runner
+# service is actually up at that wall-clock time — this machine is also
+# Alexis' dev Mac, so a missed run (machine asleep/off) is possible and this
+# workflow cannot detect or alert on that from inside the repo (see the task
+# file's completion report, Follow-ups).
+
+on:
+  schedule:
+    # 06:00 and 18:00 UTC. Twice daily, not hourly: a sweep this cheap is not
+    # free (it still walks every target/ this machine has), and the failure
+    # mode it guards against is measured in days, not hours.
+    - cron: "0 6,18 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report only, delete nothing (matches the script's own safe-by-default)"
+        type: boolean
+        default: false
+
+concurrency:
+  # Never run this alongside itself, and never alongside a `macos` CI job's
+  # own post-job sweep — both would enumerate the same target/ directories at
+  # once. Sharing the ci-<ref> group with the main workflow would over-cancel
+  # unrelated PR runs, so this uses its own group scoped to the runner instead.
+  group: runner-gc-scheduled
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    name: Sweep target/ across every checkout and worktree
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          clean: false
+
+      - name: Sweep (dry-run)
+        if: ${{ inputs.dry_run }}
+        run: python3 scripts/runner-gc.py sweep
+
+      - name: Sweep (apply)
+        if: ${{ !inputs.dry_run }}
+        run: python3 scripts/runner-gc.py sweep --apply
