@@ -10,6 +10,10 @@ use std::path::Path;
 use ts_rs::{Config, TS};
 
 use super::{CORE_EVENT_CHANNEL, PROTOCOL_VERSION};
+use crate::agent_run::wire::{
+    AgentRun, AgentRunActivity, AgentRunChangedPayload, AgentRunEvent,
+    AgentRunEventAppendedPayload, AgentRunEventLog, AgentRunEventRecord, AgentRunPath,
+};
 use crate::agent_session::attention::{AgentNotificationSettings, SetAgentNotificationsRequest};
 use crate::agent_session::wire::{
     AgentIntegration, AgentIntegrationChange, AgentIntegrationChangeRequest,
@@ -93,6 +97,14 @@ fn export_bindings() {
     AgentPermissionGrants::export_all(&cfg).expect("export AgentPermissionGrants");
     AnswerPermissionRequest::export_all(&cfg).expect("export AnswerPermissionRequest");
     RevokeGrantRequest::export_all(&cfg).expect("export RevokeGrantRequest");
+    AgentRun::export_all(&cfg).expect("export AgentRun");
+    AgentRunActivity::export_all(&cfg).expect("export AgentRunActivity");
+    AgentRunPath::export_all(&cfg).expect("export AgentRunPath");
+    AgentRunEvent::export_all(&cfg).expect("export AgentRunEvent");
+    AgentRunEventRecord::export_all(&cfg).expect("export AgentRunEventRecord");
+    AgentRunEventLog::export_all(&cfg).expect("export AgentRunEventLog");
+    AgentRunChangedPayload::export_all(&cfg).expect("export AgentRunChangedPayload");
+    AgentRunEventAppendedPayload::export_all(&cfg).expect("export AgentRunEventAppendedPayload");
     CoreError::export_all(&cfg).expect("export CoreError");
     Operation::export_all(&cfg).expect("export Operation");
     CoreEvent::export_all(&cfg).expect("export CoreEvent");

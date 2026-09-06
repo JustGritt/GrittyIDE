@@ -106,6 +106,14 @@ impl Intent {
             // contents — into Gritty's database, which ADR-015 already refused
             // for terminal buffers on the same grounds.
             | CoreEvent::AgentTimelineAppended(_)
+            // A run (T300) does not survive a restart, deliberately and for
+            // now: it supervises something live, and a row claiming on startup
+            // that a run is `RUNNING` when the process driving it died with the
+            // app would be exactly the orphan the state machine exists to
+            // prevent. ADR-021 decides what a real provider's runs persist,
+            // before T310 gives one something worth losing.
+            | CoreEvent::AgentRunChanged(_)
+            | CoreEvent::AgentRunEventAppended(_)
             | CoreEvent::DecisionRequested(_)
             | CoreEvent::DecisionResolved(_) => None,
         }

@@ -30,7 +30,12 @@
 //!   on this machine (T220), over the `gritty-agents` adapter. Read-only, and
 //!   not the agent run protocol (T300) — an observation, not something Gritty
 //!   owns.
+//! - [`agent_run`]: the other half of that distinction (T300, Gate D): the
+//!   contract for runs Gritty **does** own — the domain model, the state
+//!   machine and the normalized event vocabulary. The two modules never import
+//!   each other.
 
+pub mod agent_run;
 pub mod agent_session;
 pub mod document;
 pub mod event;
