@@ -209,9 +209,10 @@ mod tests {
 
     #[test]
     fn a_request_without_a_script_still_deserializes() {
-        let parsed: StartFakeRunRequest =
-            serde_json::from_value(serde_json::json!({ "workspaceId": "w-1", "workstreamId": "wst-1" }))
-                .expect("deserialize");
+        let parsed: StartFakeRunRequest = serde_json::from_value(
+            serde_json::json!({ "workspaceId": "w-1", "workstreamId": "wst-1" }),
+        )
+        .expect("deserialize");
         assert_eq!(parsed.script, None);
     }
 }

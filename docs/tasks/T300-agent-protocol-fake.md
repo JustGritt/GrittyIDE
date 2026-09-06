@@ -509,3 +509,198 @@ not something the adapter reported.
   judgement, unmeasured. They are named constants with tests, so moving them is
   a one-line change, but T310 should check them against a real provider's
   output rather than inherit them.
+
+### T300-CMD — the `runs.*` wire and the minimal surface (§16 onward)
+
+Branch `t300-cmd-runs-adapters`, on `388c750`. **Protocol 2.16.0 and nothing
+else; no migration** — a run is deliberately not persisted until ADR-021.
+
+**Summary**
+
+T300-C landed the run types, both `CoreEvent` variants and `AgentRunEventLog`
+at 2.15.0, so what this ticket owed the wire was the command surface that
+reaches them: four request shapes, four client methods, and the panel §17 asks
+for. It **stops short of the `src-tauri` adapters**, for the reason under
+"Blocked on" below.
+
+**The exact wire surface added (2.16.0, additive)**
+
+| Command | Rust name | Request | Answers |
+|---|---|---|---|
+| `runs.startFake` | `runs_start_fake` | `StartFakeRunRequest { workspaceId, workstreamId, script? }` | `AgentRun` |
+| `runs.cancel` | `runs_cancel` | `CancelRunRequest { runId }` | `AgentRun` |
+| `runs.list` | `runs_list` | `ListRunsRequest { workspaceId }` | `AgentRun[]` |
+| `runs.events` | `runs_events` | `RunEventsRequest { runId }` | `AgentRunEventLog` |
+
+Nothing existing changed shape: `Workstream` and `Decision` are byte-identical
+in `packages/protocol/src/generated`, and the only modified generated file is
+`version.ts`. `MAX_SCRIPT_NAME = 64` is the one new constant.
+
+**Files changed**
+
+- `crates/gritty-core/src/agent_run/request.rs` (new) — the four requests and
+  `StartFakeRunRequest::validate`, with 9 unit tests.
+- `crates/gritty-core/src/agent_run/mod.rs` — `pub mod request;` and its
+  re-exports (two lines plus one doc sentence).
+- `crates/gritty-core/src/protocol/{mod.rs,export.rs}` — 2.15.0 → 2.16.0, and
+  four `export_all` lines.
+- `packages/protocol/src/generated/` — written by `cargo test -p gritty-core`,
+  never by hand: four new files plus `version.ts`.
+- `packages/protocol/src/{commands.ts,types.ts,client.ts}` and
+  `runs-client.test.ts` (new).
+- `apps/desktop/src/features/runs/{runs-reducer.ts,runs-reducer.test.ts,use-runs.ts,runs-panel.tsx}` (new).
+- `apps/desktop/src/{App.tsx,app.css}` — the DEV mount and ~30 lines of CSS.
+- `docs/architecture/agent-runs.md` — one appended section for the command
+  surface and why the panel is throwaway.
+
+**Tests actually executed, with results**
+
+- `cargo test -p gritty-core` — **387 passed, 0 failed** (9 of them new, in
+  `agent_run::request`), and it regenerated the bindings, which are committed.
+- `pnpm vitest run` — **640 passed across 78 files** (38 new in
+  `runs-reducer.test.ts`, 9 new in `runs-client.test.ts`).
+- `pnpm check` — **green, exit status 0**, read from the process rather than
+  from a piped `tail`. That covers Biome (256 files), `tsc`, the whole vitest
+  suite, `cargo fmt --check`, `cargo clippy --workspace --all-targets -D
+  warnings` and `cargo test --workspace` (every crate ok; one pre-existing
+  ignored test). A fresh worktree needed
+  `pnpm --filter @gritty/desktop sidecar` first, per SIDECAR-FRESH-CHECKOUT.
+- **Not run: the manual pass.** §17's manual test drives the panel through the
+  real command surface, and that surface does not exist yet (below). Claiming
+  it would breach rule 12.
+
+**Blocked on, and stopped rather than invented**
+
+`apps/desktop/src-tauri/src/{commands.rs,core.rs,lib.rs}` are **untouched**.
+The adapters have to call T300-CORE's run manager, which had no commit on
+`t300-core-run-manager` when this work finished. Rather than invent a manager
+in `crates/gritty-core/src/agent_run/` — T300-CORE's lane — or ship four
+commands that refuse with a placeholder, the surface is left absent and the
+call shape is recorded here.
+
+The manager API these adapters need, derived from §§12-16:
+
+```rust
+// crates/gritty-core/src/agent_run/ (T300-CORE)
+impl AgentRunManager {
+    pub async fn start_fake(&self, request: StartFakeRunRequest, correlation: CorrelationId)
+        -> Result<AgentRun, CoreError>;          // NotFound / Conflict per §16, §14
+    pub async fn cancel(&self, request: CancelRunRequest, correlation: CorrelationId)
+        -> Result<AgentRun, CoreError>;          // idempotent per §13
+    pub async fn list(&self, request: ListRunsRequest, correlation: CorrelationId)
+        -> Result<Vec<AgentRun>, CoreError>;
+    pub async fn events(&self, request: RunEventsRequest, correlation: CorrelationId)
+        -> Result<AgentRunEventLog, CoreError>;
+    pub fn shutdown(&self);                      // §15, called from Core::shutdown
+}
+```
+
+plus a `pub runs: Arc<AgentRunManager>` field on `Core`, built in
+`Core::with_options` beside `workstreams`, and `runs.shutdown()` in
+`Core::shutdown` before the session writer flushes — the guarantee terminals
+already have.
+
+The four adapters are then mechanical, and this is the drop-in:
+
+```rust
+/// `runs.startFake`
+#[tauri::command]
+pub async fn runs_start_fake(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentRun, CoreError> {
+    let runs = core.runs.clone();
+    guard("runs.startFake", move |correlation| async move {
+        let request: StartFakeRunRequest = parse_request(request)?;
+        request.validate()?;
+        runs.start_fake(request, correlation).await
+    })
+    .await
+}
+```
+
+`runs_cancel`, `runs_list` and `runs_events` are the same four lines with their
+own request type and no `validate()`. All four then go on the end of
+`lib.rs`'s `generate_handler!` list. The integration test the "Tests required"
+section asks for — start a fake run through the real command surface and assert
+the emitted `CoreEvent` sequence — belongs with that commit, since it cannot be
+written against a manager that does not exist.
+
+**Architectural decisions**
+
+1. **The requests live in `agent_run/request.rs`, not `wire.rs`.** `wire.rs` is
+   the frozen contract; these are the command surface that reaches it, they
+   arrived a minor later, and `operation::registry` / `operation::demo` already
+   split requests away from the type they serve for the same reason. It also
+   keeps this ticket out of a 1028-line file three lanes are reading.
+2. **`script` is a bounded, optional preset *name*, not a script body.** The
+   steps belong to `gritty-agent-fake`; letting a caller post a program would
+   make the renderer the author of what an "agent" does. Absent means the
+   adapter's default, so the panel starts a run in one click without this
+   ticket guessing at a vocabulary T300-FAKE has not written yet. An unknown
+   name is `NotFound`, naming what was asked for.
+3. **The reducer mirrors the core's ring rather than inventing a second
+   policy.** `MAX_RUN_EVENTS` is duplicated in TypeScript with a comment
+   pointing at `wire.rs`, so a client that has been listening since a run
+   started trims exactly the events the core already counted. `dropped` is
+   carried through and never lowered: a gap the core reported is drawn, not
+   repaired.
+4. **Nothing optimistic, and a terminal snapshot is never undone.** Snapshots
+   merge on `updatedAt`, with a terminal-state guard for the case two snapshots
+   share a millisecond — otherwise a finished run could be left spinning in the
+   panel by the `cancel` response racing the event it caused.
+5. **An event for an unknown `runId` is dropped by the renderer too**, matching
+   the core's own rule, which is what stops a late batch resurrecting a run
+   whose workspace has closed.
+
+**Known limitations**
+
+- **An `AgentRun` does not survive a Gritty restart.** For a fake this is
+  correct rather than merely tolerable: a row claiming on startup that a run is
+  `RUNNING` when the process driving it died with the app is exactly the orphan
+  the state machine exists to prevent, and failing closed is the right
+  direction. It becomes a real gap the moment T310 gives a run a real
+  provider's process and half an hour of work to lose, and **ADR-021 should be
+  decided before T310, not after** — this ticket names it and does not pre-empt
+  it. Nothing here persists anything, so there is no migration.
+- **The command surface is specified but not wired** (above). Until it lands,
+  the panel's calls fail with Tauri's own "command not found" rather than a
+  `CoreError` — an opaque failure, and the reason the manual pass is unrun.
+- **`runs.events` is fetched once per row, on first expand.** Live batches keep
+  it current afterwards; a client that misses one sees the `dropped` count move
+  but does not re-fetch automatically. Adequate for a panel that is open for
+  seconds at a time, and not a policy a real surface should inherit.
+- **§16 says "Five commands" and then names four.** Four is what T300-C's own
+  follow-up list and `docs/merge-queue.md` both enumerate, and four is what
+  shipped; the fifth appears to be a counting slip, not a missing command. If
+  one was intended, it is not in any of the three lists.
+
+**Follow-ups** (recorded, not taken)
+
+- **The first surface a real run should get in the island.** Endorsing T300-C's
+  recommendation from the other end, having now built the throwaway: a run is
+  attached to a workstream, so its state and activity belong as a second line
+  on that workstream's island row — `RUNNING · Editing src/auth/session.ts` —
+  feeding the island's existing "needs you" count. `needsAttention()` in
+  `runs-reducer.ts` is that predicate, already written and tested, and it is
+  the only piece of this panel worth keeping. Worth a ticket once T310 exists.
+- **The integration test in `apps/desktop/src-tauri/tests/commands.rs`**, with
+  the adapter commit.
+- **`docs/architecture/agent-runs.md` says the contract landed at protocol
+  2.13.0**; the resolved merge line took **2.15.0** (`docs/merge-queue.md`).
+  One-word fix, left alone because it is T300-C's paragraph and three sessions
+  were reading the file.
+- **A `RUN_INTERRUPTED` variant**, still open from T300-C. `describeEvent`
+  already renders an unknown tag as its own name rather than throwing, so
+  adding one costs the renderer nothing.
+
+**Risks**
+
+- The reducer's `MAX_RUN_EVENTS` is a second copy of a core constant. It is
+  commented and tested, but a change to `wire.rs` will not fail a test here —
+  the two drift silently. Cheap to notice, worth a shared export if a third
+  copy ever appears.
+- `script` being a free string means the panel offers a text box, so the first
+  thing a user learns about the preset vocabulary is a `NotFound`. Once
+  T300-FAKE's script names exist, enumerating them or generating an enum would
+  be better; it was not worth guessing at ahead of that crate.
