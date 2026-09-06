@@ -53,8 +53,18 @@ function envelope(seq: number, name: EventEnvelope['name'] = 'OperationProgress'
   };
 }
 
-function setup(options: { protocolVersion?: string; deferListen?: boolean } = {}) {
-  const transport = createFakeTransport({ deferListen: options.deferListen });
+function setup(
+  options: {
+    protocolVersion?: string;
+    deferListen?: boolean;
+    failListen?: number;
+    listenBudgetMs?: number;
+  } = {},
+) {
+  const transport = createFakeTransport({
+    deferListen: options.deferListen,
+    failListen: options.failListen,
+  });
   transport.handlers.set('core_health', () => health(options.protocolVersion));
   transport.handlers.set('operations_list', () => [operation('COMPLETED')]);
   transport.handlers.set('operations_cancel', (args) => {
@@ -72,8 +82,14 @@ function setup(options: { protocolVersion?: string; deferListen?: boolean } = {}
   const diagnostics: Array<{ message: string; context: Record<string, unknown> }> = [];
   const client = createCoreClient(transport, {
     onDiagnostic: (message, context) => diagnostics.push({ message, context }),
+    ...(options.listenBudgetMs === undefined ? {} : { listenBudgetMs: options.listenBudgetMs }),
   });
   return { transport, client, diagnostics };
+}
+
+/** Enough microtask turns for the health probe and its chained handlers. */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 10; i += 1) await Promise.resolve();
 }
 
 describe('commands', () => {
@@ -205,10 +221,62 @@ describe('events', () => {
     transport.emit(envelope(9));
     transport.emit({ not: 'an envelope' });
     expect(diagnostics.map((d) => d.message)).toEqual([
+      // Emitting seq 5 first is itself a gap this client cannot have seen.
+      'core events preceded this listener',
       'core event sequence discontinuity',
       'dropping malformed core event',
     ]);
-    expect(diagnostics[0]?.context).toMatchObject({ expected: 7, received: 9 });
+    expect(diagnostics[0]?.context).toMatchObject({ preceding: 4, firstSeen: 5 });
+    expect(diagnostics[1]?.context).toMatchObject({ expected: 7, received: 9 });
+  });
+
+  it('registers the listener before anything subscribes', () => {
+    const { transport } = setup();
+    // `start()` at construction: the round trip begins while the compatibility
+    // probe is in flight, not when some hook happens to mount.
+    expect(transport.listenCalls).toBe(1);
+  });
+
+  it('does not send a command until the listener is registered', async () => {
+    // The budget is enormous on purpose. With a small one this test would pass
+    // even if the gate were deleted — the timer would let the command through
+    // and the assertion after `resolveListen` would still hold. Ordering is
+    // the property under test, so nothing may rescue it but registration.
+    const { client, transport } = setup({ deferListen: true, listenBudgetMs: 60_000 });
+    const inFlight = client.operations.list();
+    await flush();
+    // The health probe is not gated — it causes no events, and gating it would
+    // deadlock the very round trip readiness overlaps.
+    expect(transport.calls.map((call) => call.command)).toEqual(['core_health']);
+
+    transport.resolveListen();
+    await expect(inFlight).resolves.toHaveLength(1);
+    expect(transport.calls.map((call) => call.command)).toEqual(['core_health', 'operations_list']);
+  });
+
+  it('lets commands through when the channel never opens', async () => {
+    const { client, transport, diagnostics } = setup({ deferListen: true, listenBudgetMs: 5 });
+    // Never resolved: a listener that will not arrive must not become a window
+    // that will not respond.
+    await expect(client.operations.list()).resolves.toHaveLength(1);
+    expect(transport.calls.map((call) => call.command)).toContain('operations_list');
+    expect(diagnostics.map((d) => d.message)).toContain(
+      'sending commands before the core event channel is listening',
+    );
+  });
+
+  it('retries a refused registration instead of going deaf', async () => {
+    const { client, transport, diagnostics } = setup({ failListen: 1 });
+    const handler = vi.fn();
+    client.subscribe('OperationProgress', handler);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    expect(diagnostics[0]?.message).toBe('failed to listen on the core event channel');
+    expect(transport.listenCalls).toBe(2);
+    // The subscription made before the failure is live on the retry: without
+    // this, one refused registration silenced every hook for the session.
+    transport.emit(envelope(1));
+    expect(handler).toHaveBeenCalledTimes(1);
   });
 
   it('isolates a throwing handler from the others', async () => {

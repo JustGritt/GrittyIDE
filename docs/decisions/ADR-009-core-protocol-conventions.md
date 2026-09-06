@@ -41,7 +41,9 @@ the schema; `ts-rs` generates the TypeScript side (ADR-008).
   sequence discontinuities. Nothing is replayed after a renderer reload; the UI
   rehydrates through list commands (`operations.list`). Progress events are
   throttled per operation (one per 50 ms); high-frequency sources must batch
-  before they reach the bus.
+  before they reach the bus. **Registering the listener is itself asynchronous;
+  see §Amendment 2026-09-06 for what that costs and what the client now
+  guarantees.**
 - **Operations** follow `CREATED → RUNNING → COMPLETED | FAILED | CANCELLED`
   (plus `CREATED → CANCELLED`). Cancellation is cooperative through a child
   `CancellationToken`; the body task is also aborted at its next await point.
@@ -77,3 +79,101 @@ the schema; `ts-rs` generates the TypeScript side (ADR-008).
 
 A domain needs events the WebView must not miss across reloads (then add a
 replay/list pair for that domain), or `seq` gaps are observed in practice.
+
+---
+
+# Amendment, 2026-09-06 — listener registration is asynchronous
+
+- **Status:** Accepted
+- **Amends:** the *Events* bullet above, and the *Revisit when* clause, which
+  fired.
+
+## Context
+
+`seq` gaps were observed in practice, which is the second of the two triggers
+this ADR named. The observation was a shipped bug (PR #33): the shell sat on
+the startup launcher *while a workspace was open*, and dropping that same
+folder onto the window could not rescue it.
+
+The cause was not the one this ADR anticipated. It was not that a domain needed
+replay across a reload — it was that **`subscribe()` is synchronous to its
+caller and asynchronous underneath.** `EventHub` registers its transport
+listener with an IPC round trip, and `app.emit` to a WebView with no registered
+listener succeeds and delivers nothing. `session.restore` opens the last
+workspace and announces it inside that window; the announcement reached nobody.
+The persisted tabs still appeared, because those come back in the command's own
+*response* — which is exactly what made the resulting state so confusing.
+
+## What was measured
+
+1. Only one place in the repository sends a command: `invokeRaw` in
+   `packages/protocol/src/client.ts`, reached by every domain client through
+   `command()`, which already awaits a cached `core.health` probe.
+2. `EventHub` was fully lazy — its constructor did not call `transport.listen`;
+   registration began with the first `subscribe`, i.e. after the first commands
+   had already been issued in practice.
+3. A rejected `listen()` left every subscription already added permanently
+   deaf: the promise was cleared, but only a *new* `subscribe` retried, and the
+   hooks in this UI subscribe exactly once, at mount.
+4. `seq` starts at 1, but the core is built during Tauri's `setup`, before the
+   window is shown. A healthy cold start therefore has events numbered before
+   any WebView exists — so "first envelope with `seq > 1`" is **not** evidence
+   of a fault, and must not be reported as one.
+
+## Decision
+
+The client now guarantees **ordering**, not delivery-in-hindsight:
+
+- `EventHub.start()` is called when the client is constructed, so registration
+  overlaps the compatibility probe rather than waiting for a subscriber.
+- `command()` awaits `EventHub.ready()` before sending. Since registration
+  starts at construction and the probe is a full round trip, this has almost
+  always resolved already.
+- `ready()` is **bounded and fails open.** A dead event channel degrades to
+  "commands work, events do not"; it never becomes a window that will not
+  respond.
+- A refused registration is retried with a bounded backoff.
+
+**The guarantee, stated exactly:** an event emitted after a command was sent is
+delivered to every subscription registered at the moment it is dispatched. It
+is deliberately not "no event is ever lost". Two things it does not cover, both
+of which are properties of the subscriber and not of the channel:
+
+- **Events nothing asked for.** `AgentSessionsChanged` from the discovery
+  poller, `PersistenceStatusChanged`, and T070's watcher events are emitted
+  spontaneously. For those, only starting registration early helps.
+- **Subscribing after commanding.** The hub delivers to the subscriptions live
+  at dispatch time and buffers nothing, so a consumer that issues a command
+  before its own `subscribe` still misses what it caused.
+
+**No replay ring, still.** The bug was a registration-ordering fault, not a
+replay fault, and this ADR's existing answer — rehydrate through list commands
+— stands. A core-side buffer would also not have helped: `EventSink::emit` runs
+under the bus lock and feeds the session tap that persistence depends on, and
+"buffer until the first command" would flush into a WebView that is still not
+listening, because the first command is the health probe.
+
+**The rule this makes explicit, because both halves of PR #33 broke it:** *a
+command that returns state is the authority for that state.* An event is a
+notification, not the only delivery. Subscribing does not retroactively deliver.
+
+## Consequences
+
+- Every client registers one listener for its whole lifetime, including one
+  that never subscribes. There is one client per WebView.
+- Importing the client now has a side effect. In a non-Tauri environment
+  (a jsdom test) registration rejects, is retried, and gives up with a
+  diagnostic; nothing throws.
+- The hub reports how many events preceded its listener. This is worded as an
+  observation, not as loss, for the reason measured above — proving loss needs
+  a baseline the client does not have.
+
+## Revisit when
+
+- A domain needs events the WebView must not miss across reloads **and** cannot
+  re-ask for the state — then add a replay/list pair for that domain. T070 is
+  the first candidate: its explorer half re-lists on mount and survives, but
+  `documents.checkStatus` currently runs only on window focus, so an external
+  edit while unfocused has no re-ask path behind it.
+- Proving loss rather than observing precedence becomes worth a `lastEventSeq`
+  on the health report.
