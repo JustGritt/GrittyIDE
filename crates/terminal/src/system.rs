@@ -18,12 +18,32 @@
 //!
 //! **Termination.** `portable-pty` puts the child in its own session
 //! (`setsid`), so the shell is a process-group leader and `killpg` reaches it.
-//! A shell running a job puts that job in a *different* group in the same
-//! session, so we signal two groups: the shell's own, and whatever group
-//! currently owns the terminal. SIGHUP first — an interactive shell forwards it
-//! to its jobs, which is how a closed terminal window has always worked — then
-//! SIGTERM, then SIGKILL. A process that escapes into a session of its own
-//! (`setsid`, a daemon) survives, exactly as it survives closing any terminal.
+//! A shell running a job puts that job in a *different* process group in the
+//! same session, and there is no system call that signals a session, so the
+//! groups have to be enumerated: [`session_groups`] reads the process table
+//! once, while the shell is still alive, and keeps every group whose members
+//! share the shell's session id. That set, plus the group that currently owns
+//! the terminal, is what each signal goes to. SIGHUP first — it gives programs
+//! like `vim` their chance to clean up, and it is what closing a terminal
+//! window has always sent — then SIGTERM, then SIGKILL, and the ladder runs
+//! until every one of those groups is empty rather than stopping at the shell.
+//! So *ignoring* SIGHUP no longer outlives a close, which is a deliberate
+//! narrowing of what `nohup` buys; *leaving the session* still does (`setsid`,
+//! a daemon), exactly as it survives closing any terminal.
+//!
+//! Enumerating is not an optimisation of the old behaviour, it is the
+//! correctness of it. Before `PTY-FLAKE` only the shell's own group and the
+//! terminal's foreground group were signalled, and a backgrounded job is in
+//! neither: reaching it depended entirely on the shell forwarding SIGHUP to its
+//! jobs on the way out. That forwarding is not a guarantee — under load `zsh`
+//! was measured exiting from SIGHUP in 9 ms without having forwarded, and a job
+//! it did not forward to was orphaned permanently — and a job the shell never
+//! knew about (`( sleep 300 & )`, which detaches from job control while staying
+//! in the session) was leaked every single time.
+//!
+//! Enumerating alone was still not enough, which is the other half of the same
+//! ticket: escalation used to stop the moment the shell was reaped, so a group
+//! that swallowed its SIGHUP never saw a second signal. See [`escalate`].
 
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -41,6 +61,20 @@ use crate::shell::{
 
 /// How long each termination signal is given before escalating.
 const ESCALATION_STEP: Duration = Duration::from_millis(250);
+
+/// Absolute path, so `PATH` cannot decide what a kill runs.
+#[cfg(unix)]
+const PS_PATH: &str = "/bin/ps";
+
+/// Bound on the one process-table read a kill costs. Exceeding it costs the
+/// enumeration, not the kill: escalation carries on with the groups it already
+/// knows, which is what it had before this existed.
+#[cfg(unix)]
+const PS_TIMEOUT: Duration = Duration::from_millis(1_500);
+
+/// How often the `ps` wait wakes.
+#[cfg(unix)]
+const PS_POLL_STEP: Duration = Duration::from_millis(10);
 
 /// State shared by the reader, the flusher and the public handle.
 struct Shared {
@@ -380,6 +414,181 @@ fn target_groups(master: &Mutex<Box<dyn MasterPty + Send>>, pid: Option<u32>) ->
     groups
 }
 
+/// Every process group in the pty's session, read from the live process table.
+///
+/// This is the only way to reach a job the shell put in its own process group
+/// without making it the foreground one — `sleep 300 &`, or anything a build
+/// tool leaves running. There is no `killsid`, so the members have to be
+/// enumerated and their groups collected.
+///
+/// It must be called *before* the first signal. Once the shell is gone its
+/// children are reparented to init and the session they belonged to is no
+/// longer discoverable from the shell's pid.
+///
+/// Failure is never fatal: an empty answer leaves escalation exactly where it
+/// was before, signalling the shell's group and the foreground group.
+///
+/// # Safety of the answer
+///
+/// Every group returned is `killpg`ed, so a wrong answer signals innocent
+/// processes, and widening the blast radius from one group to a whole session
+/// is what makes that worth spelling out. Four guards, in the order they run:
+///
+/// 1. The pid must still be a session leader (`getsid(pid) == pid`), which is
+///    what `setsid` made it. A pid recycled onto an unrelated process is
+///    overwhelmingly unlikely to be one, so this is what stops a stale pid from
+///    nominating a stranger's session for termination.
+/// 2. That session must not be this process's own, or the enumeration would
+///    collect Gritty's process groups and the caller would kill the application.
+/// 3. Membership is asked of the kernel per process (`getsid`) rather than
+///    parsed out of `ps`, so a malformed row can only be skipped, never
+///    mis-attributed.
+/// 4. Group 0 is never returned: `killpg(0, …)` means *the caller's own group*.
+#[cfg(unix)]
+fn session_groups(shell: u32) -> Vec<i32> {
+    use nix::unistd::{Pid, getpgid, getpgrp, getsid};
+
+    let shell = Pid::from_raw(shell as i32);
+    let Ok(session) = getsid(Some(shell)) else {
+        // The shell is already gone; there is nothing to enumerate.
+        return Vec::new();
+    };
+    // `portable-pty` calls `setsid` in the child, so the shell leads its own
+    // session and `sid == pid == pgid`. If that does not hold, this pid is not
+    // the shell we spawned — most plausibly it was reaped and recycled in the
+    // window between the reader reaping it and the flusher marking the session
+    // delivered — and enumerating "its" session would sentence a stranger's
+    // process tree.
+    if session != shell {
+        tracing::warn!(
+            pid = shell.as_raw(),
+            session = session.as_raw(),
+            "the pty's pid no longer leads its own session; not enumerating it"
+        );
+        return Vec::new();
+    }
+    // Belt and braces behind the check above: never enumerate our own session.
+    if getsid(None).is_ok_and(|own| own == session) {
+        tracing::error!(
+            session = session.as_raw(),
+            "the pty shares this process's session; not enumerating it"
+        );
+        return Vec::new();
+    }
+    let own_group = getpgrp();
+
+    let Some(table) = process_table() else {
+        return Vec::new();
+    };
+    let mut groups = Vec::new();
+    for pid in table {
+        let pid = Pid::from_raw(pid);
+        // `getsid` fails with EPERM for another user's processes on some
+        // systems, and with ESRCH for one that exited between `ps` and here.
+        // Both mean "not ours to signal".
+        if getsid(Some(pid)).ok() != Some(session) {
+            continue;
+        }
+        let Ok(group) = getpgid(Some(pid)) else {
+            continue;
+        };
+        let group = group.as_raw();
+        if group <= 1 || group == own_group.as_raw() || groups.contains(&group) {
+            continue;
+        }
+        groups.push(group);
+    }
+    groups
+}
+
+/// Whether any of `groups` still has a member.
+///
+/// `killpg` with no signal is the existence check without the signal: `ESRCH`
+/// is the one answer that means the group is empty. `EPERM` — a group we may
+/// look at but not signal — counts as alive, because giving up on it silently
+/// would be the same mistake this whole path exists to stop making.
+#[cfg(unix)]
+fn any_group_alive(groups: &[i32]) -> bool {
+    groups.iter().any(|group| {
+        !matches!(
+            nix::sys::signal::killpg(nix::unistd::Pid::from_raw(*group), None),
+            Err(nix::errno::Errno::ESRCH)
+        )
+    })
+}
+
+/// Every pid on the machine, from `ps`.
+///
+/// A subprocess rather than a system call because there is no portable one:
+/// Linux has `/proc`, macOS has a `sysctl` that needs `unsafe`, and this crate
+/// denies `unsafe_code` like the rest of the workspace. Only the pid column is
+/// read — the session filter in [`session_groups`] is asked of the kernel, not
+/// of this output — so there is nothing here for a hostile process name to
+/// influence.
+///
+/// stdout is drained by a thread rather than after the wait: `ps -A` on a busy
+/// machine can outwrite a pipe buffer, and a child blocked on a full pipe never
+/// exits.
+#[cfg(unix)]
+fn process_table() -> Option<Vec<i32>> {
+    use std::process::{Command, Stdio};
+
+    let started = Instant::now();
+    let mut child = Command::new(PS_PATH)
+        .args(["-Ao", "pid="])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| tracing::warn!(%error, "could not read the process table"))
+        .ok()?;
+
+    let mut stdout = child.stdout.take()?;
+    let reader = std::thread::Builder::new()
+        .name("gritty-pty-ps".into())
+        .spawn(move || {
+            let mut buffer = Vec::new();
+            let _ = stdout.read_to_end(&mut buffer);
+            buffer
+        })
+        .ok()?;
+
+    let deadline = Instant::now() + PS_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            // Killing closes the pipe, which is what lets the reader thread
+            // finish instead of leaking. `kill` is only ever reached while the
+            // child is unreaped, so it cannot land on a recycled pid.
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                tracing::warn!("reading the process table timed out");
+                return None;
+            }
+            Ok(None) => std::thread::sleep(PS_POLL_STEP),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                tracing::warn!(%error, "could not wait for the process table read");
+                return None;
+            }
+        }
+    }
+
+    let output = reader.join().ok()?;
+    let pids: Vec<i32> = String::from_utf8_lossy(&output)
+        .lines()
+        .filter_map(|line| line.trim().parse().ok())
+        .collect();
+    tracing::debug!(
+        pids = pids.len(),
+        took_ms = started.elapsed().as_millis(),
+        "read the process table for a kill"
+    );
+    Some(pids)
+}
+
 impl PtySession for SystemSession {
     fn write(&self, data: &[u8]) -> Result<(), TerminalError> {
         if self.channel.is_delivered() {
@@ -449,11 +658,36 @@ impl PtySession for SystemSession {
     }
 }
 
-/// SIGHUP, then SIGTERM, then SIGKILL, each given [`ESCALATION_STEP`] to work.
+/// SIGHUP, then SIGTERM, then SIGKILL, each given [`ESCALATION_STEP`] to work,
+/// and each sent to every process group in the pty's session.
 ///
-/// SIGHUP is first on purpose: an interactive shell forwards it to its jobs,
-/// which is how closing a terminal window has always ended what was running in
-/// it, and it gives programs like `vim` their chance to clean up.
+/// SIGHUP is first on purpose: it is what closing a terminal window has always
+/// sent, and it gives programs like `vim` their chance to clean up. What it is
+/// *not* is a request for the shell to pass the signal on — the session is
+/// enumerated up front precisely so that a job survives or dies on its own
+/// signal rather than on the shell's cooperation.
+///
+/// The ladder runs until the shell has been reaped **and** every group it knew
+/// about is empty. Stopping at the shell alone is not enough, and that is the
+/// second half of `PTY-FLAKE`: signalling the right group is worth nothing if
+/// nothing follows up when the signal does not take. A job forked moments
+/// earlier can still be between `fork` and `execve`, where the shell's own
+/// signal mask and dispositions are what is installed — a SIGHUP that lands
+/// there can be blocked or ignored, and both states survive the `execve` into
+/// `sleep`. Measured on a loaded machine, that swallowed about one SIGHUP in
+/// twenty, and the job then lived forever because escalation had already
+/// returned. SIGTERM and finally SIGKILL now reach it.
+///
+/// Nothing user-facing waits for this: the ladder runs on the killer thread and
+/// the session reports its exit when the shell is reaped, so closing a tab is
+/// as quick as it ever was. Only a job that shrugs off a signal pays the
+/// [`ESCALATION_STEP`].
+///
+/// The cost is a deliberate narrowing of what survives a close. Ignoring SIGHUP
+/// — what `nohup` does — is no longer enough on its own; leaving the session is
+/// (`setsid`, a daemon), which is the escape hatch this module has always
+/// documented. For a cockpit that supervises agents, a dev server an agent left
+/// running is a thing to end with its terminal, not to inherit.
 #[cfg(unix)]
 fn escalate(
     channel: &Arc<Channel>,
@@ -464,14 +698,22 @@ fn escalate(
     use nix::sys::signal::Signal;
     use nix::unistd::Pid;
 
+    // Read once, before anything is signalled: a job is only attributable to
+    // this session while the shell that owns it is still alive.
+    let session = pid.map(session_groups).unwrap_or_default();
+    tracing::debug!(?pid, ?session, "terminating the pty session");
+
     for signal in [Signal::SIGHUP, Signal::SIGTERM, Signal::SIGKILL] {
-        if channel.is_delivered() {
-            return;
-        }
         // Re-read the foreground group each time: the shell may have started or
         // finished a job since the previous signal.
-        for group in target_groups(master, pid) {
-            match nix::sys::signal::killpg(Pid::from_raw(group), signal) {
+        let mut groups = target_groups(master, pid);
+        for group in &session {
+            if !groups.contains(group) {
+                groups.push(*group);
+            }
+        }
+        for group in &groups {
+            match nix::sys::signal::killpg(Pid::from_raw(*group), signal) {
                 // ESRCH only means the group is already gone.
                 Ok(()) | Err(nix::errno::Errno::ESRCH) => {}
                 Err(error) => {
@@ -479,7 +721,7 @@ fn escalate(
                 }
             }
         }
-        if channel.wait_delivered(ESCALATION_STEP) {
+        if channel.wait_delivered(ESCALATION_STEP) && !any_group_alive(&groups) {
             return;
         }
     }
