@@ -14,14 +14,14 @@ enforcement; this is the plan the leases implement.
 
 | | |
 |---|---|
-| `main` | `cb9e08a` — behind everything below |
-| Protocol | **2.10.0** (on `t325-workspace-ownership`) |
-| Schema | **3** (`0003_ownership.sql`) |
-| Open PRs | **#21** T325 workspace ownership · **#22** roadmap status correction |
-| At `review`, unmerged or unreviewed | T049, T051, T096, T098, T200, T210, T220, T221, T230, T231, T232, T325 — **twelve tasks** |
-| `in-progress` | T045 drag and drop |
-| Specified, not started | T097, T222, T223, T224 |
-| Not specified | T070, T080, T100, T110, T300, T305, T310, T320, T326, T330, T335, T400, T405, T410 |
+| `main` | `e32ee97` — everything below has landed on it |
+| Protocol | **2.10.0** (on `main`) |
+| Schema | **3** (`0003_ownership.sql`, on `main`) |
+| Open PRs | none. #20–#24 are merged and the queue is empty |
+| At `review`, merged but unreviewed | T049, T051, T096, T098, T200, T210, T220, T221, T230, T231, T232, T325 — **twelve tasks**, all of whose code is on `main`; what is missing is a reviewer, not a merge |
+| `in-progress` | T045 drag and drop (holderless — see below) · T223 attention |
+| Specified, not started | T097, T222, T224 |
+| Not specified | T305, T310, T320, T330, T335, T400, T405, T410 |
 
 Everything below is downstream of three things that are not code.
 
@@ -130,14 +130,27 @@ remaining step that makes T325 pay. T222 and T224 are additive and can slip.
 crates/agents/**
 crates/agent-hook/**
 crates/gritty-core/src/agent_session/**
-crates/gritty-core/src/ownership/**          (T326, read side only)
+crates/gritty-core/src/ownership/**          (T326 — see the note below)
 apps/desktop/src/features/agents/**
 apps/desktop/src/features/workstreams/**
 crates/platform/**                           (T224, new)
 ```
 
 Reserved protocol minors: **2.16** (T223), **2.17** (T326), **2.18** (T222), **2.19** (T224).
-T223 needs a migration.
+T223 needs a migration. Both numbers are stale as planning hints: T223 is
+spending **2.11.0** and migration **0004**, because `docs/merge-queue.md` is
+the record and a version gap costs nothing.
+
+**"Read side only" does not survive contact with T326.** The task file
+(`docs/tasks/T326-ownership-violations.md`) records that an observed violation
+is persisted as an ordinary `OwnershipConflict` row with a fourth
+`ConflictState`, and inserting a row is a write. What the annotation was
+protecting is intact — no new file, column or migration in
+`crates/persistence/**` — with one deliberate exception the spec names: the
+`WHERE` clause of `close_conflict` and `close_conflicts_for_lease`
+(`crates/persistence/src/store.rs:917,930`) is hardcoded to `WAITING`, so
+releasing a violated lease would otherwise leave its row open forever. Read
+the task file's §§6–8 before disputing the boundary.
 
 ### Lane O — orchestration · T300 → T305 → T310 → T320
 
@@ -256,6 +269,13 @@ docs/tasks/README.md
 contended file in the repository, and the reason a lane should write its command
 adapters in one commit at the end rather than growing them file by file.
 
+Two more files belong to no lane and are not on the list above, which T070's
+spec found the hard way: `crates/gritty-core/src/event/mod.rs`, where every
+lane eventually adds a `CoreEvent` variant, and
+`apps/desktop/src/features/documents/use-documents.ts`, which holds ADR-011's
+own named watcher seam. Treat both as magnets — claimed for the minute, not
+for the task — until a lane is given them deliberately.
+
 ### Why lanes should run in separate worktrees
 
 `cargo test -p gritty-core` **regenerates `packages/protocol/src/generated/`** as
@@ -300,7 +320,14 @@ scripts/agent-board.py list --lane W     # one lane
 The board is a live, cross-worktree record; its committed projection is the
 generated status column of `docs/tasks/README.md`. The lane definitions above
 are what this file owns — they change deliberately, not hourly — and
-`agent-board.py` reads its lane scopes from them.
+`agent-board.py` mirrors these scopes in a hardcoded `LANE_SCOPES` dict
+(`scripts/agent-board.py:72`); it does **not** parse this file. The two copies
+have already drifted — the script's Lane T omits ADR-017, its Lane A omits
+`crates/gritty-core/src/ownership/**`, its Lane O omits
+`crates/agents/adapters/**`, and Lane H does not exist there at all — so a
+`take` that relies on the lane default can claim less than the task needs.
+Pass `--scope` explicitly from the task file's "Allowed scope" when the two
+disagree, and treat reconciling them as its own change.
 
 ---
 
