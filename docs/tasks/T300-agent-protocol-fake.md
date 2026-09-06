@@ -1,7 +1,7 @@
 # Task T300 — Agent runs are Gritty's own, and a deterministic fake proves the whole lifecycle (Gate D)
 
 - **Phase:** 4
-- **Status:** todo
+- **Status:** superseded
 - **Depends on:** T200 (workstream model, Gate C — a run attaches to a
   workstream and brings no task model of its own), T210 (island — the
   surface a run's state eventually has to reach)
@@ -77,6 +77,23 @@ and it stops rather than reaching."
   the numbers) to reuse for event text.
 
 ## Allowed scope
+
+> **Split by `PLAN-FANOUT` (2026-09-06).** T300 is `superseded` on the
+> board and this file is the spec for the four tickets that replaced it:
+>
+> - **`T300-C`** (lane `C`) — the wire only: `agent_run/wire.rs`, the
+>   exporter, `packages/protocol/*`, the version bump. §§1-7.
+> - **`T300-FAKE`** (lane `O2`) — `crates/agent-fake/**`. §§8-11.
+> - **`T300-CORE`** (lane `O`) — `gritty-core/src/agent_run/**`: the manager,
+>   supervision, cancellation, the bounded ring. §§12-15.
+> - **`T300-CMD`** (lane `O3`) — `src-tauri` adapters and
+>   `features/runs/**`. §16 onward.
+>
+> `T300-C` lands alone and is reviewed alone: the ten-state machine and the
+> event vocabulary are the only genuinely risky design calls here, and
+> everything behind them is mechanical. The other three start together.
+> Every non-goal below binds all four — in particular, none of them edits
+> `agent_session`.
 
 - `crates/gritty-core/src/agent_run/**` (new)
 - `crates/agent-fake/**` (new) — package `gritty-agent-fake`, the name
