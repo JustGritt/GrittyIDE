@@ -116,6 +116,41 @@ impl WorkspacePath {
         })
     }
 
+    /// The wire path for a native path that is already known to be inside
+    /// `root` — the inverse of [`Self::to_native`], for paths that arrive from
+    /// the platform rather than from the protocol: a watch backend's event
+    /// (T070), a file dropped onto the window (T045).
+    ///
+    /// `root` must be the canonicalized root and `native` a path resolved
+    /// against it. The prefix is stripped component-wise, not as a string, so
+    /// `/ws2/x` is not accepted as being inside `/ws`; anything that still
+    /// resolves outside is `PermissionDenied` rather than trusted
+    /// (`docs/architecture/security.md`). A component that is not valid UTF-8
+    /// is refused too: the protocol carries strings, and a lossy name would
+    /// not round-trip back to this file.
+    pub fn from_native(root: &Path, native: &Path) -> Result<Self, WorkspaceError> {
+        let shown = native.display().to_string();
+        let relative = native.strip_prefix(root).map_err(|_| {
+            WorkspaceError::PermissionDenied(format!("{shown} resolves outside the workspace root"))
+        })?;
+        let mut path = Self::root();
+        for component in relative.components() {
+            let Component::Normal(name) = component else {
+                // Stripping a canonical root off a canonical path leaves only
+                // normal components; anything else means the caller passed
+                // something it had not resolved.
+                return Err(WorkspaceError::PermissionDenied(format!(
+                    "{shown} is not a resolved path inside the workspace root"
+                )));
+            };
+            let name = name.to_str().ok_or_else(|| {
+                WorkspaceError::invalid_path("path", "must be valid UTF-8 in every component")
+            })?;
+            path = path.join(name)?;
+        }
+        Ok(path)
+    }
+
     /// The path as the operating system sees it, joined to `root`. Purely
     /// lexical: no symlink is resolved and nothing is checked on disk.
     pub fn to_native(&self, root: &Path) -> PathBuf {
@@ -239,6 +274,50 @@ mod tests {
         for bad in ["", "..", "a/b", "x\\y", "/x"] {
             assert!(src.join(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn from_native_is_the_inverse_of_to_native() {
+        let root = Path::new("/ws");
+        for wire in ["", "src", "src/main.rs", "a/b c/d", "héllo/日本語.md"] {
+            let path = WorkspacePath::parse(wire).expect(wire);
+            let native = path.to_native(root);
+            let back = WorkspacePath::from_native(root, &native).expect(wire);
+            assert_eq!(back, path, "{wire}");
+        }
+    }
+
+    #[test]
+    fn from_native_refuses_paths_outside_the_root() {
+        let root = Path::new("/ws");
+        for outside in [
+            "/etc/passwd",
+            // A sibling that merely shares the prefix as a string.
+            "/ws2/src",
+            "/",
+            // Unresolved traversal: the caller was supposed to canonicalize.
+            "/ws/../etc",
+        ] {
+            let error = WorkspacePath::from_native(root, Path::new(outside)).expect_err(outside);
+            assert!(
+                matches!(error, WorkspaceError::PermissionDenied(_)),
+                "{outside} -> {error:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn from_native_refuses_a_component_that_is_not_utf8() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        let root = Path::new("/ws");
+        let native = root.join(OsStr::from_bytes(&[0x62, 0x61, 0x64, 0xff]));
+        assert!(matches!(
+            WorkspacePath::from_native(root, &native),
+            Err(WorkspaceError::InvalidPath { .. })
+        ));
     }
 
     #[test]

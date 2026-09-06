@@ -10,6 +10,7 @@
 //! event carries the page. Wire types are exported to TypeScript from here.
 
 pub mod recents;
+pub mod watch;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError, Weak};
@@ -213,6 +214,13 @@ pub struct WorkspaceManager {
     registry: Arc<OperationRegistry>,
     handle: Handle,
     close_guard: Mutex<Option<Weak<dyn WorkspaceCloseGuard>>>,
+    /// The watch of the open workspace, if one could be started (T070). At
+    /// most one, matching the single-open-workspace model; dropping it stops
+    /// the watch, which is why every close path goes through `emit_closed`.
+    watch: Mutex<Option<gritty_workspace::Watch>>,
+    /// Handed to the watch's callback so it can reach the close path without
+    /// keeping the manager alive.
+    me: Weak<Self>,
     /// Tests slow the blocking listing down so the budget hand-over and its
     /// cancellation can be exercised deterministically.
     #[cfg(test)]
@@ -225,12 +233,14 @@ impl WorkspaceManager {
         events: Arc<EventBus>,
         registry: Arc<OperationRegistry>,
     ) -> Arc<Self> {
-        Arc::new(Self {
+        Arc::new_cyclic(|me| Self {
             current: Mutex::new(None),
             events,
             registry,
             handle,
             close_guard: Mutex::new(None),
+            watch: Mutex::new(None),
+            me: me.clone(),
             #[cfg(test)]
             listing_delay: Mutex::new(Duration::ZERO),
         })
@@ -302,9 +312,15 @@ impl WorkspaceManager {
                 workspace: workspace.clone(),
             }),
         );
+        let root = Arc::new(root);
+        // Started after the workspace is announced, so nothing the watch says
+        // can arrive before `WorkspaceOpened`; a backend that refuses leaves
+        // `None` here and every on-demand check stays as correct as it was.
+        *self.watch.lock().unwrap_or_else(PoisonError::into_inner) =
+            self.start_watch(&workspace, &root);
         *current = Some(OpenWorkspace {
             workspace: workspace.clone(),
-            root: Arc::new(root),
+            root,
         });
         Ok(workspace)
     }
@@ -487,6 +503,17 @@ impl WorkspaceManager {
         correlation_id: Option<CorrelationId>,
     ) {
         tracing::info!(workspace = %open.workspace.id, ?reason, "workspace closed");
+        // Every close — user, replaced, root missing — funnels through here,
+        // so stopping the watch here means no path can leave one running.
+        // Dropping the handle never joins the pump thread, which is what lets
+        // the pump itself reach this (a root that disappeared) without
+        // deadlocking against its own close.
+        drop(
+            self.watch
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take(),
+        );
         self.events.emit(
             &EventOrigin {
                 workspace_id: Some(open.workspace.id.clone()),
@@ -1065,6 +1092,113 @@ mod tests {
         assert_eq!(h.manager.current(&CorrelationId::new()), None);
         let closed = h.next_named("WorkspaceClosed").await;
         assert_eq!(closed.meta.workspace_id, Some(workspace.id));
+    }
+
+    /// T070 §11: an external change under the open workspace reaches the bus
+    /// as one coalesced batch of directories, attributed to `SYSTEM` and to no
+    /// correlation id, because nothing the user asked for caused it.
+    #[tokio::test]
+    async fn an_external_change_is_announced_as_a_batch_of_directories() {
+        let mut h = harness();
+        let dir = TempDir::new("watch-change");
+        let workspace = h
+            .manager
+            .open(
+                &dir.0,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
+            .unwrap();
+        // Written from outside Gritty, the way another process would.
+        fs::write(dir.0.join("src/added.rs"), "fn added() {}").unwrap();
+        let envelope = h.next_named("WorkspaceEntriesChanged").await;
+        assert_eq!(envelope.meta.actor, Actor::System);
+        assert_eq!(envelope.meta.correlation_id, None);
+        assert_eq!(envelope.meta.workspace_id, Some(workspace.id.clone()));
+        let CoreEvent::WorkspaceEntriesChanged(payload) = envelope.event else {
+            panic!("expected WorkspaceEntriesChanged");
+        };
+        assert_eq!(payload.workspace_id, workspace.id);
+        assert!(!payload.overflowed);
+        assert!(
+            payload
+                .directories
+                .contains(&WorkspacePath::parse("src").unwrap()),
+            "{:?}",
+            payload.directories
+        );
+    }
+
+    /// T070 §10: the root's disappearance runs the *existing* `RootMissing`
+    /// close, without waiting for a command to notice it — the difference from
+    /// `a_removed_root_closes_the_workspace_lazily` is that nothing is called.
+    #[tokio::test]
+    async fn a_removed_root_closes_the_workspace_without_a_command() {
+        let mut h = harness();
+        let dir = TempDir::new("watch-root-gone");
+        let workspace = h
+            .manager
+            .open(
+                &dir.0,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
+            .unwrap();
+        fs::remove_dir_all(&dir.0).unwrap();
+        let closed = h.next_named("WorkspaceClosed").await;
+        assert_eq!(closed.meta.actor, Actor::System);
+        let CoreEvent::WorkspaceClosed(payload) = closed.event else {
+            panic!("expected WorkspaceClosed");
+        };
+        assert_eq!(payload.reason, WorkspaceClosedReason::RootMissing);
+        assert_eq!(payload.workspace_id, workspace.id);
+        // And it closed once: the lazy path finds nothing left to close.
+        assert_eq!(h.manager.current(&CorrelationId::new()), None);
+        assert_eq!(
+            h.sink
+                .names()
+                .iter()
+                .filter(|name| **name == "WorkspaceClosed")
+                .count(),
+            1
+        );
+    }
+
+    /// A closed workspace has no watch: a batch for a workspace that is gone
+    /// would be a change the UI cannot place.
+    #[tokio::test]
+    async fn closing_the_workspace_stops_the_watch() {
+        let h = harness();
+        let dir = TempDir::new("watch-stop");
+        let workspace = h
+            .manager
+            .open(
+                &dir.0,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
+            .unwrap();
+        h.manager
+            .close(
+                &workspace.id,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
+            .unwrap();
+        for n in 0..20 {
+            fs::write(dir.0.join(format!("after-{n}.txt")), "x").unwrap();
+        }
+        // Well past the watcher's debounce and its ceiling.
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        assert!(
+            !h.sink.names().contains(&"WorkspaceEntriesChanged"),
+            "a closed workspace still reported changes: {:?}",
+            h.sink.names()
+        );
     }
 
     #[test]

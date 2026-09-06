@@ -9,7 +9,7 @@
 
 use std::fs;
 use std::io;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use crate::error::WorkspaceError;
 use crate::path::WorkspacePath;
@@ -137,19 +137,12 @@ impl WorkspaceRoot {
     /// The root itself maps to [`WorkspacePath::root`]. A component that is not
     /// valid UTF-8 yields `None` rather than a lossy path: the protocol carries
     /// strings, and a lossy name would not round-trip back to this file.
+    ///
+    /// The check itself lives in [`WorkspacePath::from_native`], which the
+    /// watcher (T070) needs with its error rather than as an `Option`; this is
+    /// the same answer with the reason dropped.
     pub fn relativize(&self, canonical: &Path) -> Option<WorkspacePath> {
-        let relative = canonical.strip_prefix(&self.path).ok()?;
-        let mut path = WorkspacePath::root();
-        for component in relative.components() {
-            let name = match component {
-                Component::Normal(name) => name.to_str()?,
-                // `strip_prefix` on two canonical absolute paths leaves only
-                // normal components; anything else means the assumption broke.
-                _ => return None,
-            };
-            path = path.join(name).ok()?;
-        }
-        Some(path)
+        WorkspacePath::from_native(&self.path, canonical).ok()
     }
 }
 

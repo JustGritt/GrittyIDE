@@ -36,7 +36,12 @@ path, reason: USER | WORKSPACE_CLOSED, dirty }`. Events never carry text.
 ## State matrix
 
 `dirty = sha256(encode(buffer)) != savedHash`. The disk state comes from the
-last check (`status`, `save`, `reload`); it is not watched (T070).
+last check (`status`, `save`, `reload`). Since T070 that check is also *run*
+by the watcher: `WorkspaceEntriesChanged` makes the shell call
+`documents.status`, so an external edit surfaces within one debounce window
+instead of at the next save or window focus. The watcher never decides a
+state — it only makes the same check fire sooner (ADR-011, ADR-025, and
+`docs/architecture/workspace.md`).
 
 | Disk since last sync | Buffer clean | Buffer dirty |
 |---|---|---|

@@ -74,6 +74,11 @@ gix = { version = "0.87.1", default-features = false, features = [
   "max-performance-safe",
   "sha1",
 ] }
+# T070 watcher: cross-platform filesystem notification (FSEvents on macOS,
+# inotify on Linux). Nothing in the tree observes the filesystem, and
+# hand-rolling two platform backends would need far more unreviewed code than
+# a dependency; it is used only inside `gritty-workspace`.
+notify = "8.2.0"
 
 [workspace.lints.rust]
 # Unsafe code needs a justified, reviewed `#![allow(unsafe_code)]` in the crate.

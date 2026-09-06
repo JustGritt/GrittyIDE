@@ -313,6 +313,78 @@ describe('listings that became operations', () => {
   });
 });
 
+describe('watched entries (T070)', () => {
+  /** Root loaded with `src` (loaded and expanded) and `docs` (never opened). */
+  function withLoadedTree(): ExplorerState {
+    const root = explorerReducer(opened(), {
+      type: 'pageLoaded',
+      path: '',
+      page: page('', [entry('src', { kind: 'dir' }), entry('docs', { kind: 'dir' })]),
+      append: false,
+    });
+    return explorerReducer(root, {
+      type: 'pageLoaded',
+      path: 'src',
+      page: page('src', [entry('main.rs')]),
+      append: false,
+    });
+  }
+
+  function changed(directories: string[], overflowed = false, workspaceId = WS.id): EventEnvelope {
+    return event({
+      name: 'WorkspaceEntriesChanged',
+      payload: { workspaceId, directories, overflowed },
+    });
+  }
+
+  it('marks a loaded directory stale and leaves an unopened one alone', () => {
+    const state = explorerReducer(withLoadedTree(), {
+      type: 'event',
+      event: changed(['src', 'docs']),
+    });
+    // `docs` has never been listed: there is nothing on screen to correct.
+    expect(state.stale).toEqual(['src']);
+    // Nothing else about the node moves until its page comes back.
+    expect(state.nodes.src?.loading).toBe(false);
+    expect(state.nodes.src?.children).toEqual(['src/main.rs']);
+  });
+
+  it('ignores a directory it does not know and a batch for another workspace', () => {
+    const loaded = withLoadedTree();
+    expect(explorerReducer(loaded, { type: 'event', event: changed(['elsewhere']) })).toBe(loaded);
+    const other = changed(['src'], false, 'ws-other' as WorkspaceId);
+    expect(explorerReducer(loaded, { type: 'event', event: other })).toBe(loaded);
+  });
+
+  it('re-lists every loaded node when the core says the batch overflowed', () => {
+    const state = explorerReducer(withLoadedTree(), {
+      type: 'event',
+      event: changed([], true),
+    });
+    // The root and `src`, the two that have pages; not `docs`.
+    expect([...state.stale].sort()).toEqual(['', 'src']);
+  });
+
+  it('accumulates batches and hands each path over exactly once', () => {
+    let state = explorerReducer(withLoadedTree(), { type: 'event', event: changed(['src']) });
+    state = explorerReducer(state, { type: 'event', event: changed(['', 'src']) });
+    expect([...state.stale].sort()).toEqual(['', 'src']);
+    // The hook takes what it is about to list; a batch that arrives meanwhile
+    // is not swept away with it.
+    const taking = explorerReducer(state, { type: 'refreshing', paths: ['src'] });
+    expect(taking.stale).toEqual(['']);
+    const after = explorerReducer(taking, { type: 'event', event: changed(['src']) });
+    expect([...after.stale].sort()).toEqual(['', 'src']);
+  });
+
+  it('drops everything pending when the workspace closes', () => {
+    const state = explorerReducer(withLoadedTree(), { type: 'event', event: changed(['src']) });
+    expect(state.stale).not.toEqual([]);
+    const closed = explorerReducer(state, { type: 'workspace', workspace: null });
+    expect(closed.stale).toEqual([]);
+  });
+});
+
 describe('isExpandable', () => {
   it('allows directories and inside-root directory symlinks only', () => {
     expect(isExpandable(null)).toBe(true);
