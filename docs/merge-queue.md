@@ -45,6 +45,12 @@ the unlucky one.
    only) and a collision costs a migration.
 3. **Migration numbers are claimed the same way.** `0003_ownership.sql` and
    `0003_agent_links.sql` cannot both exist.
+3b. **So are ADR numbers**, added after two branches in one wave both wrote an
+   `ADR-024` (filesystem watching, and `target/` retention). This is worse than
+   the `PROTOCOL_VERSION` case rather than better: the filenames differ, so git
+   merges both **cleanly**, and the repository ends up with two ADRs carrying
+   the same number and a `README.md` index that lists whichever row survived.
+   Nothing asserts against it. Claim the number here before writing the file.
 4. **Never hand-merge `packages/protocol/src/generated/`.** Resolve the Rust,
    then `cargo test -p gritty-core` and take what it writes.
 5. **The second PR to land re-runs `pnpm check`** after resolving, not before.
