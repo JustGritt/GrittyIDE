@@ -26,6 +26,8 @@ requires updating the relevant ADR.
 | [ADR-018](ADR-018-agent-integration-bridge.md) | Gritty may install a hook into another tool's configuration, additively and with consent | Accepted |
 | [ADR-019](ADR-019-workspace-ownership.md) | Write ownership is a logical lease held by a workstream, and it is observed rather than enforced | Accepted |
 | [ADR-020](ADR-020-agent-permission-verdicts.md) | A hook may wait for Gritty's verdict on a permission prompt, bounded and fail-open | Accepted |
+| [ADR-022](ADR-022-search-engine.md) | Search runs in-process on ripgrep's own crates, and "ignored" keeps its current, narrower meaning | Proposed |
+| [ADR-023](ADR-023-git-library.md) | Git is read in-process through `gix`, with no `git` process and no configuration that can run one | Proposed |
 
 Template:
 

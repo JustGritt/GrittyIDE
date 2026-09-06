@@ -103,10 +103,14 @@ released in one pass at the end, since `commands.rs` is 1040 lines already.
    Its iterator-based traversal also composes with cancellation (§6) rather
    than a spawned process's lifecycle. Against `git2`: both avoid the
    shell-out concerns, but `git2` wraps a C library, a larger memory-safety
-   surface for attacker-influenced data. Record this as a follow-up ADR; do
-   not decide it in a PR. Whichever is chosen, it is exactly one new
-   *external* `[workspace.dependencies]` entry, pinned exact, with the
-   dependency-policy justification, not overlapping any existing entry.
+   surface for attacker-influenced data. **Decided:
+   `docs/decisions/ADR-023-git-library.md`** takes `gix`, read-only, as
+   exactly one new *external* `[workspace.dependencies]` entry, pinned
+   exact, with the dependency-policy justification. One constraint it adds
+   that this spec did not have: the adapter must open repositories with
+   external filters and `textconv` disabled, **proven by a test** against a
+   fixture whose `.git/config` and `.gitattributes` ask for one — a library
+   is not "no process" by construction, only if configured that way.
 
 ### `git.status`
 
