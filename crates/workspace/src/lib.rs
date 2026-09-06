@@ -23,6 +23,7 @@ pub mod fixtures;
 pub mod listing;
 pub mod path;
 pub mod root;
+pub mod watch;
 
 pub use detect::{
     ContentKind, DocumentEncoding, LARGE_FILE_THRESHOLD, MAX_DOCUMENT_BYTES, decode_text,
@@ -35,7 +36,11 @@ pub use file::{
 };
 pub use listing::{
     DEFAULT_PAGE_SIZE, DirEntry, DirEntryKind, DirectoryPage, IGNORED_DIRECTORY_NAMES, ListOptions,
-    ListStats, Listing, MAX_PAGE_SIZE, SymlinkInfo, list_directory,
+    ListStats, Listing, MAX_PAGE_SIZE, SymlinkInfo, is_ignored, list_directory,
 };
 pub use path::WorkspacePath;
 pub use root::{ResolvedPath, WorkspaceRoot, canonicalize};
+pub use watch::{
+    ChangeBatch, DEBOUNCE, MAX_DIRECTORIES, MAX_WAIT, Watch, WatchConfig, WatchEvent,
+    WatchStrategy, watch,
+};

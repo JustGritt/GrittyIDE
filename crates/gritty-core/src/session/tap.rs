@@ -75,6 +75,10 @@ impl Intent {
             CoreEvent::OperationFailed(p) => durable(&p.operation),
             CoreEvent::OperationCancelled(p) => durable(&p.operation),
             CoreEvent::OperationProgress(_)
+            // What the watcher (T070) saw on disk is a fact about the disk,
+            // rediscovered by looking at it again. Persisting it would let a
+            // restart claim a directory changed while Gritty was closed.
+            | CoreEvent::WorkspaceEntriesChanged(_)
             | CoreEvent::DocumentExternalChangeDetected(_)
             | CoreEvent::PersistenceStatusChanged(_)
             // Terminal buffers are an explicit T090 non-goal: nothing a shell

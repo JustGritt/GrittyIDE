@@ -33,6 +33,7 @@ use crate::protocol::error::CoreError;
 use crate::protocol::ids::{CorrelationId, DocumentId, OperationId, WorkspaceId};
 use crate::session::wire::PersistenceStatusPayload;
 use crate::terminal::wire::{TerminalExitedPayload, TerminalOutputPayload};
+use crate::workspace::watch::WorkspaceEntriesChangedPayload;
 use crate::workspace::{Workspace, WorkspaceClosedReason};
 use crate::workstream::wire::{
     DecisionRequestedPayload, DecisionResolvedPayload, WorkstreamChangedPayload,
@@ -67,6 +68,13 @@ pub enum CoreEvent {
     OperationCancelled(OperationCancelledPayload),
     WorkspaceOpened(WorkspaceOpenedPayload),
     WorkspaceClosed(WorkspaceClosedPayload),
+    /// Directories under the open workspace whose entries changed on disk
+    /// (T070). Coalesced and capped by the watcher, never one event per
+    /// filesystem event (rule 8); `overflowed` says the list was dropped
+    /// rather than truncated. It reports *that* something changed, never what
+    /// it means: a document's external-modification state stays the on-demand
+    /// answer of `documents.status` (ADR-011).
+    WorkspaceEntriesChanged(WorkspaceEntriesChangedPayload),
     DocumentOpened(DocumentOpenedPayload),
     /// The buffer or its mode changed (an edit, a reload, read-only lifted).
     /// Carries the document snapshot, never the text: the text travels in the
@@ -221,6 +229,7 @@ impl CoreEvent {
             Self::OperationCancelled(_) => "OperationCancelled",
             Self::WorkspaceOpened(_) => "WorkspaceOpened",
             Self::WorkspaceClosed(_) => "WorkspaceClosed",
+            Self::WorkspaceEntriesChanged(_) => "WorkspaceEntriesChanged",
             Self::DocumentOpened(_) => "DocumentOpened",
             Self::DocumentChanged(_) => "DocumentChanged",
             Self::DocumentSaved(_) => "DocumentSaved",
@@ -252,6 +261,7 @@ impl CoreEvent {
             Self::OperationCancelled(p) => Some(&p.operation.id),
             Self::WorkspaceOpened(_)
             | Self::WorkspaceClosed(_)
+            | Self::WorkspaceEntriesChanged(_)
             | Self::DocumentOpened(_)
             | Self::DocumentChanged(_)
             | Self::DocumentSaved(_)

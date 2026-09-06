@@ -38,6 +38,20 @@ pub const IGNORED_DIRECTORY_NAMES: &[&str] = &[
     ".cache",
 ];
 
+/// Whether `path` lies in a generated or dependency subtree: any of its
+/// segments is one of [`IGNORED_DIRECTORY_NAMES`].
+///
+/// One answer, shared by everything that has to decide whether to descend —
+/// the watcher (T070) prunes its registrations with it, and a directory walk
+/// (T080) calls it per entry — so "ignored" never means two different things
+/// in two places. It is deliberately name-based and synchronous: nothing is
+/// read from disk, and the ignored directory *itself* is not ignored by its
+/// parent, only its contents are.
+pub fn is_ignored(path: &WorkspacePath) -> bool {
+    path.segments()
+        .any(|segment| IGNORED_DIRECTORY_NAMES.contains(&segment))
+}
+
 /// How many entries are processed between two cancellation checks.
 const CANCEL_CHECK_INTERVAL: usize = 256;
 
@@ -424,5 +438,33 @@ mod tests {
                 "name": ".git", "kind": "dir", "modifiedAt": 5, "hidden": true, "ignoredHint": true
             })
         );
+    }
+
+    #[test]
+    fn is_ignored_matches_any_segment_not_just_the_name() {
+        for wire in [
+            "node_modules",
+            "node_modules/react",
+            "node_modules/react/dist/index.js",
+            "a/b/target",
+            "a/b/target/debug/deps/x.rlib",
+            ".git",
+            "crates/x/.git/HEAD",
+        ] {
+            let path = WorkspacePath::parse(wire).expect(wire);
+            assert!(is_ignored(&path), "{wire} should be ignored");
+        }
+        for wire in [
+            "",
+            "src",
+            "src/main.rs",
+            "my-node_modules",
+            "targets",
+            "a/targeting/b",
+            ".gitignore",
+        ] {
+            let path = WorkspacePath::parse(wire).expect(wire);
+            assert!(!is_ignored(&path), "{wire} should not be ignored");
+        }
     }
 }

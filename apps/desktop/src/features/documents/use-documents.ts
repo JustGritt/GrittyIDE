@@ -185,9 +185,25 @@ export function useDocuments() {
       }),
   );
 
+  const checkStatus = useCallback(async () => {
+    if (stateRef.current.order.length === 0) return;
+    try {
+      const documents = await core.documents.status();
+      dispatch({ type: 'refreshed', documents });
+    } catch (cause: unknown) {
+      setError(toCoreError(cause));
+    }
+  }, []);
+
   // Events from the core; the store applies them idempotently.
   useEffect(() => {
     const unsubscribe = core.subscribeAll((event) => {
+      // The watcher (T070) saw the disk move: run the check ADR-011 already
+      // specifies, one debounce window after the change instead of at the next
+      // save or window focus. No filtering by path here — the core has already
+      // coalesced and bounded the batch — and no second opinion about what
+      // changed: `documents.status` stays the only answer.
+      if (event.name === 'WorkspaceEntriesChanged') void checkStatus();
       if (event.name === 'DocumentClosed') {
         const documentId = event.payload.documentId;
         // Keep what the editor still holds so an orphaned buffer is complete.
@@ -204,7 +220,7 @@ export function useDocuments() {
       unsubscribe();
       scheduler.cancelAll();
     };
-  }, [scheduler, forget]);
+  }, [scheduler, forget, checkStatus]);
 
   /**
    * Open every document the core still holds (a renderer reload: the core
@@ -234,17 +250,9 @@ export function useDocuments() {
     [opened],
   );
 
-  const checkStatus = useCallback(async () => {
-    if (stateRef.current.order.length === 0) return;
-    try {
-      const documents = await core.documents.status();
-      dispatch({ type: 'refreshed', documents });
-    } catch (cause: unknown) {
-      setError(toCoreError(cause));
-    }
-  }, []);
-
-  // External modification is checked on demand (T070 adds a watcher).
+  // The other way in: a window that regains focus after an edit elsewhere.
+  // The watcher branch above covers a change while the window stays focused,
+  // which is the one this listener alone could not see.
   useEffect(() => {
     const onFocus = () => void checkStatus();
     window.addEventListener('focus', onFocus);

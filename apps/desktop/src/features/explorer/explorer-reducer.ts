@@ -60,6 +60,13 @@ export interface ExplorerState {
    * IPC messages, and their order is not guaranteed.
    */
   readonly unmatched: Readonly<Record<string, ListingOutcome>>;
+  /**
+   * Loaded nodes the watcher (T070) says are out of date, waiting to be
+   * re-listed. The reducer is pure, so it names them and the hook runs the
+   * same `workspace.list` a manual reload runs; nothing else about a node
+   * changes until its page comes back.
+   */
+  readonly stale: readonly string[];
 }
 
 export const initialExplorerState: ExplorerState = {
@@ -68,6 +75,7 @@ export const initialExplorerState: ExplorerState = {
   showHidden: false,
   notice: null,
   unmatched: {},
+  stale: [],
 };
 
 /** Operation kind the core uses for a listing that outlived its budget. */
@@ -83,6 +91,7 @@ export type ExplorerAction =
   | { type: 'listFailed'; path: string; error: CoreErrorShape }
   | { type: 'setShowHidden'; showHidden: boolean }
   | { type: 'dismissNotice' }
+  | { type: 'refreshing'; paths: readonly string[] }
   | { type: 'event'; event: EventEnvelope };
 
 export function childPath(parent: string, name: string): string {
@@ -135,6 +144,7 @@ function openWorkspace(state: ExplorerState, workspace: Workspace): ExplorerStat
     nodes: { '': makeNode('', null, true) },
     notice: null,
     unmatched: {},
+    stale: [],
   };
 }
 
@@ -145,7 +155,7 @@ function closeWorkspace(
 ): ExplorerState {
   if (state.workspace === null) return state;
   if (workspaceId !== null && state.workspace.id !== workspaceId) return state;
-  return { ...state, workspace: null, nodes: {}, notice, unmatched: {} };
+  return { ...state, workspace: null, nodes: {}, notice, unmatched: {}, stale: [] };
 }
 
 function dropSubtree(nodes: Record<string, ExplorerNode>, path: string): void {
@@ -214,10 +224,32 @@ function settle(state: ExplorerState, operationId: OperationId, outcome: Listing
   return applyOutcome(state, path, outcome);
 }
 
+/**
+ * The loaded nodes a watcher batch invalidates (T070).
+ *
+ * A node is loaded when `children !== null`; an unexpanded one has nothing on
+ * screen to correct and is left alone, so the cost of a change is bounded by
+ * what the user opened. `overflowed` means the core dropped the list rather
+ * than truncating it, so every loaded node is re-listed instead — still
+ * bounded by the tree the user expanded, never by the size of the storm, which
+ * is what lets a storm converge without being forwarded.
+ */
+function staleNodes(state: ExplorerState, directories: readonly string[], overflowed: boolean) {
+  const loaded = (path: string) => state.nodes[path]?.children != null;
+  const paths = overflowed ? Object.keys(state.nodes).filter(loaded) : directories.filter(loaded);
+  const pending = new Set([...state.stale, ...paths]);
+  return pending.size === state.stale.length ? state.stale : [...pending];
+}
+
 function onEvent(state: ExplorerState, event: EventEnvelope): ExplorerState {
   switch (event.name) {
     case 'WorkspaceOpened':
       return openWorkspace(state, event.payload.workspace);
+    case 'WorkspaceEntriesChanged': {
+      if (state.workspace?.id !== event.payload.workspaceId) return state;
+      const stale = staleNodes(state, event.payload.directories, event.payload.overflowed);
+      return stale === state.stale ? state : { ...state, stale };
+    }
     case 'WorkspaceClosed':
       return closeWorkspace(state, event.payload.workspaceId, {
         root: event.payload.root,
@@ -289,6 +321,13 @@ export function explorerReducer(state: ExplorerState, action: ExplorerAction): E
         : { ...state, showHidden: action.showHidden };
     case 'dismissNotice':
       return state.notice === null ? state : { ...state, notice: null };
+    case 'refreshing': {
+      // Taken, not cleared: a batch that arrived while these were being
+      // dispatched must survive.
+      const taken = new Set(action.paths);
+      const rest = state.stale.filter((path) => !taken.has(path));
+      return rest.length === state.stale.length ? state : { ...state, stale: rest };
+    }
     case 'event':
       return onEvent(state, action.event);
   }

@@ -94,6 +94,25 @@ export function useExplorer(options: ExplorerOptions = {}) {
     }
   }, [workspace, root, load]);
 
+  /**
+   * Re-list what the watcher (T070) invalidated, with the same call a manual
+   * reload makes. The reducer named the nodes; this runs them, and takes them
+   * off the list first so a batch arriving mid-flight is not lost with them.
+   *
+   * Nothing new is subscribed to: `WorkspaceEntriesChanged` already reaches
+   * the reducer through the one `subscribeAll` above.
+   */
+  const stale = state.stale;
+  const refreshing = useRef<readonly string[] | null>(null);
+  useEffect(() => {
+    if (!workspace || stale.length === 0 || refreshing.current === stale) return;
+    // React may run this effect twice for one state (StrictMode); the identity
+    // guard keeps that from listing every directory twice.
+    refreshing.current = stale;
+    dispatch({ type: 'refreshing', paths: stale });
+    for (const path of stale) void load(workspace.id, path, null);
+  }, [workspace, stale, load]);
+
   /** Runs an action, reporting a refusal instead of throwing. `undefined` on failure. */
   const run = useCallback(async <T>(action: () => Promise<T>): Promise<T | undefined> => {
     try {

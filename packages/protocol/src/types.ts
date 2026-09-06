@@ -160,6 +160,7 @@ export { CORE_EVENT_CHANNEL, PROTOCOL_VERSION } from './generated/version';
 export type { Workspace } from './generated/Workspace';
 export type { WorkspaceClosedPayload } from './generated/WorkspaceClosedPayload';
 export type { WorkspaceClosedReason } from './generated/WorkspaceClosedReason';
+export type { WorkspaceEntriesChangedPayload } from './generated/WorkspaceEntriesChangedPayload';
 export type { WorkspaceId } from './generated/WorkspaceId';
 export type { WorkspaceOpenedPayload } from './generated/WorkspaceOpenedPayload';
 export type { WorkspacePath } from './generated/WorkspacePath';
