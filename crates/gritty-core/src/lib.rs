@@ -17,6 +17,9 @@
 //!   the `gritty-workspace` crate.
 //! - [`document`]: open documents and their buffers (T030, Gate B): dirty
 //!   state, atomic saves, external modification detection.
+//! - [`git`]: read-only repository status and structured diffs (T100) over
+//!   the `gritty-git` adapter. Never a `ChangeSet`, and never linked to a
+//!   workstream: `git` and `workstream` do not import each other.
 //! - [`shell`]: opening external URLs through an injected opener (T050).
 //! - [`terminal`]: terminal sessions (T090) over the `gritty-terminal` crate:
 //!   the registry, the workspace-relative working directory and the
@@ -35,6 +38,7 @@ pub mod agent_session;
 pub mod document;
 pub mod event;
 pub mod file_drop;
+pub mod git;
 pub mod health;
 pub mod operation;
 pub mod ownership;

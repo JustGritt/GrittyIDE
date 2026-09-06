@@ -1,0 +1,30 @@
+[package]
+name = "gritty-git"
+description = "Gritty git adapter: read-only repository status and structured diffs, in-process through gix"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# Repositories built at test time by shelling out to `git`. Off in the
+# production build: the `git` binary is never run to *read* a repository
+# (ADR-023), only to *build* a fixture for a test. Enabled by downstream
+# crates through their `[dev-dependencies]`.
+fixtures = []
+
+[dependencies]
+gix = { workspace = true }
+gritty-workspace = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+ts-rs = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

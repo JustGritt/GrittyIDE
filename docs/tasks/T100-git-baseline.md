@@ -1,7 +1,7 @@
 # Task T100 — Git baseline: read-only status and diff as domain objects
 
 - **Phase:** 2
-- **Status:** todo
+- **Status:** review
 - **Depends on:** T020 (open workspace: `WorkspaceId`, canonical `WorkspaceRoot`)
 
 ## Objective
@@ -241,11 +241,261 @@ pnpm check
 
 ## Completion report
 
-_(filled in by the implementing session)_ — must record: the dependency
-justification for the new external backend entry (the internal `gritty-git`
-path entry needs none); whether the §2 recommendation was followed or
-overridden, and why; that the backend-choice ADR was actually filed; the
-`PROTOCOL_VERSION` claimed in `docs/merge-queue.md` (2.13 is a planning
-reservation, not the record — `execution-board.md:219-220`); which of the
-cancellation, platform-build and manual checks actually ran, with results;
-and any follow-up recorded rather than built.
+### T100 (lane G — core half)
+
+_(T100-U, lane `Gu`, owns `apps/desktop/src/features/git/**` and reports
+separately below.)_
+
+**Summary.** `crates/git/` (package `gritty-git`) reads a repository through
+`gix`, and `crates/gritty-core/src/git/` turns that into `git.status` and
+`git.diff` with the `workspace.list` budget-then-operation split. Both stop at
+the magnet: **no wire change of any kind**. `docs/tasks/T100-git-baseline.md:62-63`
+defers the wire to `PROTO-W2`, and `docs/merge-queue.md:114-116` records that
+**T100 claims no protocol version**. So `PROTOCOL_VERSION` is untouched
+(still `2.12.0`), no `CoreEvent` variant was added, and
+`packages/protocol/**`, `crates/gritty-core/src/protocol/**` and
+`apps/desktop/src-tauri/src/commands.rs` are not in the diff. The wire surface
+the later ticket needs is written out below rather than built.
+
+**Files changed.**
+
+| Path | What |
+|---|---|
+| `crates/git/Cargo.toml` | new package `gritty-git`, plus the off-by-default `fixtures` feature |
+| `crates/git/src/lib.rs` | module map and the four "will not do" boundaries |
+| `crates/git/src/open.rs` | ADR-023 decision 2 in code, and the upstream-ref fallback it costs |
+| `crates/git/src/model.rs` | `RepositoryStatus`, `DiffSummary` and everything under them |
+| `crates/git/src/status.rs` | the three status streams merged per path |
+| `crates/git/src/diff.rs` | changed paths, both sides read directly, structured hunks |
+| `crates/git/src/page.rs` | pagination and the cancellation-check bound |
+| `crates/git/src/path.rs` | Git bytes → `WorkspacePath` |
+| `crates/git/src/fixtures.rs` | repositories built at test time (test-only) |
+| `crates/gritty-core/src/git/mod.rs` | `GitService`, the budget hand-over, `GitError` → `CoreError` |
+| `crates/gritty-core/src/git/wire.rs` | request/response types, `TS`-derived and ready to export |
+| `Cargo.toml` | the `gritty-git` path entry and one external `gix` entry |
+| `Cargo.lock` | resolved `gix` tree |
+| `crates/gritty-core/Cargo.toml` | depends on `gritty-git`; dev-dependency enables `fixtures` |
+| `crates/gritty-core/src/lib.rs` | `pub mod git;` and its line in the module map |
+
+`crates/gritty-core/src/lib.rs` is the one file outside the lane's two
+directories. It is a two-line module registration, without which
+`src/git/**` is not compiled at all; it is not on `execution-board.md`'s
+magnet list.
+
+**Dependency justification.** One new external `[workspace.dependencies]`
+entry, as ADR-023 budgets:
+
+```
+gix = { version = "0.87.1", default-features = false,
+        features = ["status", "revision", "max-performance-safe", "sha1"] }
+```
+
+Read a repository in-process: pure Rust end to end, so the one subsystem whose
+inputs are an attacker's file format never reaches a C parser, and no `git`
+subprocess inherits the user's configuration as ambient authority. It overlaps
+nothing in the tree. `default-features = false` is load-bearing rather than
+tidiness — it drops `extras`, which is what keeps the network transports,
+credential helpers, prompts and `signal-hook` out of the build: with these
+features there is no code path to a remote at all. `max-performance-safe`
+brings `parallel`, which the status iterator needs to be interruptible (without
+it `gix` buffers the whole status before yielding anything and the read cannot
+be cancelled). The internal `gritty-git` path entry carries no justification
+comment, matching the existing internal entries. **No second dependency was
+added:** the test fixtures hand-roll their temporary directory the way
+`gritty-agent-hook`'s tests do, rather than pulling in `tempfile`.
+
+**§2 recommendation: followed, and ADR-023 is filed**
+(`docs/decisions/ADR-023-git-library.md`, still `Proposed`; the roadmap
+amendment of 2026-09-06 accepts building against it). Nothing during the build
+gave a reason to reconsider `gix` — status, diff, rev-parsing and ahead/behind
+were all reachable. Its one constraint beyond this spec is decision 2, and that
+turned out to be the hardest requirement in the ticket; see the next section.
+
+**Architectural decisions.**
+
+1. **Nothing repository-influenced can run a program — the mechanism.**
+   `gix` will honour a `.git/config` that names a clean/smudge filter or a
+   `diff.<driver>.textconv`, so "in-process" had to be made true rather than
+   assumed. `gix::open::Options::isolated()` removes the *user's* config
+   (system, `~/.gitconfig`, `GIT_*`, `include.path`), and
+   `filter_config_section(|_| false)` removes the *repository's* ability to
+   define a driver: `gix` gates `filter.*` and `diff.*` driver extraction
+   behind exactly that predicate, so both lists come back empty and there is
+   nothing left to execute. The hook is a `fn(&gix_config::file::Metadata)`,
+   which describes the config *file* and not the section, so a narrower rule
+   ("reject `filter.*`, keep `remote.*`") is not expressible — refusing
+   everything is the only shape with no gap.
+2. **What that costs, and how it is paid back.** The same predicate hides
+   `remote.*`/`branch.*` from `gix`'s remote resolution, which would have taken
+   ahead/behind (§5) with it. `open::upstream_ref_name` therefore reads
+   `branch.<name>.merge` and `branch.<name>.remote` straight out of the
+   resolved config and reproduces the default
+   `refs/remotes/<remote>/<branch>` mapping. Reading a value is not running a
+   program. **Known limitation:** a repository with a non-default fetch
+   refspec reports *no* upstream rather than a wrong one.
+3. **The repository is opened at the workspace root, never discovered above
+   it.** A workspace opened at `repo/crates/git` would otherwise report paths
+   outside the workspace root, which ADR-010 exists to prevent. The cost is
+   that opening a subdirectory of a repository answers `NotARepository`
+   (follow-up 1).
+4. **`git.diff` reads both sides itself instead of using `gix`'s blob
+   pipeline.** Which paths changed comes from the status machinery with the
+   target tree substituted for HEAD; what each side *contains* is then read
+   from the tree and from the worktree directly. Two reasons: the change kind
+   falls out of "which side exists" so no HEAD→index and index→worktree merge
+   rules are needed (that merge is where diff views usually acquire wrong
+   badges), and the `textconv` code path is *absent* rather than merely
+   disabled. **Known limitation:** a `binary`/`-diff` gitattribute is not
+   honoured; the NUL-byte heuristic Git falls back on without one is used.
+5. **Hunks are structured, never text.** `gix::diff::blob::UnifiedDiff` with a
+   `ConsumeHunk` collector yields 1-based line numbers and per-line
+   Context/Add/Remove tags, copied into `DiffHunk`/`DiffLine`. No `+`/`-`
+   prefix is ever written into a string. Asserted against the *serialized*
+   response, not the Rust types, by
+   `git::tests::no_response_field_carries_a_whole_diff_as_one_string`.
+6. **A symlink is compared by its target and never followed** — faithful to
+   Git, and the reason no link in the worktree can read a file outside it.
+7. **`unrepresentable` counts, rather than hides, paths with no protocol
+   representation** (in practice a filename containing a backslash, which is
+   unaddressable on Windows and therefore in the protocol). Silently dropping
+   one would be the "partial data shown as complete" the failure table forbids.
+8. **`gritty-git` is a boundary, not a backend abstraction** (ADR-023 decision
+   3): no trait with one implementation. `gix` types never leave the crate.
+
+**Tests actually executed, with results.**
+
+- `cargo test -p gritty-git` — **45 passed, 0 failed.** Repositories built at
+  test time cover clean, staged, unstaged, untracked, deleted, staged rename,
+  ignored (on and off), merge conflict, detached HEAD, unborn branch, bare,
+  submodule (reported, not entered), ahead/behind, paging with a cursor;
+  diff additions/deletions/renames/binary/symlink/arbitrary revision/unknown
+  revision/path filter/hunk bounds/bare/paging; and path decoding.
+- `cargo test -p gritty-core` — **328 passed, 0 failed**, of which 9 are the
+  new `git::tests`: the `Ready`/`NotARepository`/`Pending` union, `NotFound`
+  on a `workspace_id` mismatch, `InvalidInput` naming `target` and `pageSize`,
+  both budget hand-overs completing on `OperationCompleted` with the payload,
+  cancellation, and the rule-5 check above.
+- **The cancellation check, run and measured.**
+  `page::tests::cancellation_is_noticed_within_one_check_interval` measures
+  the bound exactly — at most `CANCEL_CHECK_INTERVAL` (256) further items are
+  consumed after the predicate flips, over a 10 240-item sequence, with the
+  consumed count observed rather than inferred.
+  `status::tests::cancelling_a_large_status_abandons_the_work_rather_than_finishing_it`
+  runs a real 3 000-file repository twice: it measures what the whole read
+  costs, then cancels a tenth of the way in and asserts the cancelled run
+  returns `Cancelled` in less time — which is what shows the flag reaches
+  `gix`'s producer threads rather than the result being computed and thrown
+  away. The core-level budget tests use a `#[cfg(test)]` read-delay hook, the
+  same one `WorkspaceManager::listing_delay` exists for, so the hand-over is a
+  decision rather than a race.
+- **ADR-023 decision 2, run and proven.**
+  `open::tests::no_program_named_by_the_repository_can_run` builds a repository
+  whose `.git/config` defines `filter.evil.{clean,smudge}` and
+  `diff.evil.textconv` and whose `.gitattributes` points two patterns at them,
+  each command being a script that touches a marker file. It asserts (a) the
+  **control** — the same repository opened with `gix`'s defaults *does* produce
+  a driver, so the test cannot go vacuous after a `gix` upgrade; (b) opened the
+  way Gritty opens repositories the driver list is empty; (c) a full status and
+  a full diff over the targeted files leave the marker untouched. Unix-only,
+  because the fixture needs an executable script.
+- `cargo clippy --workspace --all-targets -- -D warnings` — clean.
+- `pnpm check` — **green, exit 0**, run locally in full (GitHub Actions is dark
+  per `CI-LINUX-DARK`, so this is the only evidence). `check:generated` passes
+  because `packages/protocol/src/generated` is untouched.
+- **Platform build: macOS (aarch64) only.** Nothing here is
+  platform-conditional except the two Unix-only tests (the filter fixture needs
+  `chmod +x`; the symlink diff test needs `std::os::unix::fs::symlink`), which
+  are `#[cfg(unix)]`. No Windows or Linux build was run. `gix` adds no C
+  toolchain, so no new platform requirement was introduced.
+- **Manual check: not run.** The task's manual pass wants the diff *view*, which
+  is T100-U's panel and does not exist in this half. What this half can be
+  checked against is covered by the fixtures above; the manual pass belongs
+  with T100-U.
+
+**Follow-ups recorded, not built.**
+
+1. **Opening a subdirectory of a repository reports `NotARepository`.** Deliberate
+   (decision 3), but a user who opens `repo/crates/git` gets an empty panel with
+   no explanation. A future ticket could report "this is inside a repository
+   rooted at X" as a distinct arm.
+2. **No watcher integration.** `git.status` is polled on demand; wiring it to
+   T070's invalidation is explicitly out of scope here.
+3. **A non-default fetch refspec yields no upstream** (decision 2). Reading
+   `remote.<name>.fetch` and matching it would fix it.
+4. **`binary`/`-diff` gitattributes are not honoured** (decision 4).
+5. **Untracked files do not appear in `git.diff`**, matching `git diff HEAD`.
+   A review-oriented view may later want them as additions; that is a product
+   decision, not an oversight.
+6. **`gix` is pre-1.0 with a history of breaking minors** (ADR-023's standing
+   consequence). Upgrades are deliberate tasks.
+7. **The sidecar must be staged before `cargo test --workspace` succeeds** in a
+   fresh worktree (`apps/desktop/scripts/prepare-sidecar.mjs`); `pnpm check`
+   does not do it. Hit while running the checks here, and already filed as
+   `SIDECAR-FRESH-CHECKOUT` — noted only as a second sighting.
+
+**Remaining risks.**
+
+- Decision 2's mechanism depends on `gix` continuing to gate driver extraction
+  behind `filter_config_section`. The control assertion in the test is what
+  turns a silent regression into a failing test, but it is a `gix` internal and
+  a future version could route around it. That is the risk ADR-023's "revisit
+  when" clause is for.
+- `gix`'s status is younger than libgit2's, and ADR-023 names submodules,
+  sparse checkout and conflicted entries as the likely edges. Submodules and
+  conflicts have fixtures here; **sparse checkout does not** and is untested.
+- The large-repository cancellation test compares two timed runs, so it is
+  timing-sensitive under heavy parallel load, though it cancels at 10% of a
+  freshly measured baseline and so has a wide margin. The exact bound it backs
+  up is proven by a deterministic unit test.
+
+### Wire surface required by `PROTO-W2`
+
+Nothing below exists yet; this is the input the wire ticket needs.
+
+**Commands (2, both read-only).**
+
+| Command | Request | Response |
+|---|---|---|
+| `git.status` | `GitStatusRequest` | `GitStatusResponse` |
+| `git.diff` | `GitDiffRequest` | `GitDiffResponse` |
+
+Both are `async` on `GitService` and take `(request, Actor, CorrelationId, DEFAULT_GIT_BUDGET)`,
+exactly like `workspace.list`. The adapters belong in `commands.rs`'s
+per-domain grouping, and `GitService::new(workspaces, registry, handle)` needs
+wiring in `core.rs`/`lib.rs`.
+
+**Event variants: none.** Both commands reuse the existing `Operation*` events;
+a `Pending` response completes on `OperationCompleted`, whose `result` is a
+serialized `RepositoryStatus` or `DiffSummary`.
+
+**`PROTOCOL_VERSION`: MINOR bump, additive only. No migration** — this task
+persists nothing and `SCHEMA_VERSION` is untouched.
+
+**Types to add to `export_bindings` (`protocol/export.rs`),** as a
+`gritty_git::*` / `git::wire::*` group beside the existing ones. Dependencies
+export transitively, so the roots are:
+
+```
+GitStatusRequest, GitStatusResponse, GitDiffRequest, GitDiffResponse
+```
+
+which pull in, from `gritty_git::model`:
+
+```
+RepositoryStatus, RepositoryState, UpstreamStatus, FileStatus, FileState, EntryKind,
+DiffSummary, FileDiff, DiffChangeKind, DiffHunk, DiffLine, DiffLineKind
+```
+
+All twelve already derive `Serialize`/`Deserialize`/`TS` with
+`#[serde(rename_all = "camelCase")]`, and the enums use
+`SCREAMING_SNAKE_CASE`, matching the existing protocol conventions. The two
+responses are `#[serde(tag = "status")]` unions with arms
+`ready` / `notARepository` / `pending`, mirroring `ListDirectoryResponse`.
+
+**Note for whoever writes it:** `gritty-core` re-exports nothing from
+`gritty-git` today. `export.rs` will need `use gritty_git::{...}` directly, or
+`crate::git::wire` for the four request/response roots.
+
+### T100-U (lane Gu — the panel)
+
+_(not this session)_
