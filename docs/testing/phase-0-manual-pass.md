@@ -7,10 +7,20 @@ concluded from `pnpm check`, and the agent cannot see or click the WebView on
 this machine.
 
 This is every outstanding human check in one ordered session. It replaces the
-"Not executed (human WKWebView pass)" lists spread across the T040, T045, T048,
-T049, T050, T060, T090, T096 and T098 completion reports.
+"Not executed (human WKWebView pass)" lists spread across the T040, T041, T045,
+T048, T049, T050, T051, T060, T090, T096, T098, T210, T220, T221, T225, T231,
+T232 and T325 completion reports.
 
-- **Time:** about 105 minutes, in seven sessions you can run separately.
+That list used to name nine tasks and the sentence above it claimed to be
+complete anyway; `docs/testing/review-findings.md` finding 6 is what caught it.
+Sessions 1B (T051), 8 and 9 are what closed the gap, and every step in them
+traces to a claim listed there.
+
+- **Time:** about 170 minutes, in nine sessions you can run separately — the
+  sum of the per-session estimates below, which the old "105" had stopped being.
+- **The split that matters:** **Sessions 1–7 decide ADR-001** (~130 min).
+  Sessions 8 and 9 close the review queue — T210, T220, T221, T231, T232 and
+  T325 — and neither half blocks the other. If you have one evening, run 1–7.
 - **Fills:** the `–` rows in `docs/testing/platform-matrix.md`, the perceptual
   rows of `docs/plans/phase-0-spike.md` §C, and the §D go/no-go answers.
 - **Record:** tick each step, note anything surprising, and keep the log file.
@@ -89,7 +99,7 @@ case identity, 10k+ repo, >5000 entries, root removed).
 
 ---
 
-## Session 1B — Startup screen, T048/T049 (~10 min)
+## Session 1B — Startup screen, T048/T049/T051 (~15 min)
 
 **Nothing in this session has ever been performed.** T048 and T049 were both
 built without a screen: verified by `pnpm check`, by rendering the frontend in
@@ -117,6 +127,19 @@ GRITTY_DATA_DIR=$(mktemp -d) pnpm dev
 | 1B.6 | Close again, click the **Reopen** tile | Same workspace, same result |
 | 1B.7 | Click **Open path…** | A field appears **already focused**. Type an absolute path → opens. Try a relative one (`../secrets`) → the core's `InvalidInput` envelope, no crash. Escape closes the field |
 
+**The resume rail, T051** — these continue from 1B.3's state and have never
+been performed either. 1B.5 above says tabs do not come back when you click a
+recents row; that is still true and still intended. The rail is the other
+control, and it is the one that brings them back.
+
+| # | Do | Expect |
+|---|---|---|
+| 1B.3a | At 1B.3's launcher — you closed a workspace that had no tabs open — look for the rail | There is none. A workspace with nothing open offers nothing to resume, and a rail that appeared here would teach you to ignore it |
+| 1B.3b | Reopen `small-repo`, open two files, click somewhere in the middle of the second, type a character into the first **without saving**, then Explorer `⋯` → **Close workspace** | The launcher carries a resume rail naming `small-repo`, its tab count, and the unsaved buffer **by name** — not just a count |
+| 1B.3c | Press **Restore** | The same two tabs, in the same order, with the same one active and the cursor where you left it. The edited tab is **still dirty**, and the file on disk is unchanged — restoring never writes |
+| 1B.3d | With the workspace open, look for the rail; then close the workspace again and press **Open without them** | The rail is gone while a workspace is open, and a fresh one appears on closing. "Open without them" opens the folder with no tabs |
+| 1B.3e | Close once more, press **Dismiss**, then reopen from the recents row and close again | Dismiss hides the rail and leaves the launcher alone. Reaching the launcher again offers the same tabs — **Dismiss hides, it never discards** |
+
 **Keyboard**
 
 | # | Do | Expect |
@@ -140,6 +163,7 @@ GRITTY_DATA_DIR=$(mktemp -d) pnpm dev
 | # | Do | Expect |
 |---|---|---|
 | 1B.16 | `mkdir /tmp/gritty-doomed`, open it as the workspace, quit the app, `rm -rf /tmp/gritty-doomed`, relaunch | A session notice, "Last workspace not reopened"; the launcher lists `gritty-doomed` **struck through** with `root missing` in red, and it is not clickable |
+| 1B.16a | Repeat 1B.16, but `echo hi > /tmp/gritty-doomed/a.txt` and open that file before quitting (T051) | The rail names `gritty-doomed` and offers **no Restore button**, saying why. An offer to reopen tabs under a root that is gone is worse than no offer |
 | 1B.17 | Click its **Forget**, quit, relaunch | The row is gone **and the notice is gone** — this is the whole point of Forget clearing the last-workspace pointer. If the notice comes back, that is a defect |
 
 **Long lists, themes and geometry**
@@ -152,7 +176,8 @@ GRITTY_DATA_DIR=$(mktemp -d) pnpm dev
 | 1B.21 | With a workspace open, quit and relaunch | The workspace comes back by itself and **the launcher never flashes** on the way. A blink of the empty state here is a defect |
 
 Rows filled: Shell (empty state), Files (picker again, drop onto the launcher),
-Input (the two chords, and that neither steals from Monaco or the shell).
+Input (the two chords, and that neither steals from Monaco or the shell), and
+Session (the resume rail's six claims, T051).
 
 ---
 
@@ -372,6 +397,140 @@ Then T098, on the same shells:
 
 Rows filled: the T096 and T098 completion reports' "not yet exercised by a pointer".
 
+---
+
+## Session 8 — Workstreams, the queue and ownership, T210/T325 (~15 min)
+
+**Not needed for ADR-001.** Sessions 1–7 decide the runtime; 8 and 9 close the
+review queue. Run them when you want those six tasks off `review`, in either
+order relative to the rest.
+
+Nothing in either task has been seen in the running app. Open `small-repo`, and
+keep 7.7a–7.7c in mind — they raise a question, which is the state several steps
+below need and which nothing else in the runbook produces.
+
+**The island itself**
+
+| # | Do | Expect |
+|---|---|---|
+| 8.1 | Press **⌥A**, then **⌥A** again | The sheet opens and closes. It is a floating layer: **the tab strip must not move down by a pixel** and nothing below it reflows |
+| 8.2 | Open it, press **Escape**; open it, click in the editor | Both close it. (T048's `⋯` and health popovers do *not* do this — that is a known defect of theirs, not of the island) |
+| 8.3 | Type a title into **New workstream**, submit | A row appears reading **Draft**, with a dot |
+| 8.4 | Hover the row, then reach it with **Tab** instead | The move buttons appear on hover **and** on keyboard focus. Mouse-only here is a defect |
+| 8.5 | Walk it **Ready → Start → Review → Done**, entirely from the row | Each click moves the row and relabels the state. Only the moves the core allows are ever offered — the renderer keeps no copy of the state machine |
+| 8.6 | On the **Done** row, look at what is offered | No **Block** and no **Abandon**: the row filters them deliberately. If a move you expect is missing, that is the core's answer, not a bug |
+
+**A refusal, and the two surfaces agreeing**
+
+| # | Do | Expect |
+|---|---|---|
+| 8.7 | Raise a question on a **In progress** workstream (7.7a) | The row goes to **Blocked** and reads "1 open question". The core blocks running work on a question; the renderer does not decide this |
+| 8.8 | While it is Blocked, try to move it to **Review** | It is refused. **The row stays exactly where it was** and the core's message is what you read — nothing moves optimistically and springs back |
+| 8.9 | Answer the question from the island's most-urgent slot | The row leaves Blocked and the work resumes **without a reload**. Watch the log: one event, not a refetch |
+| 8.10 | Press **Open the queue**, then answer a question there instead | The queue replaces the sidebar and editor. The island and the queue must agree at every moment, in both directions — answer in one, look at the other |
+| 8.11 | In the queue, click each filter: **All, Questions, Reviews, Conflicts** | Four filters, each with a count that matches the list. An empty filter says "Nothing under …", never a blank pane |
+| 8.12 | Press **Back to the editor** | The editor comes back with the same tabs, unchanged |
+
+**Ownership, T325**
+
+| # | Do | Expect |
+|---|---|---|
+| 8.13 | In the island, find the **Ownership** section with nothing claimed | "Nothing is claimed", and a claim form below it |
+| 8.14 | Claim a **folder** for one workstream: pick it, pick Folder, type `crates`, press **Claim** | A lease row appears reading **Held**, naming the target and the holding workstream. The roster row now carries **`owns 1`** |
+| 8.15 | Claim `crates` again for a *different* workstream | Refused where you clicked: "… is already owned. The conflict is in the attention queue." Check the queue's **Conflicts** filter — the refusal is a row there, naming the holder |
+| 8.16 | Take the holding workstream to **Done**, then look at its lease | It reads **"Held by finished work"** with a different dot. It still keeps others out; only you take it away |
+| 8.17 | Press **Release** on it | The row goes and the ground is claimable again |
+| 8.18 | **Read the section as a stranger would.** Does anything here make you believe a claimed file is *protected*? | The note says Gritty refuses a second claim and does **not** stop a write. T325's own report names this as its main risk: "The registry is believable, and it protects nothing." **This judgement is the single most useful thing you can record about this task** — if the wording oversells, say so in your own words |
+
+Rows filled: T210's seven perceptual claims and T325's five, none of which had a
+step before.
+
+---
+
+## Session 9 — Agents: the rail, the timeline and the hook, T220/T231/T232/T221 (~25 min)
+
+**This session needs a real Claude Code session running in another terminal**,
+because that is the only thing that produces the state four tasks are waiting
+to be seen in. Have one ready before you start, working in a *different* folder
+from the one Gritty has open.
+
+Check Session 0 step 0.1 first: without `target/debug/gritty-agent-hook` the
+whole hook surface reads unavailable, and that is not a defect.
+
+**The roster and the rail (T220, T231)**
+
+| # | Do | Expect |
+|---|---|---|
+| 9.1 | With a Claude Code session running elsewhere, press **⌥A** and look at the **Agents** section | The section renders at all — T220's report says this "has not been seen in the running app". The session is listed with its task line and the tool in flight |
+| 9.2 | Press **⌥G** | The agent rail opens on the right, listing every session |
+| 9.3 | Watch a session's marker as it works, blocks and finishes | The marker changes with it. **Look at the five shapes — filled disc, diamond, square, ring, bar — and say whether you can tell them apart at rail size with the colour ignored.** Colour alone would be a defect |
+| 9.4 | Quit the Claude Code session | Its row flips to **Ended** within one poll interval, and stays listed |
+| 9.5 | Drag the rail's gutter to resize; quit and relaunch | The width comes back |
+| 9.6 | Collapse the rail | The needs-you count is **still visible** on the collapsed strip. A collapsed rail that hides the one number worth seeing is worthless |
+| 9.7 | Shrink the window until something has to give | The rail shrinks toward its collapsed strip; the editor never goes below its minimum |
+| 9.8 | **Click into a terminal so the shell has focus, then press ⌥G** | The rail toggles and **no `©` is typed into the shell**. This was reasoned from an xterm source read and never run — it is the step most likely to fail |
+| 9.9 | With the island open (⌥A), press **⌥G**; then with a terminal focused press **⌥1** | ⌥G does nothing while the island is open, and the dock's ⌥1…⌥9 and the island's ⌥A never fight each other |
+
+**The timeline (T232)**
+
+| # | Do | Expect |
+|---|---|---|
+| 9.10 | Open a session's timeline and watch it while the agent works | The feed grows live |
+| 9.11 | Scroll up a few entries and wait for new ones | **You stay where you put yourself.** A feed that yanks you back to the bottom while you are reading is the defect this pin exists to prevent |
+| 9.12 | Find a file the agent just edited in **files touched** and click it | It opens with the **current** contents from disk. Open the same file first, edit it without saving, then click it again → the ordinary dirty-buffer conflict, never a silent overwrite |
+| 9.13 | Look for a file the agent touched **outside** the workspace | Listed, and **not clickable** |
+| 9.14 | Kill and restart the agent mid-timeline | The feed draws an explicit **gap** rather than pretending it is continuous |
+| 9.15 | Let a long tool result arrive | The rail never scrolls sideways as a whole, and the files-touched list is still reachable |
+
+**The hook, stage A — a scratch home, nothing real is touched (T221)**
+
+The installer edits `~/.claude/settings.json`, which is the file every Claude
+Code session on this machine reads. Gritty honours an absolute `HOME`, so this
+half is genuinely safe: everything below happens inside a temporary directory
+you can delete.
+
+```sh
+export FAKEHOME=/tmp/gritty-manual-home
+rm -rf "$FAKEHOME" && mkdir -p "$FAKEHOME/.claude"
+cat > "$FAKEHOME/.claude/settings.json" <<'JSON'
+{ "hooks": { "PreToolUse": [ { "matcher": "Bash", "hooks": [
+  { "type": "command", "command": "/usr/bin/true" } ] } ] } }
+JSON
+HOME=$FAKEHOME GRITTY_DATA_DIR=/tmp/gritty-manual-home-data GRITTY_LOG=debug pnpm dev
+```
+
+| # | Do | Expect |
+|---|---|---|
+| 9.16 | ⌥A → Agents section header → **Install…** | The proposed change is shown **before anything is applied**, and it names the backup path it will write |
+| 9.17 | Press **Apply**, then read `$FAKEHOME/.claude/settings.json` | Gritty's entry is there **and the `/usr/bin/true` entry is byte-identical**. Key order and indentation survived |
+| 9.18 | Press **Uninstall…** → **Remove**, then `diff` the file against the backup | No difference. This is the obligation ADR-018 puts on the installer, and the first time it has been checked against a file rather than a fixture |
+| 9.19 | Note **where the control is** | §25 says "in settings, not in the roster". It renders in the island's agents-section header, which the code argues *is* settings. Worth an eye rather than an argument — say whether you would have found it |
+
+**The hook, stage B — the real home, the only way to see `BLOCKED`**
+
+Stage A cannot produce a `BLOCKED` row: the hook only fires for a Claude Code
+session that reads the config Gritty wrote, and a real session reads the real
+file. Take your own copy first — the installer writes its own backup too, and
+both are worth having.
+
+```sh
+cp ~/.claude/settings.json ~/.claude/settings.json.manualpass
+```
+
+| # | Do | Expect |
+|---|---|---|
+| 9.20 | Relaunch Gritty normally (no `HOME` override) and install the hook | Same preview, same apply |
+| 9.21 | In the other terminal, get a Claude Code session to a **permission prompt** | Within one interval the row reads **Blocked**, and the row says the verdict came from the hook — `activitySource: HOOK` (T221 §24). The label reads **"Pending validation"**, not "Blocked": that phrasing is the point of §24, and whether it lands is your call |
+| 9.22 | Open that session's timeline while it sits at the prompt | The **permission prompt is the last row of the feed** (T232). It is a state, not an entry: it is replaced, never accumulated, and a new prompt re-pins the feed once |
+| 9.23 | Answer the prompt | The row leaves Blocked and the feed row goes with it |
+| 9.24 | Get back to a prompt, then **kill the agent while it waits there** | The row reads **Ended**, not Blocked. A dead agent that still claims to need you is the worst outcome this design has |
+| 9.25 | Uninstall, then `diff ~/.claude/settings.json ~/.claude/settings.json.manualpass` | No difference. If there is one, **stop and keep both files** — that is the highest-stakes defect in the whole runbook |
+| 9.26 | `rm -rf /tmp/gritty-manual-home /tmp/gritty-manual-home-data` and remove your copy once 9.25 passed | Clean |
+
+Rows filled: T220's four claims, T231's eight, T232's six and T221's six —
+thirty of the forty-three that `docs/testing/review-findings.md` lists as having
+no step anywhere.
+
 ## Then: the three questions that actually decide ADR-001
 
 Row ticks are evidence, but the ADR turns on judgment. Answer these in your own
@@ -398,7 +557,14 @@ words — a paragraph each is enough, and "I am not sure yet" is a real answer.
 2. Keep `/tmp/gritty-manual.log` and `/tmp/gritty-packaged.log` — hand over the
    paths and the §C command timings come out of them automatically.
 3. Note the machine and date once: macOS version, chip, RAM.
+4. Steps 8.18 and 9.3 ask for a **judgement**, not a tick. Answer them in your
+   own words even if everything worked — they are the two places where a
+   passing row and a good design are different things.
 
 The agent transcribes all of it into `docs/testing/platform-matrix.md` and
 `docs/plans/phase-0-spike.md`, with your observations attributed to the pass
 rather than to a test.
+
+Sessions 8 and 9 have one more consequence: they are what lets T210, T220,
+T221, T231, T232 and T325 leave `review`. An agent never sets `done`
+(`AGENTS.md`), so those six flips are yours and they need this evidence first.
