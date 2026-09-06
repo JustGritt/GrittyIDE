@@ -51,7 +51,7 @@ the workflow below are hand-maintained.
 | [T230](T230-agent-timeline.md) | Agent timeline: what a session is actually doing | 3 | T020, T220 | done |
 | [T231](T231-agent-rail.md) | The agent rail: a dedicated region for running agents | 3 | T046, T060, T220, T230 | done |
 | [T232](T232-timeline-view.md) | The timeline view, and the files an agent touched | 3 | T030, T230, T231 | review |
-| JSDOM-VITEST | A jsdom vitest project, so a `.tsx` can be tested against a DOM | 3 | T096, T232 | review |
+| [JSDOM-VITEST](JSDOM-VITEST-component-tests.md) | A jsdom vitest project, so a `.tsx` can be tested against a DOM | 3 | T096, T232 | review |
 | [T300](T300-agent-protocol-fake.md) | Agent event protocol + deterministic fake agent (Gate D) | 4 | T200, T210 | superseded |
 | T305 | Agent capability model | 4 | T300 | unspec |
 | T310 | First real adapter | 4 | T300, T305 | unspec |
@@ -67,8 +67,8 @@ the workflow below are hand-maintained.
 | ADR-017 | Decide the terminal command-block contract (drafted, undecided) | 2 | – | todo |
 | ADR-018A | ADR-018 amendment: a hook that may refuse a write | 4 | T326 | todo |
 | ADR-021 | Persistence for a run Gritty owns | 4 | T300-C | todo |
-| ADR-022 | Search engine: in-process grep/ignore, or spawn ripgrep | 2 | – | todo |
-| ADR-023 | Git library: gix, git2, or porcelain | 2 | – | todo |
+| ADR-022 | Search engine: in-process grep/ignore, or spawn ripgrep | 2 | – | review |
+| ADR-023 | Git library: gix, git2, or porcelain | 2 | – | review |
 | CI-COST | CI: self-hosted macOS runner, and stop burning metered minutes |  | – | review |
 | CI-LINUX-DARK | Linux CI is dark until the minute allowance resets (1 Oct) or a spending limit is set |  | – | blocked |
 | [CI-RUNNER-GC](CI-RUNNER-GC-disk-retention.md) | Self-hosted runner never cleans up: target/ and stale bundles grow unbounded on the dev Mac |  | – | review |
