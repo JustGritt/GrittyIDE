@@ -73,7 +73,7 @@ the workflow below are hand-maintained.
 | CI-LINUX-DARK | Linux CI is dark until the minute allowance resets (1 Oct) or a spending limit is set |  | – | blocked |
 | [CI-RUNNER-GC](CI-RUNNER-GC-disk-retention.md) | Self-hosted runner never cleans up: target/ and stale bundles grow unbounded on the dev Mac |  | – | review |
 | [EVENT-LISTEN-GAP](EVENT-LISTEN-GAP-startup-events.md) | An event emitted before the WebView is listening reaches nobody | 1 | T010 | review |
-| PLAN-FANOUT | Split the remaining work into fan-out-sized tickets, and the lanes to run them in |  | – | doing |
+| PLAN-FANOUT | Split the remaining work into fan-out-sized tickets, and the lanes to run them in |  | – | review |
 | PROTO-W2 | Wave 2 wire, in one PR: watcher, git, terminal blocks, diagnostics, violations | 2 | ADR-001, ADR-017, ADR-023 | todo |
 | PROTO-W3 | Wave 3 wire, in one PR: search | 2 | ADR-022 | todo |
 | T080-U | The search panel | 2 | PROTO-W3, T080 | todo |
