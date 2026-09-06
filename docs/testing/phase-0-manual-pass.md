@@ -149,7 +149,7 @@ Input (the two chords, and that neither steals from Monaco or the shell).
 
 ---
 
-## Session 2 — Editor, T040 (~25 min)
+## Session 2 — Editor, T040 and T041 (~30 min)
 
 Workspace: `fixtures/small-repo`.
 
@@ -180,6 +180,21 @@ Workspace: `fixtures/small-repo`.
 | 2.16 | Drop the folder `fixtures/markdown` | Becomes the workspace. With a dirty tab open it asks first, offering "Discard changes and open" |
 | 2.17 | Drop two folders at once, and a folder together with a file | One folder opens; the notice names what it skipped and why |
 | 2.18 | Drag a tab to reorder it | Reorders. OS file drops are enabled (`dragDropEnabled: true`), so if the tab drag stopped working, that is the T040 interaction risk — say so, it decides whether these two can coexist |
+
+**Preview tabs and the tab menu, T041** — the feature that landed with no ticket
+and no steps until now (`review-findings.md` finding 4). None of it has ever
+been performed; the reducer under it is unit-tested and the *gestures* are not.
+
+| # | Do | Expect |
+|---|---|---|
+| 2.18a | Single-click three different files in the explorer, one after another | **One** tab, showing the third. Its name is in italics, and its tooltip says "preview, double-click to keep" |
+| 2.18b | Single-click a file, type one character, then single-click another | **Two** tabs. The edited one is still open and still dirty — this is the rule the whole feature stands on |
+| 2.18c | Double-click the previewed tab, then single-click another file in the explorer | The double-clicked tab stays; the new file opens beside it |
+| 2.18d | Double-click a file in the explorer that is already the preview | It is kept, in one gesture. No second tab, no flicker |
+| 2.18e | Single-click a file, then drag its tab one place left | It is kept: the next single click no longer replaces it |
+| 2.18f | Open four files, edit the second and the third, right-click the first tab → "Close 3 tabs to the right" | Asks about the second, then the third, in that order. Cancel at the second: nothing behind it closes |
+| 2.18g | Right-click the last tab | "Close tabs to the right" is present and disabled |
+| 2.18h | With a preview open, quit and relaunch | It comes back as an ordinary tab — italics gone. Preview is not persisted |
 
 **Files that misbehave** (`fixtures/weird-files/generated`, opened as a workspace)
 
@@ -317,7 +332,10 @@ a workspace, and leave a second window's worth of shells running.
 | 7.4 | Click into a terminal so it has focus, press ⌥2 | Switches to the second session. Nothing is printed and nothing reaches the shell |
 | 7.5 | Press ⌥7 with three sessions open | Nothing happens, and nothing is typed |
 | 7.6 | Start a rename (F2), press ⌥1 while typing | The character goes into the field; no session switch |
-| 7.7 | Open the island (⌥A) onto a decision with options, press ⌥1 | It answers the decision. The dock does not switch |
+| 7.7a | ⌥A, hover a roster row, press **Ask**, type a question, press **Add an option** twice and fill both, press **Ask** | The form folds away. The row shows "1 open question" and, if it was In progress, goes to Blocked — the core blocks running work on a question |
+| 7.7b | Look at the top of the sheet | The question is in the most-urgent slot with both options, each carrying its ⌥ number |
+| 7.7 | With the island open on that decision, press ⌥1 | It answers the decision. The dock does not switch |
+| 7.7c | Type into the question field and press ⌥1 while typing | The character goes into the field; no decision is answered and no session switches |
 | 7.8 | Press ✕ on a running pill | The shell dies, the pill stays, its dot turns red and it reads `exit N` |
 | 7.9 | Press ✕ again on that pill | The pill goes |
 | 7.10 | Right-click a running pill → Close | Gone in one step, no intermediate state |

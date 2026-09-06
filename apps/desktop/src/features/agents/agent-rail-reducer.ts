@@ -124,6 +124,13 @@ export function applyAppended(
     // Sticky, matching the core's own snapshot: the reset happened, and a later
     // quiet tick does not unhappen it.
     restarted: timeline.restarted || batch.restarted,
+    // Replaced, never appended: the permission prompt is a *state*, so every
+    // batch carries its whole current value and `undefined` means the session
+    // is not stopped at one any more (T221). Merging it the way entries are
+    // merged would leave an answered prompt in the feed forever, claiming to
+    // be waiting — which is exactly why the core holds it beside the ring
+    // rather than in it.
+    pending: batch.pending,
   };
 }
 

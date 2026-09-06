@@ -270,7 +270,42 @@ export function timelineRows(timeline: AgentTimeline): readonly TimelineRow[] {
     });
   }
 
+  // Last, always. The prompt is held beside the ring rather than in it (T221),
+  // and the core stamps it `u64::MAX` to say exactly this: it is the end of the
+  // feed, and it vanishes when the session leaves the prompt instead of being
+  // superseded by a later entry.
+  //
+  // Keyed `pending` rather than by `seq`, because `u64::MAX` does not survive
+  // the trip through a JavaScript number and the row's identity is "the prompt
+  // this session is stopped at", not a position in the sequence.
+  if (timeline.pending) {
+    rows.push({
+      key: 'pending',
+      at: timeline.pending.at ?? null,
+      sidechain: timeline.pending.sidechain,
+      ...describe(timeline.pending, null),
+    });
+  }
+
   return rows;
+}
+
+/**
+ * What the feed watches to know a prompt arrived or changed (§2).
+ *
+ * A prompt is the one row the user is meant to act on, so it must not appear
+ * off-screen for someone who had scrolled up. This is the value the panel pins
+ * on: `null` when nothing is waiting, and a different string whenever the tool
+ * or its detail changes, so answering one prompt and stopping at the next
+ * re-pins rather than reading as the same prompt still standing.
+ *
+ * Composed here rather than in the component so the rule is testable without a
+ * DOM, and so nothing outside this module has to know the shape of the entry.
+ */
+export function pendingPinKey(timeline: AgentTimeline | null): string | null {
+  const kind = timeline?.pending?.kind;
+  if (kind?.type !== 'PERMISSION_PENDING') return null;
+  return `${kind.tool} ${kind.detail ?? ''}`;
 }
 
 function gap(key: string, text: string): TimelineRow {

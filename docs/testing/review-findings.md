@@ -46,6 +46,12 @@ suggestion, a runbook step that cannot be performed, three tasks landed in one
 unreviewed commit alongside a fourth that has no ticket at all. Every "not
 executed" admission in the twelve was checked and every one of them is true.
 
+**Findings 1, 2 and 3 were fixed on 2026-09-06** and are stamped where they
+stand, as is the ticketing half of finding 4. What is left — the shape of
+`cb9e08a` itself, two missing "Tests executed" sections, files touched but not
+listed, and seven tasks with no manual-pass session — is history and paperwork
+rather than code, and is open.
+
 ---
 
 # Discrepancies
@@ -53,6 +59,10 @@ executed" admission in the twelve was checked and every one of them is true.
 Ordered by how much each would change a reviewer's decision.
 
 ## 1. The permission prompt is delivered by the core and drawn by nothing
+
+> **Resolved 2026-09-06** — `T232: the feed draws the permission prompt it is
+> already sent`. `applyAppended` carries `pending` through and `timelineRows`
+> draws it as the last row. See T232's fix pass.
 
 **What the reports claim.** T232's summary: "Selecting a session now draws the
 files it touched and, under them, its feed — prompts, replies, thinking, tool
@@ -92,6 +102,10 @@ nothing draws it yet"); nothing else does, and no ticket carries it.
 
 ## 2. T221 §24 is not implemented, and its report describes the state wrongly
 
+> **Resolved 2026-09-06** — `T221: a row says where its verdict came from`. The
+> rail row draws `activitySourceLabel`, and the follow-up sentence is corrected.
+> See T221's fix pass.
+
 **What the report claims.** Under Follow-up: "Consider surfacing
 `activitySource` on the rail row; `activitySourceLabel` is exported and tested
 but **only the settings surface is wired today**."
@@ -117,6 +131,10 @@ label is on screen somewhere, and it is not.
 
 ## 3. Manual-pass step 7.7 cannot be performed: nothing raises a decision
 
+> **Resolved 2026-09-06** — `T210: raise a question from the island and the
+> queue`. The roster and the queue both raise questions, and steps 7.7a–7.7c
+> put a decision on screen for 7.7. See T210's fix pass.
+
 **What the runbook asks.** `docs/testing/phase-0-manual-pass.md`, Session 7,
 step 7.7: "Open the island (⌥A) onto a decision with options, press ⌥1 | It
 answers the decision. The dock does not switch."
@@ -141,6 +159,12 @@ table).
 
 ## 4. T096, T098 and T220 landed in one unreviewed commit carrying a fourth,
 unticketed feature
+
+> **Partly resolved 2026-09-06** — the unticketed feature is now **T041**
+> (`docs/tasks/T041-preview-tabs.md`), on the board at `review`, with
+> manual-pass steps 2.18a–2.18h. The rest of this finding stands: `cb9e08a` is
+> still an unreviewed commit carrying three tasks, and nothing separates their
+> diffs.
 
 **What the reports imply.** Three separate task files, three separate scopes,
 and T096 lists an acceptance criterion of its own: "Nothing in `crates/`,

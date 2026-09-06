@@ -41,7 +41,17 @@ export interface WorkstreamsController {
   update(workstreamId: WorkstreamId, patch: { title?: string; goal?: string }): Promise<void>;
   transition(workstreamId: WorkstreamId, to: WorkstreamState): Promise<void>;
   remove(workstreamId: WorkstreamId): Promise<void>;
-  raise(workstreamId: WorkstreamId, question: string, options?: DecisionOption[]): Promise<void>;
+  /**
+   * Ask a question against a piece of work. Resolves with the decision the core
+   * created, or `undefined` when it refused — the same shape as `acquire`, so a
+   * form can close on success and stay open with the envelope on a refusal
+   * rather than inferring the outcome from `error`.
+   */
+  raise(
+    workstreamId: WorkstreamId,
+    question: string,
+    options?: DecisionOption[],
+  ): Promise<Decision | undefined>;
   resolve(decisionId: DecisionId, chosen: string, rationale?: string): Promise<void>;
   dismiss(decisionId: DecisionId, rationale?: string): Promise<void>;
   /** Who owns what in this workspace (T325). Replaced whole on every change. */
@@ -230,6 +240,7 @@ export function useWorkstreams(workspace: Workspace | null): WorkstreamsControll
         core.decisions.raise({ workspaceId: id, workstreamId, question, options }),
       );
       if (decision) dispatch({ type: 'decision', decision });
+      return decision;
     },
     [run],
   );

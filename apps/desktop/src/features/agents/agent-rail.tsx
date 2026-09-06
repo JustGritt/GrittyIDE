@@ -2,7 +2,7 @@ import type { AgentSession } from '@gritty/protocol';
 import { useEffect, useId, useRef } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
 import { AGENT_RAIL_CHORD_HINT, isAgentRailChord } from './agent-rail-chords';
-import { agentStatus, providerLabel } from './agent-status';
+import { activitySourceLabel, agentStatus, providerLabel } from './agent-status';
 import { AgentStatusBadge } from './agent-status-badge';
 import { AgentTimelinePanel } from './agent-timeline';
 import { taskLine, toolLine } from './agents-reducer';
@@ -229,6 +229,12 @@ function AgentRow({
       {tool && <span className="agent-rail__tool">{tool}</span>}
       <span className="agent-rail__foot">
         <AgentStatusBadge activity={session.activity} />
+        {/* Where the status came from (T221 §24). Three sources can disagree,
+            and the one status the user is meant to act on — `BLOCKED` — is the
+            one they otherwise have least reason to trust: without this it is a
+            verdict with no provenance, and "Pending validation" is magic. */}
+        <span className="agent-rail__source">{activitySourceLabel(session.activitySource)}</span>
+        <span className="agent-rail__spacer" />
         {pending && <span className="agent-rail__pending">Opening…</span>}
       </span>
     </button>

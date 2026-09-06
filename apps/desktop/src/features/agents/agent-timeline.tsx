@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { AgentStatusBadge } from './agent-status-badge';
 import {
   isPinnedToBottom,
+  pendingPinKey,
   type TimelineRow,
   type TouchedFile,
   timelineRows,
@@ -45,6 +46,7 @@ export function AgentTimelinePanel({
 }) {
   const rows = useMemo(() => (timeline ? timelineRows(timeline) : []), [timeline]);
   const files = useMemo(() => (timeline ? touchedFiles(timeline.entries) : []), [timeline]);
+  const pinKey = pendingPinKey(timeline);
   const title = taskLine(session);
   const ended = session.activity === 'ENDED';
 
@@ -87,7 +89,7 @@ export function AgentTimelinePanel({
           </p>
         )
       ) : (
-        <Feed key={session.id} rows={rows} />
+        <Feed key={session.id} rows={rows} pinKey={pinKey} />
       )}
 
       {/* The feed stopped growing; nothing was removed (§6, and the failure
@@ -109,7 +111,17 @@ export function AgentTimelinePanel({
  * whose bottom means "the newest entry" — which the rail body, with the session
  * list above it, does not have.
  */
-function Feed({ rows }: { rows: readonly TimelineRow[] }) {
+function Feed({
+  rows,
+  pinKey,
+}: {
+  rows: readonly TimelineRow[];
+  /**
+   * The permission prompt the session is stopped at, or `null` for none. A
+   * change to it re-pins the feed once (§2).
+   */
+  pinKey: string | null;
+}) {
   const feed = useRef<HTMLDivElement | null>(null);
   /**
    * Whether new entries may scroll the view (§1).
@@ -123,6 +135,18 @@ function Feed({ rows }: { rows: readonly TimelineRow[] }) {
    * than told to forget where the last one had been scrolled.
    */
   const pinned = useRef(true);
+
+  // A permission prompt is the one row the user is meant to act on, so it may
+  // not arrive off-screen for someone who had scrolled up to read something.
+  // Re-pinning here rather than scrolling directly leaves the work to the
+  // effect below — which is declared after this one, so it runs in the same
+  // commit and sees the pin already set.
+  //
+  // Once, on the change. Afterwards the ordinary rule applies again and the
+  // user can scroll away from a standing prompt without being dragged back.
+  useEffect(() => {
+    if (pinKey !== null) pinned.current = true;
+  }, [pinKey]);
 
   // Follow new entries down, but only from the bottom. Someone who scrolled up
   // to read something is left exactly where they are — including through a
