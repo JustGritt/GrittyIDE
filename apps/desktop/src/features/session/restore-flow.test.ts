@@ -33,6 +33,7 @@ function fakes(options: {
   let nextId = 1;
   const deps: RestoreDeps = {
     restore: options.restore ?? (async () => response),
+    adoptWorkspace: (workspace) => calls.push(`adopt:${workspace.id}`),
     rehydrate: async () => {
       calls.push('rehydrate');
       if (options.rehydrateFails) throw new Error('list failed');
@@ -64,6 +65,7 @@ describe('runRestore', () => {
     const { deps, calls, actions } = fakes({});
     const outcome = await runRestore(deps);
     expect(calls).toEqual([
+      'adopt:ws-1',
       'prefs:{"version":1,"fontSize":15}',
       'layout:{"version":1,"explorer":{"showHidden":true}}',
       'rehydrate',
@@ -108,6 +110,7 @@ describe('runRestore', () => {
     const outcome = await runRestore(deps);
     expect(outcome.response).toBeNull();
     expect(calls).toEqual(['rehydrate']);
+    expect(calls).not.toContain('adopt:ws-1');
     expect(actions.map((a) => a.type)).toEqual([
       'restoreStarted',
       'restoreFailed',
@@ -130,6 +133,26 @@ describe('runRestore', () => {
     const outcome = await runRestore(deps);
     expect(outcome.opened).toEqual([]);
     expect(calls.some((c) => c.startsWith('open:') || c.startsWith('order:'))).toBe(false);
+  });
+
+  it('the restored workspace is handed over before anything slow, not awaited from an event', async () => {
+    // The regression this guards: the core opens the workspace inside
+    // `session.restore` and announces it with `WorkspaceOpened`, which the
+    // WebView can miss entirely — it is still registering its event listener
+    // while the command runs. The shell then shows the launcher over a
+    // workspace that is open, and dropping that same folder onto the window
+    // does nothing, because reopening the open root emits nothing either.
+    const { deps, calls } = fakes({});
+    await runRestore(deps);
+    expect(calls[0]).toBe('adopt:ws-1');
+  });
+
+  it('no workspace to restore: nothing is adopted', async () => {
+    const { deps, calls } = fakes({
+      restore: async () => ({ ...response, workspace: undefined }),
+    });
+    await runRestore(deps);
+    expect(calls.some((c) => c.startsWith('adopt:'))).toBe(false);
   });
 
   it('documents of another workspace are left alone', async () => {
