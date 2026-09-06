@@ -93,7 +93,7 @@ file decides.
 | `PROTOCOL_VERSION` | **2.13.0** | `T300-C` — the run contract (Gate D) |
 | `PROTOCOL_VERSION` | **2.14.0** | `T070` — file watcher |
 | `PROTOCOL_VERSION` | **2.15.0** | `T326` — observed ownership violations |
-| `SCHEMA_VERSION` + migration | **5** / `0005` | `T326` — and nothing else in this wave |
+| ~~`SCHEMA_VERSION` + migration~~ | ~~**5** / `0005`~~ | **released unspent** — see below |
 
 Everything through `PROTOCOL_VERSION` **2.12.0**, `SCHEMA_VERSION` **4** and
 migration `0004_agent_links.sql` is on `main`.
@@ -110,6 +110,15 @@ wave position and that version claim are all of it, with no command names or
 event variants written down — so it is not in this wave and cannot spend a
 number. It takes the next free minor when someone writes it, which the five
 completion reports from this wave are meant to make possible.
+
+**T326 released `SCHEMA_VERSION` 5 and migration `0005` without spending them.**
+It persists an observed violation as an ordinary `OwnershipConflict` row in a
+fourth `ConflictState`, so it needed no new table and no migration at all —
+`SCHEMA_VERSION` stays at 4. **`0005` is free and is the next migration
+number.** This is the release that matters most under rule 3: a claimed
+migration number that is never spent would leave a hole, and
+`migrations_are_numbered_contiguously_from_one` asserts `version == index + 1`,
+so the hole would break the build for whoever took `0006`.
 
 **T100 claims nothing.** `docs/tasks/T100-git-baseline.md:62-63` already defers
 its wire to `PROTO-W2`, so it builds `crates/git/` and
