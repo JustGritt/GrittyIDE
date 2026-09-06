@@ -66,6 +66,10 @@ export const COMMANDS = {
   'agents.answerPermission': 'agents_answer_permission',
   'agents.permissionGrants': 'agents_permission_grants',
   'agents.revokeGrant': 'agents_revoke_grant',
+  'runs.startFake': 'runs_start_fake',
+  'runs.cancel': 'runs_cancel',
+  'runs.list': 'runs_list',
+  'runs.events': 'runs_events',
 } as const;
 
 export type CommandName = keyof typeof COMMANDS;

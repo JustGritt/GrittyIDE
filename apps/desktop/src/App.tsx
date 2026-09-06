@@ -27,6 +27,7 @@ import { Launcher } from './features/launcher/launcher';
 import { useLastSession } from './features/launcher/use-last-session';
 import { viewModesReducer } from './features/markdown/view-modes';
 import { OperationsPanel } from './features/operations/operations-panel';
+import { RunsPanel } from './features/runs/runs-panel';
 import { DEFAULT_LAYOUT, type Layout, PANE_LIMITS } from './features/session/persisted-layout';
 import { SessionNotices } from './features/session/session-notices';
 import { useSession } from './features/session/use-session';
@@ -308,6 +309,9 @@ export function App() {
               }
             />
             {import.meta.env.DEV && <OperationsPanel />}
+            {import.meta.env.DEV && (
+              <RunsPanel workspace={workspace} workstreams={workstreams.workstreams} />
+            )}
           </aside>
           <Splitter
             orientation="vertical"

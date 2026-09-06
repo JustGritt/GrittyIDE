@@ -37,7 +37,10 @@
 //!   not [`wire::AgentRunEvent`] — the translation between them is the seam
 //!   T310's real adapter needs, and a fake that skipped it would test nothing
 //!   about the boundary that matters (hard rule 4).
-//! - **T300-CMD** owns the `runs.*` command adapters and the panel.
+//! - **T300-CMD** owns the `runs.*` command adapters and the panel. Its four
+//!   request shapes are [`request`], kept out of [`wire`] because that file is
+//!   the frozen contract and these are the command surface that reaches it —
+//!   the same split `operation::registry` and `operation::demo` already make.
 //!
 //! There is **no `AgentAdapter` trait**. One implementation will exist; a trait
 //! over one implementation is the abstraction hard rule 9 forbids building
@@ -51,9 +54,11 @@
 //! the untrusted side, and never in the renderer, which would be trusting it.
 //! Tracing carries a run's id, state, provider and duration; never event text.
 
+pub mod request;
 pub mod state;
 pub mod wire;
 
+pub use request::{CancelRunRequest, ListRunsRequest, RunEventsRequest, StartFakeRunRequest};
 pub use state::AgentRunState;
 pub use wire::{
     AgentRun, AgentRunActivity, AgentRunActivityKind, AgentRunChangedPayload, AgentRunEvent,
