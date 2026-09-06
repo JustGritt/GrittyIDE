@@ -189,3 +189,54 @@ it exists to prove the boundary works, not to skip it.
   T405's, once there is a run to schedule.
 - **Capabilities.** The one provider, `FAKE`, can emit everything — which is
   exactly why it cannot stand in for capability-awareness (T305).
+
+## The command surface (T300-CMD, protocol 2.16.0)
+
+Four commands, one namespace, added as a MINOR: the contract above already
+carried the types and both events, so nothing existing changed shape.
+
+| Command | Request | Answers |
+|---|---|---|
+| `runs.startFake` | `StartFakeRunRequest { workspaceId, workstreamId, script? }` | `AgentRun` |
+| `runs.cancel` | `CancelRunRequest { runId }` | `AgentRun` |
+| `runs.list` | `ListRunsRequest { workspaceId }` | `AgentRun[]` |
+| `runs.events` | `RunEventsRequest { runId }` | `AgentRunEventLog` |
+
+They live in `crates/gritty-core/src/agent_run/request.rs` rather than in
+`wire.rs`, which is the frozen contract: a request belongs beside the thing
+that serves it, the split `operation::registry` and `operation::demo` already
+make.
+
+Three things this surface deliberately does not have:
+
+- **No `runs.start`.** `AgentRunProvider` has one variant, so `startFake` is
+  the only way to start a run at all and a run cannot reach a real process by
+  construction. T310 adds the second variant and the command that uses it.
+- **No command that answers a run.** A run reaches `BLOCKED` or
+  `NEEDS_DECISION` and says so; replying to that is T335's, and half of it
+  built here would be redone there.
+- **No script body on the wire.** `script` is a *name*, bounded at
+  `MAX_SCRIPT_NAME` and resolved by the adapter. Letting a caller post the
+  steps would make the renderer the author of what an "agent" does, and an
+  unknown name is `NotFound` rather than a silently different run.
+
+`runs.list` is scoped to a workspace because that is the boundary a run is
+cancelled at: closing a workspace ends its runs, so a list that crossed
+workspaces would be listing work that is already over. `runs.events` is the
+T010 rehydration convention — a renderer that reloaded asks for the state it
+missed rather than replaying events it never received — and its `dropped`
+count is what lets a client tell a real gap from a delivery failure.
+
+### The panel is the throwaway version
+
+`apps/desktop/src/features/runs/` is a DEV-only collapsed row beside the
+operations panel: start a scripted run, watch its state and activity, cancel
+it, read its events. It exists to make the manual test possible.
+
+The surface an owned run actually deserves is **a second line on its
+workstream's island row** — `RUNNING · Editing src/auth/session.ts` — feeding
+the same "needs you" count the island already keeps. A run is attached to a
+workstream, so a fourth roster beside the island, the agent rail and the
+attention queue would break the one-roster-one-count rule those three already
+follow, and would give T410 two queues to aggregate instead of one. That is a
+designed change with no ticket yet; it is recorded rather than taken.

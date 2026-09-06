@@ -12,9 +12,12 @@ import {
   type AgentNotificationSettings,
   type AgentPermissionGrants,
   type AgentRoster,
+  type AgentRun,
+  type AgentRunEventLog,
   type AgentTimeline,
   type AgentTimelineRequest,
   type AnswerPermissionRequest,
+  type CancelRunRequest,
   type CandidatesRequest,
   type CheckOwnershipRequest,
   type CloseDocumentRequest,
@@ -42,6 +45,7 @@ import {
   type ListDirectoryResponse,
   type ListOwnershipRequest,
   type ListProfilesRequest,
+  type ListRunsRequest,
   type ListWorkstreamsRequest,
   type OpenDocumentRequest,
   type OpenExternalRequest,
@@ -67,11 +71,13 @@ import {
   type ResolveConflictRequest,
   type ResolveDecisionRequest,
   type RevokeGrantRequest,
+  type RunEventsRequest,
   type SaveDocumentRequest,
   type SessionRestoreResponse,
   type SetAgentNotificationsRequest,
   type SpawnTerminalRequest,
   type StartDemoRequest,
+  type StartFakeRunRequest,
   type Terminal,
   type TerminalProfile,
   type TransitionWorkstreamRequest,
@@ -409,6 +415,51 @@ export interface CoreClient {
      */
     revokeGrant(request: RevokeGrantRequest): Promise<AgentRoster>;
   };
+  /**
+   * Agent runs Gritty **owns** (T300, Gate D).
+   *
+   * The other half of `agents.*`, and deliberately not the same surface. There
+   * a session is something another terminal started and Gritty can only watch,
+   * which is why nothing there starts or stops one. Here Gritty started the
+   * run, can cancel it, and is answerable for how it ended.
+   *
+   * Two events keep this current and they are not interchangeable:
+   * `AgentRunChanged` carries a whole run on every state or activity change,
+   * and `AgentRunEventAppended` carries a *batch* of new events. A consumer
+   * that missed a change converges on the next one; a consumer that missed a
+   * batch calls `events` to resynchronise, and compares `dropped` with what it
+   * last saw to know a gap opened.
+   */
+  runs: {
+    /**
+     * Start a scripted run against a workstream in the open workspace.
+     *
+     * `FAKE` is the only provider that exists, so this is the only way to
+     * start a run at all: nothing here can reach a real process until T310
+     * adds the second variant. The workstream must exist (`NotFound`) and the
+     * workspace must be open (`NotFound`); past `MAX_CONCURRENT_RUNS` active
+     * runs the core refuses with `Conflict`, naming the count. `script` picks
+     * one of the adapter's presets and defaults to its first.
+     */
+    startFake(request: StartFakeRunRequest): Promise<AgentRun>;
+    /**
+     * Ask a run to stop. Cooperative and idempotent, like `operations.cancel`:
+     * an unknown id rejects with `NotFound`, a run that already ended returns
+     * its snapshot unchanged, and anything else ends `CANCELLED`.
+     *
+     * The returned run may still be non-terminal with `cancellationRequested`
+     * set — the flag moves at once and the state follows when the run notices.
+     */
+    cancel(request: CancelRunRequest): Promise<AgentRun>;
+    /** Every run of one workspace, terminal ones included. For rehydration. */
+    list(request: ListRunsRequest): Promise<AgentRun[]>;
+    /**
+     * One run's events, for rehydration after a renderer reload (T010's
+     * convention). `dropped` reports what the core's ring evicted, so a client
+     * draws the gap rather than splicing unrelated events together.
+     */
+    events(request: RunEventsRequest): Promise<AgentRunEventLog>;
+  };
   subscribe<N extends EventName>(name: N, handler: (event: EventOf<N>) => void): Unsubscribe;
   subscribeAll(handler: (event: EventEnvelope) => void): Unsubscribe;
   /** Stop listening for events. Commands still work. */
@@ -580,6 +631,12 @@ export function createCoreClient(
       permissionGrants: (request = {}) =>
         command<AgentPermissionGrants>('agents.permissionGrants', { request }),
       revokeGrant: (request) => command<AgentRoster>('agents.revokeGrant', { request }),
+    },
+    runs: {
+      startFake: (request) => command<AgentRun>('runs.startFake', { request }),
+      cancel: (request) => command<AgentRun>('runs.cancel', { request }),
+      list: (request) => command<AgentRun[]>('runs.list', { request }),
+      events: (request) => command<AgentRunEventLog>('runs.events', { request }),
     },
     subscribe: (name, handler) => hub.subscribe(name, handler),
     subscribeAll: (handler) => hub.subscribeAll(handler),

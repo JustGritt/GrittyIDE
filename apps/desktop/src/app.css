@@ -432,6 +432,44 @@ textarea:focus-visible {
   color: var(--fg-muted);
 }
 
+/* T300-CMD: the runs panel reuses the operation row above and adds only the
+   per-run event log, which no other surface has. */
+
+.runs__events {
+  margin-top: 0.3rem;
+  font-size: 0.8rem;
+}
+
+.runs__events > summary {
+  color: var(--fg-muted);
+  cursor: default;
+}
+
+.runs__event-list {
+  list-style: none;
+  margin: 0.3rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.runs__event {
+  font-family: var(--font-mono);
+  /* Agent output is untrusted text: it wraps, it never widens the sidebar. */
+  overflow-wrap: anywhere;
+}
+
+.runs__event-at {
+  color: var(--fg-muted);
+}
+
+/* A gap the core reported, drawn rather than repaired. */
+.runs__gap {
+  color: var(--fg-muted);
+  margin: 0.3rem 0 0;
+}
+
 /* T040: sidebar column (explorer, dev panels) next to the editor pane. */
 
 .shell__body {

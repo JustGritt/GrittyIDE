@@ -10,6 +10,9 @@ use std::path::Path;
 use ts_rs::{Config, TS};
 
 use super::{CORE_EVENT_CHANNEL, PROTOCOL_VERSION};
+use crate::agent_run::request::{
+    CancelRunRequest, ListRunsRequest, RunEventsRequest, StartFakeRunRequest,
+};
 use crate::agent_run::wire::{
     AgentRun, AgentRunActivity, AgentRunChangedPayload, AgentRunEvent,
     AgentRunEventAppendedPayload, AgentRunEventLog, AgentRunEventRecord, AgentRunPath,
@@ -105,6 +108,10 @@ fn export_bindings() {
     AgentRunEventLog::export_all(&cfg).expect("export AgentRunEventLog");
     AgentRunChangedPayload::export_all(&cfg).expect("export AgentRunChangedPayload");
     AgentRunEventAppendedPayload::export_all(&cfg).expect("export AgentRunEventAppendedPayload");
+    StartFakeRunRequest::export_all(&cfg).expect("export StartFakeRunRequest");
+    CancelRunRequest::export_all(&cfg).expect("export CancelRunRequest");
+    ListRunsRequest::export_all(&cfg).expect("export ListRunsRequest");
+    RunEventsRequest::export_all(&cfg).expect("export RunEventsRequest");
     CoreError::export_all(&cfg).expect("export CoreError");
     Operation::export_all(&cfg).expect("export Operation");
     CoreEvent::export_all(&cfg).expect("export CoreEvent");
