@@ -34,10 +34,15 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "ownership",
         sql: include_str!("migrations/0003_ownership.sql"),
     },
+    Migration {
+        version: 4,
+        name: "agent_links",
+        sql: include_str!("migrations/0004_agent_links.sql"),
+    },
 ];
 
 /// The schema version this build expects after migrating.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 const _: () = assert!(MIGRATIONS[MIGRATIONS.len() - 1].version == SCHEMA_VERSION);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -174,6 +179,9 @@ mod tests {
             "operation_record",
             "workstream",
             "decision",
+            "ownership_lease",
+            "ownership_conflict",
+            "workstream_agent_link",
         ] {
             assert!(table_exists(&conn, table), "{table}");
         }

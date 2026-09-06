@@ -945,3 +945,112 @@ pub mod ownership {
         Ok(changed)
     }
 }
+
+/// `workstream_agent_link`: which observed agent session is working on which
+/// workstream (T223).
+///
+/// The link is a row of its own rather than a field on `workstream`: a
+/// workstream is durable, a discovered session is not, and one workstream
+/// legitimately accumulates several sessions over its life. Nothing here reads
+/// the roster — a link records a fact about the past, and whether the session
+/// is running *now* is the caller's join to make.
+pub mod agent_links {
+    use super::*;
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct AgentLinkRow {
+        pub workstream_id: String,
+        /// The wire's `AgentProvider`, e.g. `CLAUDE_CODE`.
+        pub provider: String,
+        pub session_id: String,
+        pub linked_at: i64,
+    }
+
+    const COLUMNS: &str = "workstream_id, provider, session_id, linked_at";
+
+    fn from_row(row: &Row<'_>) -> rusqlite::Result<AgentLinkRow> {
+        Ok(AgentLinkRow {
+            workstream_id: row.get(0)?,
+            provider: row.get(1)?,
+            session_id: row.get(2)?,
+            linked_at: row.get(3)?,
+        })
+    }
+
+    /// Records the link. `false` when the exact triple was already there, so a
+    /// duplicate is a no-op the caller can report rather than a failure — and
+    /// the original `linked_at` is kept, because the link started then.
+    pub fn insert(conn: &Connection, row: &AgentLinkRow) -> Result<bool> {
+        let changed = conn.execute(
+            "INSERT OR IGNORE INTO workstream_agent_link
+                 (workstream_id, provider, session_id, linked_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                row.workstream_id,
+                row.provider,
+                row.session_id,
+                row.linked_at
+            ],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Removes one link. `false` when there was none, which is not an error:
+    /// unlinking twice leaves the same state.
+    pub fn delete(
+        conn: &Connection,
+        workstream_id: &str,
+        provider: &str,
+        session_id: &str,
+    ) -> Result<bool> {
+        let changed = conn.execute(
+            "DELETE FROM workstream_agent_link
+             WHERE workstream_id = ?1 AND provider = ?2 AND session_id = ?3",
+            params![workstream_id, provider, session_id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// One workstream's links, oldest first — the order they were made in.
+    pub fn list_for_workstream(
+        conn: &Connection,
+        workstream_id: &str,
+    ) -> Result<Vec<AgentLinkRow>> {
+        let mut statement = conn.prepare(&format!(
+            "SELECT {COLUMNS} FROM workstream_agent_link WHERE workstream_id = ?1
+             ORDER BY linked_at ASC, session_id ASC"
+        ))?;
+        let rows = statement.query_map([workstream_id], from_row)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Every link of one workspace, through the workstreams that hold them.
+    /// The link table has no `workspace_root` of its own on purpose: the
+    /// workstream already answers that, and a second copy could disagree.
+    pub fn list_for_workspace(
+        conn: &Connection,
+        workspace_root: &str,
+    ) -> Result<Vec<AgentLinkRow>> {
+        let mut statement = conn.prepare(
+            "SELECT l.workstream_id, l.provider, l.session_id, l.linked_at
+             FROM workstream_agent_link l
+             JOIN workstream w ON w.id = l.workstream_id
+             WHERE w.workspace_root = ?1
+             ORDER BY l.linked_at ASC, l.workstream_id ASC, l.session_id ASC",
+        )?;
+        let rows = statement.query_map([workspace_root], from_row)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    /// How many links a workstream already holds, for the caller's bound.
+    pub fn count_for_workstream(conn: &Connection, workstream_id: &str) -> Result<i64> {
+        conn.query_row(
+            "SELECT COUNT(*) FROM workstream_agent_link WHERE workstream_id = ?1",
+            [workstream_id],
+            |row| row.get(0),
+        )
+        .map_err(Into::into)
+    }
+}
