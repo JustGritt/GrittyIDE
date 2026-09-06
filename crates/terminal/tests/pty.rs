@@ -341,29 +341,61 @@ fn an_absurd_size_is_clamped_rather_than_rejected() {
 
 #[test]
 fn kill_terminates_the_whole_process_tree() {
+    // A background job lives in its own process group under job control, so
+    // neither the shell's own group nor the terminal's foreground group covers
+    // it. It is reached because `kill` enumerates the session's groups before
+    // it signals anything — *not* because the shell forwards SIGHUP to its
+    // jobs. It usually does; measured under load it sometimes exits from SIGHUP
+    // in single-digit milliseconds without having done it, and that is what
+    // made this test flaky rather than wrong.
+    kill_reaches("a backgrounded job", |pid_file| {
+        format!("sleep 300 & echo $! > {}; echo started", pid_file.display())
+    });
+}
+
+#[test]
+fn kill_reaches_a_job_detached_from_job_control() {
+    // `( sleep 300 & )` puts the sleep in the subshell's process group and then
+    // the subshell exits, so nothing in the shell's job table refers to it: no
+    // amount of SIGHUP forwarding would ever reach it, and before `PTY-FLAKE`
+    // it was leaked on every single run. It is still in the pty's session,
+    // which is what termination is scoped to, so it must die with the session.
+    //
+    // This is the deterministic half of the pair. It is here because it fails
+    // the same way the one above fails, without needing a loaded machine to
+    // show it.
+    kill_reaches("a job detached from job control", |pid_file| {
+        format!(
+            "( sleep 300 & echo $! > {} ); echo started",
+            pid_file.display()
+        )
+    });
+}
+
+/// Runs `command`, which must background a `sleep 300` and write its pid to the
+/// file it is given, then kills the session and fails if the sleep outlived it.
+///
+/// A survivor is killed before the assertion fires. A test that leaks a
+/// `sleep 300` on every failure poisons the machine for the next twenty runs,
+/// and this is a test that only fails on a machine that is already busy.
+fn kill_reaches(scenario: &str, command: impl Fn(&std::path::Path) -> String) {
     let dir = TempDir::new("pty-tree");
     let pid_file = dir.join("child.pid");
     let fixture = Fixture::in_dir(dir);
 
-    // A background job lives in its own process group under job control; it is
-    // reached because SIGHUP goes to the shell, which forwards it to its jobs.
-    fixture.run(&format!(
-        "sleep 300 & echo $! > {}; echo started",
-        pid_file.display()
-    ));
+    fixture.run(&command(&pid_file));
     fixture.sink.wait_for_text("started");
-    fixture
-        .sink
-        .wait_for("the child pid file", |_| pid_file.exists());
+    // Waiting for the file to *exist* is not enough: `>` creates it before the
+    // shell writes into it, and on a loaded machine the test can read the empty
+    // file in between. Wait for a pid instead of for a path.
+    fixture.sink.wait_for("a pid in the child pid file", |_| {
+        read_pid(&pid_file).is_some()
+    });
 
-    let child_pid: i32 = std::fs::read_to_string(&pid_file)
-        .expect("read the pid file")
-        .trim()
-        .parse()
-        .expect("a pid");
+    let child_pid = read_pid(&pid_file).expect("a pid");
     assert!(
         is_alive(child_pid),
-        "the grandchild is running before the kill"
+        "{scenario}: the grandchild is running before the kill"
     );
 
     fixture.session().kill();
@@ -374,10 +406,52 @@ fn kill_terminates_the_whole_process_tree() {
     while is_alive(child_pid) && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert!(
-        !is_alive(child_pid),
-        "the grandchild ({child_pid}) survived the kill"
+    if !is_alive(child_pid) {
+        return;
+    }
+
+    // Only reached when something really did outlive the session, so the cost
+    // of asking `ps` is paid once and never on the happy path. It answers the
+    // one question `is_alive` cannot: `kill(pid, 0)` succeeds for a zombie too,
+    // so a process that exited but has not yet been reaped by init is
+    // indistinguishable from one that is still running, and reporting a reaping
+    // delay as a leaked process would send the next reader down the wrong path.
+    let state = process_state(child_pid);
+    let zombie = state
+        .split_whitespace()
+        .nth(3)
+        .is_some_and(|s| s.starts_with('Z'));
+    let _ = nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(child_pid),
+        nix::sys::signal::Signal::SIGKILL,
     );
+    if zombie {
+        // Passing, but worth saying out loud: init took longer than `DEADLINE`
+        // to reap something that had already died. Nothing leaked, and nothing
+        // here is wrong, but a run that prints this is a run on a machine under
+        // enough pressure to be worth knowing about.
+        eprintln!("{scenario}: the grandchild ({child_pid}) was still unreaped:\n  {state}");
+    }
+    assert!(
+        zombie,
+        "{scenario}: the grandchild ({child_pid}) survived the kill and is still \
+         running — the session's process groups were not all signalled\n  {state}"
+    );
+}
+
+/// The pid the shell wrote, or `None` while the file is still absent or empty.
+fn read_pid(path: &std::path::Path) -> Option<i32> {
+    std::fs::read_to_string(path).ok()?.trim().parse().ok()
+}
+
+/// `pid ppid pgid state command` for one process, or why `ps` could not say.
+fn process_state(pid: i32) -> String {
+    std::process::Command::new("/bin/ps")
+        .args(["-o", "pid=,ppid=,pgid=,state=,command=", "-p"])
+        .arg(pid.to_string())
+        .output()
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned())
+        .unwrap_or_else(|error| format!("ps failed: {error}"))
 }
 
 #[test]
@@ -583,7 +657,9 @@ fn a_working_directory_that_is_not_a_directory_is_rejected() {
     assert!(matches!(error, TerminalError::Cwd { .. }));
 }
 
-/// `kill(pid, 0)` succeeds while the process exists.
+/// `kill(pid, 0)` succeeds while the process *exists* — which includes a zombie
+/// that has exited and is waiting to be reaped. Cheap enough to poll; see
+/// [`kill_reaches`] for how the zombie case is told apart once, at the end.
 fn is_alive(pid: i32) -> bool {
     nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok()
 }
