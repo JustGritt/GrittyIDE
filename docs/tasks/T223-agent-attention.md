@@ -1,7 +1,7 @@
 # Task T223 — Attention: notify when an agent needs you, and link it to the work
 
 - **Phase:** 3
-- **Status:** not yet started
+- **Status:** todo
 - **Depends on:** T200 (workstream model), T210 (island), T220 (discovery), T221 (`BLOCKED`)
 
 ## Objective

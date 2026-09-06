@@ -1,7 +1,7 @@
 # Task T097 — Shell integration and command blocks
 
 - **Phase:** 2
-- **Status:** not yet started
+- **Status:** todo
 - **Depends on:** T090, T095, T096
 
 ## Objective

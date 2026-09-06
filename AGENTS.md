@@ -48,6 +48,63 @@ GRITTY_LOG=debug pnpm dev     # tracing filter
 
 `pnpm check` is the definition of "checks pass". CI runs exactly the same command.
 
+## Concurrent agent sessions
+
+More than one agent session works in this checkout at the same time, so two
+sessions can silently edit the same file. `AGENT-LEASES.md` at the repository
+root is the live record of who owns what. It is git-ignored (machine-local
+state, like `HANDOFF.md`); this section is the part that is binding.
+
+```
+scripts/agent-lease.py list                  # who holds what, before you edit
+scripts/agent-lease.py claim --agent T097-blocks --session <your-session-uuid> \
+    --task 'T097 shell integration' \
+    --scope 'apps/desktop/src/features/terminal/**'
+scripts/agent-lease.py release --agent T097-blocks   # the moment you are done
+```
+
+Read the registry before your first edit, claim the narrowest scope your task
+needs, and never edit inside another agent's scope — say so and let the user
+sequence the two sessions instead. Your session UUID is the directory name in
+your own scratchpad path; without it the row is advisory only. Release when the
+task is done; sessions that end normally are released automatically.
+
+A `PreToolUse` hook (`scripts/agent-lease.py guard`, wired in
+`.claude/settings.json`) denies edits that land in a live foreign lease. It
+fails open — unclaimed paths, advisory rows and leases older than 8h are not
+enforced — so it catches recorded conflicts and nothing more. Coverage of shell
+writes is a best-effort heuristic, which is why the convention still matters.
+
+## Picking up work
+
+A lease answers *may I write this file* — a question about a working tree, and
+correctly per-checkout. It does not answer *is anyone already building T070*,
+which is a question about the work and must be visible from every checkout at
+once. `scripts/agent-board.py` is that board.
+
+```
+scripts/agent-board.py list                  # printed to you at session start
+scripts/agent-board.py take T070 --agent W-t070 --session <your-session-uuid>
+scripts/agent-board.py move T070 --to review --pr 24
+scripts/agent-board.py drop T070             # handing back
+```
+
+`take` claims the ticket **and** its lane's lease, so it replaces the `claim`
+above rather than adding to it; `drop` and `move` release both. Statuses are
+`unspec → todo → doing → review → done`, plus `tofix` when a review sends work
+back, `blocked` with a reason, and `superseded`. Two rules the tool enforces:
+**a take on a held ticket is refused** — the fold decides who won, so both
+sessions get the same answer — and **an agent never sets `done`**; you set
+`review` and the reviewer flips it.
+
+State is an append-only log in the shared git directory, so worktrees see one
+board. It is machine-local and never committed. The committed projection is the
+status column of `docs/tasks/README.md`, which
+`scripts/agent-board.py render --index` writes — run it before you open a PR and
+commit what it writes, the way `cargo test -p gritty-core` regenerates protocol
+types. **It is not part of `pnpm check`**: CI has no board, so a freshness gate
+there would fail on every clone.
+
 ## Hard rules
 
 1. Do not bypass the typed core protocol from frontend code. No raw Tauri
@@ -75,6 +132,11 @@ GRITTY_LOG=debug pnpm dev     # tracing filter
     appear in logs, events or persisted output.
 14. Do not broaden scope. Record newly discovered work as follow-up items in your
     completion report.
+15. Take the ticket, then claim the scope. Another session shares this working
+    tree, and others share the repository from their own worktrees:
+    `agent-board.py take` records that the work is yours and claims the lease
+    with it. Never edit inside another agent's lease, and never take a ticket
+    another live session holds.
 
 ## Contract gates (do not implement downstream before upstream exists)
 
@@ -112,7 +174,8 @@ frozen; changes need deliberate review and usually an ADR update.
 
 ## Task workflow
 
-1. Read the task file in `docs/tasks/` plus its required reading.
+1. Take the ticket (`agent-board.py take <ID> --agent … --session …`), then read
+   the task file in `docs/tasks/` plus its required reading.
 2. Stay inside "Allowed scope". If the task needs something outside it, stop and
    record the need instead of expanding scope.
 3. Add or update tests for domain logic and regression-prone behavior. Consider
@@ -121,8 +184,10 @@ frozen; changes need deliberate review and usually an ADR update.
 5. Fill the completion report in the task file and in the PR description:
    summary, files changed, tests actually executed with results, architectural
    decisions, known limitations, follow-up tasks, remaining risks.
-6. Update `docs/tasks/README.md` status and any ADR/architecture doc that a
-   durable decision changed.
+6. `agent-board.py move <ID> --to review --pr <n>`, then
+   `agent-board.py render --index` and commit what it writes — that is how the
+   status reaches `docs/tasks/README.md`, which is generated. Update by hand any
+   ADR or architecture doc that a durable decision changed.
 
 ## Definition of done
 
