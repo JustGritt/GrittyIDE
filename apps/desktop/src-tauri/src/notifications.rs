@@ -66,8 +66,12 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
 pub struct PluginNotifier<R: Runtime> {
     #[cfg(target_os = "macos")]
     app: AppHandle<R>,
+    // `fn() -> R` rather than `R`: a bare `PhantomData<R>` would inherit `R`'s
+    // auto traits, and `R: Runtime` does not imply `Send + Sync`, which
+    // `AttentionNotifier` requires. The macOS field gets them from
+    // `AppHandle<R>`; this one has to not take them away.
     #[cfg(not(target_os = "macos"))]
-    _runtime: std::marker::PhantomData<R>,
+    _runtime: std::marker::PhantomData<fn() -> R>,
 }
 
 impl<R: Runtime> PluginNotifier<R> {
