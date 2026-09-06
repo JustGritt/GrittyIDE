@@ -1,7 +1,7 @@
 # Task T326 — Ownership notices a violation after it happens, not before
 
 - **Phase:** 4
-- **Status:** todo
+- **Status:** review
 - **Depends on:** T230 (`FileTouched` timeline entries, on `main`), T325
   (the ownership registry, ADR-019), T223 (session→workstream link, landing
   in parallel — depend on its table's shape, not its code)

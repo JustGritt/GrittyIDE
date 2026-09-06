@@ -1,7 +1,7 @@
 # Task T100 — Git baseline: read-only status and diff as domain objects
 
 - **Phase:** 2
-- **Status:** todo
+- **Status:** doing
 - **Depends on:** T020 (open workspace: `WorkspaceId`, canonical `WorkspaceRoot`)
 
 ## Objective
