@@ -56,9 +56,6 @@ export function App() {
     [documents.state.order],
   );
   const editor = useEditorBinding(documents, prefs);
-  // Files and folders dropped onto the window (classified by the core, opened
-  // through the ordinary commands).
-  const drop = useFileDrop(documents);
   const [layout, setLayout] = useState<Layout>(DEFAULT_LAYOUT);
   // The workspace lives here (T049), not inside the explorer: the launcher
   // opens folders through the same controller and the top bar names the same
@@ -69,6 +66,11 @@ export function App() {
       setLayout((current) => ({ ...current, explorer: { showHidden } })),
   });
   const workspace = explorer.state.workspace;
+  // Files and folders dropped onto the window (classified by the core, opened
+  // through the ordinary commands). Declared after the explorer because that
+  // is where an opened workspace has to land: the drop reports what it opened
+  // rather than waiting for an event the core does not always have to emit.
+  const drop = useFileDrop(documents, explorer.adoptWorkspace);
   // Only the launcher has a path field, so ⌘⇧O is its shortcut and the shell
   // holds the disclosure it opens.
   const [pathOpen, setPathOpen] = useState(false);
@@ -140,6 +142,10 @@ export function App() {
   const activeEol = active ? (editor.eols[active.document.id] ?? null) : null;
   const session = useSession({
     documents,
+    // The startup restore is told which workspace is open by its own
+    // response; without this the shell would wait for `WorkspaceOpened` and
+    // could miss it, leaving the launcher up over an open workspace.
+    adoptWorkspace: explorer.adoptWorkspace,
     editor,
     prefs,
     setPrefs: replacePrefs,

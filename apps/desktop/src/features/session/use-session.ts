@@ -7,6 +7,7 @@ import {
   type RecoveryCandidate,
   type SessionTab,
   toCoreError,
+  type Workspace,
   type WorkspaceId,
 } from '@gritty/protocol';
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
@@ -26,6 +27,8 @@ import { SETTINGS_DELAY_MS, SessionWriter, TABS_DELAY_MS, VIEW_DELAY_MS } from '
 
 export interface SessionDeps {
   readonly documents: DocumentsController;
+  /** Where the restored workspace goes: the shell renders from the explorer. */
+  adoptWorkspace(workspace: Workspace): void;
   readonly editor: EditorBinding;
   readonly prefs: EditorPreferences;
   setPrefs(prefs: EditorPreferences): void;
@@ -171,6 +174,7 @@ export function useSession(deps: SessionDeps): SessionController {
     if (restoreInFlight === null) {
       restoreInFlight = runRestore({
         restore: () => core.session.restore(),
+        adoptWorkspace: (workspace) => depsRef.current.adoptWorkspace(workspace),
         rehydrate: () => depsRef.current.documents.rehydrate(),
         openFile: (workspaceId, path) =>
           depsRef.current.documents.openFile(workspaceId, path, { quiet: true }),

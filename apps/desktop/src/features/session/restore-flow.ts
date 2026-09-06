@@ -5,6 +5,7 @@ import type {
   DocumentId,
   SessionRestoreResponse,
   SessionTab,
+  Workspace,
   WorkspaceId,
 } from '@gritty/protocol';
 import type { OpenFileResult } from '../documents/use-documents';
@@ -18,6 +19,8 @@ import type { SessionAction } from './session-reducer';
  */
 export interface RestoreDeps {
   restore(): Promise<SessionRestoreResponse>;
+  /** Hand the workspace the core reports open to the shell that renders it. */
+  adoptWorkspace(workspace: Workspace): void;
   /** Open every document the core still holds (renderer reload) into the store. */
   rehydrate(): Promise<readonly Document[]>;
   openFile(workspaceId: WorkspaceId, path: string): Promise<OpenFileResult>;
@@ -55,6 +58,14 @@ export async function runRestore(deps: RestoreDeps): Promise<RestoreOutcome> {
     deps.dispatch({ type: 'restoreFailed', error: deps.toCoreError(cause) });
   }
   if (response) {
+    // Before anything slow: the restore's own answer says which workspace is
+    // open, and waiting for `WorkspaceOpened` to repeat it loses the window.
+    // The core opens the workspace while the WebView is still registering its
+    // event listener, so that event can be emitted to nobody — and then the
+    // shell sits on the launcher with a workspace open underneath it, where
+    // even dropping that same folder does nothing (reopening the open root
+    // emits nothing either).
+    if (response.workspace) deps.adoptWorkspace(response.workspace);
     deps.applyPreferences(response.preferences);
     deps.applyLayout(response.layout);
   }

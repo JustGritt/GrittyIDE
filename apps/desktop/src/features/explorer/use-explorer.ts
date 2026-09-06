@@ -2,6 +2,7 @@ import {
   type CoreError,
   type ListDirectoryRequest,
   toCoreError,
+  type Workspace,
   type WorkspaceId,
 } from '@gritty/protocol';
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
@@ -47,7 +48,11 @@ export function useExplorer(options: ExplorerOptions = {}) {
     let active = true;
     core.workspace.current().then(
       (workspace) => {
-        if (active) dispatch({ type: 'workspace', workspace });
+        // A workspace only, never `null`. The state starts empty, so a null
+        // snapshot can say nothing new — it can only overwrite one that
+        // arrived while this call was in flight, and "nothing was open when
+        // this was asked" is not "nothing is open now".
+        if (active && workspace) dispatch({ type: 'workspace', workspace });
       },
       (cause: unknown) => {
         if (active) setError(toCoreError(cause));
@@ -177,6 +182,20 @@ export function useExplorer(options: ExplorerOptions = {}) {
     },
     [onShowHiddenChange],
   );
+  /**
+   * Take the workspace a command has already returned instead of waiting for
+   * `WorkspaceOpened` to say it again. Two callers need this and neither can
+   * rely on the event: the startup restore (T060) is answered by the core
+   * before the WebView has finished registering its event listener, and
+   * reopening the root that is already open (T045) is a no-op the core
+   * announces to nobody. Idempotent — the reducer keeps the state it has when
+   * the id matches.
+   */
+  const adoptWorkspace = useCallback(
+    (workspace: Workspace) => dispatch({ type: 'workspace', workspace }),
+    [],
+  );
+
   const dismissNotice = useCallback(() => dispatch({ type: 'dismissNotice' }), []);
   const clearError = useCallback(() => setError(null), []);
 
@@ -187,6 +206,7 @@ export function useExplorer(options: ExplorerOptions = {}) {
     reload,
     loadMore,
     openFolder,
+    adoptWorkspace,
     closeWorkspace,
     discardAndRetry,
     cancelListing,

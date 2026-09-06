@@ -1,4 +1,4 @@
-import { type CoreError, toCoreError } from '@gritty/protocol';
+import { type CoreError, toCoreError, type Workspace } from '@gritty/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { core } from '../../core/client';
 import type { useDocuments } from '../documents/use-documents';
@@ -20,28 +20,41 @@ export type DropNotice =
  * commands that already exist. Two rules it keeps: a drop never replaces the
  * workspace without asking when documents are dirty, and a file that Gritty
  * cannot address is reported rather than dropped on the floor.
+ *
+ * `onWorkspaceOpened` is how the opened folder reaches the shell. It is not a
+ * convenience: `workspace.open` on the root that is *already* open returns it
+ * and announces nothing, so a drop that trusted `WorkspaceOpened` would be
+ * silent in exactly the case where the user is telling Gritty to show them a
+ * workspace it believes it already has.
  */
-export function useFileDrop(documents: ReturnType<typeof useDocuments>) {
+export function useFileDrop(
+  documents: ReturnType<typeof useDocuments>,
+  onWorkspaceOpened: (workspace: Workspace) => void,
+) {
   const [hovering, setHovering] = useState(false);
   const [notice, setNotice] = useState<DropNotice | null>(null);
   /** The folder open refused with `Conflict`, replayable with force. */
   const refused = useRef<string | null>(null);
 
-  const openFolder = useCallback(async (path: string, force = false) => {
-    try {
-      await core.workspace.open(path, force ? { force } : undefined);
-      refused.current = null;
-      setNotice(null);
-    } catch (cause: unknown) {
-      const error = toCoreError(cause);
-      if (error.code === 'Conflict') {
-        refused.current = path;
-        setNotice({ kind: 'confirmReplace', path });
-      } else {
-        setNotice({ kind: 'error', error });
+  const openFolder = useCallback(
+    async (path: string, force = false) => {
+      try {
+        const workspace = await core.workspace.open(path, force ? { force } : undefined);
+        refused.current = null;
+        setNotice(null);
+        if (workspace) onWorkspaceOpened(workspace);
+      } catch (cause: unknown) {
+        const error = toCoreError(cause);
+        if (error.code === 'Conflict') {
+          refused.current = path;
+          setNotice({ kind: 'confirmReplace', path });
+        } else {
+          setNotice({ kind: 'error', error });
+        }
       }
-    }
-  }, []);
+    },
+    [onWorkspaceOpened],
+  );
 
   const perform = useCallback(
     (plan: DropPlan) => {
