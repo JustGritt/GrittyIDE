@@ -3,7 +3,18 @@ name: CI
 on:
   push:
     branches: [main]
+    # Actions minutes are pooled across the whole account, not this repository,
+    # and documentation carries no code: 30 of the last 40 non-merge commits on
+    # main touched only docs and markdown, and each one paid for a full run.
+    # `scripts/` is deliberately absent from this list — the board tooling is
+    # code and stays covered.
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   workflow_dispatch:
 
 concurrency:
@@ -16,6 +27,9 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  # The only cross-platform verification in the project: there is no Linux box,
+  # so nothing else compiles or runs the workspace anywhere but macOS. It stays
+  # on a GitHub-hosted runner and stays cheap (1x multiplier).
   linux:
     name: Linux (check, build on main)
     runs-on: ubuntu-24.04
@@ -63,28 +77,42 @@ jobs:
 
   macos:
     name: macOS (check + app bundle)
-    runs-on: macos-15
+    # The development Mac, registered as a self-hosted runner. Nothing here is
+    # billed and there is no 10x multiplier, so the gate below is no longer
+    # about minutes — it is about not competing for the machine someone is
+    # working on. On demand only: `workflow_dispatch`, or a pull request
+    # labelled `ci:macos`. Ordinary pushes to main no longer wake it, and macOS
+    # is verified locally by `pnpm check` on every change anyway.
+    runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 45
-    # macOS minutes cost 10x on a private repo: run on main, manual dispatch,
-    # or pull requests labelled `ci:macos`. macOS is also verified locally.
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:macos')
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || contains(github.event.pull_request.labels.*.name, 'ci:macos')
     steps:
+      # `clean: false` keeps target/ and node_modules/ between runs. The default
+      # (`git clean -ffdx`) deletes both, which on a persistent runner means a
+      # cold Rust build every time. This is also why no cache action follows:
+      # the directory that a cache would restore never goes away.
       - uses: actions/checkout@v7
+        with:
+          clean: false
 
       - uses: pnpm/action-setup@v6
 
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
-          cache: pnpm
 
-      # Runners ship rustup; this installs the exact toolchain pinned in rust-toolchain.toml.
-      - name: Install pinned Rust toolchain
+      # This machine already carries the pinned toolchain, but the runner
+      # service's PATH does not include Homebrew's rustup shims.
+      - name: Put the pinned Rust toolchain on PATH
         run: |
-          rustup toolchain install 2>/dev/null || cargo --version
-          rustup show
+          echo "/opt/homebrew/opt/rustup/bin" >> "$GITHUB_PATH"
 
-      - uses: Swatinem/rust-cache@v2
+      - name: Show the toolchain this job will use
+        run: |
+          rustup show
+          cargo --version
 
       - run: pnpm install --frozen-lockfile
 
