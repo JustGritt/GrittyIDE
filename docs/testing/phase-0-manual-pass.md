@@ -36,7 +36,14 @@ export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
 cargo run -p gritty-workspace --example generate_large_repo
 cargo run -p gritty-workspace --example generate_weird_files
 
+# 0.1 — the agent hook, for Sessions 6 and 9 (T221, T225)
+#   In dev, Gritty finds the hook beside its own binary in target/debug. A
+#   clean checkout has never built it, and then the whole hook surface reads
+#   "unavailable" for a reason that is not a defect.
+cargo build -p gritty-agent-hook
+
 # The packaged app for Session 6 (reuses the debug build; a few minutes)
+# `pnpm sidecar` runs inside this and puts the hook in the bundle (T225).
 pnpm tauri build --debug --bundles app
 ```
 
@@ -313,9 +320,10 @@ GRITTY_DATA_DIR=/tmp/gritty-packaged GRITTY_LOG=debug \
 | 6.5 | Open a terminal in the dock, run something | Works the same as in dev |
 | 6.6 | Quit; run *without* `GRITTY_DATA_DIR`, open a workspace, quit, relaunch by double-clicking the app in Finder | Restores from the real app-data directory (`~/Library/Application Support/io.github.justgritt.gritty`) |
 | 6.7 | Note cold launch of the packaged app from the log | Compare with dev — this is the honest launch number |
+| 6.8 | ⌥A, open the agents section, look at its header (T225) | The hook reads **available**, and the path it names is inside `Gritty.app/Contents/MacOS/`. Before T225 a packaged build always said unavailable; this step is the only positive check that the sidecar shipped |
 
 Rows filled: Build (launchable bundle), the packaged-app halves of the worker,
-XSS, external-link and data-directory rows.
+XSS, external-link and data-directory rows, and the bundled sidecar (T225).
 
 ---
 
