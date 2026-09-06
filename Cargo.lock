@@ -2339,6 +2339,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gritty-agent-fake"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
 name = "gritty-agent-hook"
 version = "0.1.0"
 dependencies = [
