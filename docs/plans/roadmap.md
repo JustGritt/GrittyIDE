@@ -35,24 +35,28 @@ ADR-001 confirm or reject Tauri
 T070 (watcher), T080 (search) and the rest of Phases 1–2 start only after the
 Phase 0 runtime decision is recorded. Task specs live in `docs/tasks/`.
 
-## Agent observability (T221–T232, specified, not started)
+## Agent observability (T221 and T230–T232 built; T222–T224 specified only)
 
 T220 landed read-only discovery of the agent sessions already running on the
 machine. The rest finishes that surface without crossing into orchestration.
 
-The landing that matters first is the **agent rail**: T230 (a transcript
-follower and a provider-neutral timeline, no UI), T221 (the hook bridge, which
-earns `BLOCKED` — the one status the transcript cannot produce), T231 (a third
-region beside the editor, sessions coloured by status) and T232 (the feed, and
-opening a file the agent touched). Together they answer *what is this agent
-doing* next to the code it is changing.
+The landing that mattered first was the **agent rail**, and it has landed:
+T230 (a transcript follower and a provider-neutral timeline, no UI), T221 (the
+hook bridge, which earns `BLOCKED` — the one status the transcript cannot
+produce), T231 (a third region beside the editor, sessions coloured by status)
+and T232 (the feed, and opening a file the agent touched). Together they answer
+*what is this agent doing* next to the code it is changing. All four are at
+`review`: built, `pnpm check` green, and never once driven by a pointer.
 
-Then T222 (Codex), T223 (notifications plus a session↔workstream link) and
-T224 (reveal the terminal).
+Still specified only: T222 (Codex), T223 (notifications plus a
+session↔workstream link) and T224 (reveal the terminal).
 
 They sit in Phase 3 beside T210 and **do not gate on T300**, because none of
-them owns a run. They are specified now and **implementation waits for ADR-001**
-— nothing new is built on a runtime decision that is still formally open.
+them owns a run. This section used to say implementation waited for ADR-001.
+It did not: the four above were built while the runtime decision is still
+formally `Proposed`. Nothing in them rests on it — no new runtime assumption,
+and the Phase 0 measurements are untouched — but the gate is real, and an
+exception to it belongs in writing rather than in the commit log.
 
 The comparison that motivated them is in ADR-018's context: Herdr ships the
 runtime layer (a detached daemon, 15+ agents, a socket API) and explicitly
