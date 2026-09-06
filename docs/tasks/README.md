@@ -83,6 +83,9 @@ T200 Workstream model (done: state machine, decisions, persistence)
 1. Set the task status to `in-progress` in its file and in this table.
 2. Follow `AGENTS.md` (scope, tests, `pnpm check`, completion report).
 3. Open a PR named after the task (`T010: core protocol`), paste the completion
-   report, set status to `review`; the reviewer flips it to `done`.
+   report, set status to `review`; the reviewer flips it to `done`. Cut the
+   branch from `main`, and check `docs/merge-queue.md` first — it says which
+   version constants and migration numbers are already claimed by something in
+   flight (`scripts/merge-queue.py` renders the live queue).
 4. Newly discovered work becomes a bullet under "Follow-up tasks" in the
    completion report, and a new task file only when it has an owner.
