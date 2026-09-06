@@ -13,8 +13,8 @@ use std::time::Instant;
 
 use gritty_core::agent_session::{
     AgentIntegration, AgentIntegrationChange, AgentIntegrationChangeRequest,
-    AgentIntegrationRequest, AgentRoster, AgentTimeline, AgentTimelineRequest,
-    ListAgentSessionsRequest,
+    AgentIntegrationRequest, AgentNotificationSettings, AgentRoster, AgentTimeline,
+    AgentTimelineRequest, ListAgentSessionsRequest, SetAgentNotificationsRequest,
 };
 use gritty_core::document::{
     CloseDocumentRequest, Document, DocumentContent, DocumentStatusRequest, OpenDocumentRequest,
@@ -45,9 +45,10 @@ use gritty_core::workspace::{
     UnsavedPolicy, Workspace,
 };
 use gritty_core::workstream::{
-    CreateWorkstreamRequest, Decision, DismissDecisionRequest, ListDecisionsRequest,
-    ListWorkstreamsRequest, RaiseDecisionRequest, RemoveWorkstreamRequest, ResolveDecisionRequest,
-    TransitionWorkstreamRequest, UpdateWorkstreamRequest, Workstream,
+    AgentLinkChange, CreateWorkstreamRequest, Decision, DismissDecisionRequest, LinkAgentRequest,
+    ListAgentLinksRequest, ListDecisionsRequest, ListWorkstreamsRequest, RaiseDecisionRequest,
+    RemoveWorkstreamRequest, ResolveDecisionRequest, TransitionWorkstreamRequest,
+    UnlinkAgentRequest, UpdateWorkstreamRequest, Workstream, WorkstreamAgentLink,
 };
 use gritty_core::{CoreError, HealthReport};
 use serde::de::DeserializeOwned;
@@ -675,6 +676,41 @@ pub async fn agents_integration_uninstall(
     .await
 }
 
+/// `agents.notifications`
+///
+/// What the settings surface shows (T223): whether this build can raise a
+/// notification, whether the user has turned it on, and what the platform says
+/// about permission. Reading it never produces a permission prompt.
+#[tauri::command]
+pub async fn agents_notifications(
+    core: State<'_, Core>,
+) -> Result<AgentNotificationSettings, CoreError> {
+    let agents = core.agents.clone();
+    guard("agents.notifications", move |_| async move {
+        Ok(agents.notification_settings())
+    })
+    .await
+}
+
+/// `agents.setNotifications`
+///
+/// Turning it **on** is the one thing in Gritty that asks the platform for
+/// notification permission — never application startup. A refusal comes back
+/// as a value with the setting still off, not as an error to dismiss, and
+/// nothing retries.
+#[tauri::command]
+pub async fn agents_set_notifications(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentNotificationSettings, CoreError> {
+    let agents = core.agents.clone();
+    guard("agents.setNotifications", move |_| async move {
+        let request: SetAgentNotificationsRequest = parse_request(request)?;
+        Ok(agents.set_notifications(request.enabled))
+    })
+    .await
+}
+
 /// `workstreams.list`
 #[tauri::command]
 pub async fn workstreams_list(
@@ -743,6 +779,56 @@ pub async fn workstreams_remove(
     guard("workstreams.remove", move |correlation| async move {
         let request: RemoveWorkstreamRequest = parse_request(request)?;
         workstreams.remove(request, Actor::User, correlation).await
+    })
+    .await
+}
+
+/// `workstreams.linkAgent`
+///
+/// Attaches an observed agent session to the work it is doing (T223). A
+/// session that is no longer in the roster is allowed: a link records a fact
+/// about the past. Returns the workstream's links as they are afterwards, read
+/// back from the database, rather than emitting an event.
+#[tauri::command]
+pub async fn workstreams_link_agent(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentLinkChange, CoreError> {
+    let workstreams = core.workstreams.clone();
+    guard("workstreams.linkAgent", move |correlation| async move {
+        let request: LinkAgentRequest = parse_request(request)?;
+        workstreams.link_agent(request, correlation).await
+    })
+    .await
+}
+
+/// `workstreams.unlinkAgent`. Removes the link and nothing else: the session
+/// is not Gritty's to touch.
+#[tauri::command]
+pub async fn workstreams_unlink_agent(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentLinkChange, CoreError> {
+    let workstreams = core.workstreams.clone();
+    guard("workstreams.unlinkAgent", move |correlation| async move {
+        let request: UnlinkAgentRequest = parse_request(request)?;
+        workstreams.unlink_agent(request, correlation).await
+    })
+    .await
+}
+
+/// `workstreams.agentLinks`. Without `workstreamId`, every link of the
+/// workspace. A link whose session is not running is still returned; joining
+/// it against the roster is the caller's job.
+#[tauri::command]
+pub async fn workstreams_agent_links(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Vec<WorkstreamAgentLink>, CoreError> {
+    let workstreams = core.workstreams.clone();
+    guard("workstreams.agentLinks", move |correlation| async move {
+        let request: ListAgentLinksRequest = parse_request(request)?;
+        workstreams.agent_links(request, correlation).await
     })
     .await
 }

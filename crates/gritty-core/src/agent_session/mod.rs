@@ -25,11 +25,13 @@
 //! renderer ever waits on it (rules 8 and 10). An unchanged roster emits
 //! nothing at all.
 
+pub mod attention;
 pub mod timeline;
 pub mod wire;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -48,8 +50,13 @@ use crate::protocol::error::{CoreError, CoreErrorCode};
 use crate::protocol::time::Timestamp;
 use crate::workspace::WorkspaceManager;
 use crate::workspace::recents::{display_name, shorten};
+use attention::{AttentionNotifier, AttentionTracker};
 use timeline::OpenTimeline;
 
+pub use attention::{
+    AgentNotificationPermission, AgentNotificationSettings, AttentionAlert, MAX_NOTIFICATION_BODY,
+    NOTIFY_CAP_PER_WINDOW, NOTIFY_COOLDOWN, NOTIFY_WINDOW, SetAgentNotificationsRequest,
+};
 pub use timeline::MAX_TIMELINE_ENTRIES;
 pub use wire::{
     AgentActivity, AgentActivitySource, AgentEvidence, AgentIntegration, AgentIntegrationChange,
@@ -136,6 +143,10 @@ pub struct AgentDiscoveryConfig {
     /// and then nothing is offered rather than an entry that would be broken
     /// the moment it was written.
     pub hook_binary: Option<PathBuf>,
+    /// How a notification reaches the platform (T223), or `None` for a build
+    /// that cannot raise one. `None` makes the setting *absent* rather than
+    /// broken: nothing is offered that would do nothing.
+    pub notifier: Option<Arc<dyn AttentionNotifier>>,
 }
 
 impl AgentDiscoveryConfig {
@@ -170,6 +181,7 @@ impl AgentDiscoveryConfig {
             home,
             hooks: None,
             hook_binary: None,
+            notifier: None,
         }
     }
 
@@ -189,6 +201,13 @@ impl AgentDiscoveryConfig {
     /// Where this build's hook binary is, when it could be found.
     pub fn with_hook_binary(mut self, hook_binary: Option<PathBuf>) -> Self {
         self.hook_binary = hook_binary;
+        self
+    }
+
+    /// How attention notifications reach the platform (T223). Left unset, the
+    /// core still tracks the transitions and simply raises nothing.
+    pub fn with_notifier(mut self, notifier: Option<Arc<dyn AttentionNotifier>>) -> Self {
+        self.notifier = notifier;
         self
     }
 }
@@ -225,6 +244,17 @@ pub struct AgentSessionManager {
     /// by every scan.
     sources: Mutex<HashMap<String, TimelineSource>>,
     metrics: Mutex<FollowMetrics>,
+    /// The edge-triggering, throttle and cap behind attention notifications
+    /// (T223). Advanced from [`Self::publish`], which is the one place a roster
+    /// change is observed, so the two loops cannot disagree about what a
+    /// transition is.
+    attention: Mutex<AttentionTracker>,
+    /// Off until the user turns it on, every run (T223 §2).
+    notifications_enabled: AtomicBool,
+    /// Whether the Gritty window has focus. **Starts true**: focus that is
+    /// unknown counts as focused, and a missed notification is better than one
+    /// over the user's face.
+    window_focused: AtomicBool,
     /// Both loops, so shutdown can wait for them rather than assume.
     tasks: Mutex<Vec<JoinHandle<()>>>,
     cancel: CancellationToken,
@@ -252,6 +282,9 @@ impl AgentSessionManager {
             timelines: Mutex::new(HashMap::new()),
             sources: Mutex::new(HashMap::new()),
             metrics: Mutex::new(FollowMetrics::default()),
+            attention: Mutex::new(AttentionTracker::new()),
+            notifications_enabled: AtomicBool::new(false),
+            window_focused: AtomicBool::new(true),
             tasks: Mutex::new(Vec::new()),
             cancel: CancellationToken::new(),
         });
@@ -750,7 +783,95 @@ impl AgentSessionManager {
                 CoreEvent::AgentSessionsChanged(roster.clone()),
             );
         }
+        // After the event, and on every roster rather than only the ones that
+        // differed: the tracker's own pruning depends on seeing the current
+        // population, and an unchanged roster produces no transitions anyway.
+        self.raise_attention(&roster);
         roster
+    }
+
+    /// Notify about whatever just started needing the user (T223).
+    ///
+    /// The decision is entirely [`AttentionTracker`]'s; this only supplies the
+    /// clock, the settings and the platform. Held-lock discipline matters here:
+    /// the tracker's mutex is released before anything reaches the platform, so
+    /// a notifier that blocks cannot hold up the next scan.
+    fn raise_attention(&self, roster: &AgentRoster) {
+        let enabled = self.notifications_enabled.load(Ordering::Relaxed);
+        let focused = self.window_focused.load(Ordering::Relaxed);
+        let alerts = {
+            let mut tracker = self
+                .attention
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            tracker.advance(roster, gritty_agents::now_ms(), enabled, focused)
+        };
+        let Some(notifier) = self.config.notifier.as_deref() else {
+            return;
+        };
+        for alert in &alerts {
+            // Counts and the session id only: a title, a prompt or a working
+            // directory never reaches the log (rule 13).
+            tracing::debug!(session = %alert.session_id, "raising an attention notification");
+            notifier.show(alert);
+        }
+    }
+
+    /// `agents.notifications`. What the settings surface shows. Reads the
+    /// platform's answer without asking for it, so opening settings never
+    /// produces a permission prompt.
+    pub fn notification_settings(&self) -> AgentNotificationSettings {
+        let Some(notifier) = self.config.notifier.as_deref() else {
+            return AgentNotificationSettings {
+                enabled: false,
+                supported: false,
+                permission: AgentNotificationPermission::Denied,
+            };
+        };
+        AgentNotificationSettings {
+            enabled: self.notifications_enabled.load(Ordering::Relaxed),
+            supported: notifier.supported(),
+            permission: notifier.permission(),
+        }
+    }
+
+    /// `agents.setNotifications`.
+    ///
+    /// Turning it **on** is the one thing that asks the platform for
+    /// permission — never application startup. A refusal is reported as a value
+    /// and leaves the setting off; nothing retries on a loop, and the roster is
+    /// unaffected either way.
+    pub fn set_notifications(&self, enabled: bool) -> AgentNotificationSettings {
+        let Some(notifier) = self.config.notifier.as_deref() else {
+            return self.notification_settings();
+        };
+        if !enabled {
+            self.notifications_enabled.store(false, Ordering::Relaxed);
+            return self.notification_settings();
+        }
+        if !notifier.supported() {
+            return self.notification_settings();
+        }
+        let permission = notifier.request_permission();
+        let granted = permission == AgentNotificationPermission::Granted;
+        self.notifications_enabled.store(granted, Ordering::Relaxed);
+        tracing::info!(
+            granted,
+            ?permission,
+            "agent attention notifications requested"
+        );
+        AgentNotificationSettings {
+            enabled: granted,
+            supported: true,
+            permission,
+        }
+    }
+
+    /// Whether the Gritty window has focus, from the composition root's window
+    /// events. Focus that is never reported stays `true`, and Gritty stays
+    /// silent (T223 §3, and the failure table's "window focus unknown").
+    pub fn set_window_focused(&self, focused: bool) {
+        self.window_focused.store(focused, Ordering::Relaxed);
     }
 
     async fn scan(&self) -> Discovery {

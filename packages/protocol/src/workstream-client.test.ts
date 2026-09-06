@@ -7,6 +7,7 @@ import type {
   HealthReport,
   WorkspaceId,
   Workstream,
+  WorkstreamAgentLink,
   WorkstreamId,
 } from './types';
 import { PROTOCOL_VERSION } from './types';
@@ -152,5 +153,69 @@ describe('workstream client', () => {
       code: 'Io',
       retryable: true,
     });
+  });
+
+  it('links and unlinks an agent session and reads the links back', async () => {
+    const { transport, core } = client();
+    const link: WorkstreamAgentLink = {
+      workstreamId,
+      provider: 'CLAUDE_CODE',
+      sessionId: 'claude_code:pid-42',
+      linkedAt: 5,
+    };
+    transport.handlers.set('workstreams_link_agent', () => ({
+      workstreamId,
+      links: [link],
+      changed: true,
+    }));
+    transport.handlers.set('workstreams_unlink_agent', () => ({
+      workstreamId,
+      links: [],
+      changed: false,
+    }));
+    transport.handlers.set('workstreams_agent_links', () => [link]);
+
+    const request = {
+      workspaceId,
+      workstreamId,
+      provider: 'CLAUDE_CODE',
+      sessionId: 'claude_code:pid-42',
+    } as const;
+    await expect(core.workstreams.linkAgent(request)).resolves.toMatchObject({
+      changed: true,
+      links: [link],
+    });
+    // An unlink of something that was not there is a no-op that says so,
+    // rather than a rejection the user has to dismiss.
+    await expect(core.workstreams.unlinkAgent(request)).resolves.toMatchObject({
+      changed: false,
+      links: [],
+    });
+    // Without `workstreamId` it is the whole workspace, which is what the
+    // island reads in one pass.
+    await expect(core.workstreams.agentLinks({ workspaceId })).resolves.toEqual([link]);
+
+    const args = (command: string) => transport.calls.find((c) => c.command === command)?.args;
+    expect(args('workstreams_link_agent')).toEqual({ request });
+    expect(args('workstreams_agent_links')).toEqual({ request: { workspaceId } });
+  });
+
+  it('surfaces the link bound as a Conflict', async () => {
+    const { transport, core } = client();
+    transport.handlers.set('workstreams_link_agent', () => {
+      throw {
+        code: 'Conflict',
+        message: 'a workstream may be linked to at most 50 agent sessions',
+        retryable: false,
+      };
+    });
+    await expect(
+      core.workstreams.linkAgent({
+        workspaceId,
+        workstreamId,
+        provider: 'CLAUDE_CODE',
+        sessionId: 's-1',
+      }),
+    ).rejects.toMatchObject({ code: 'Conflict' });
   });
 });

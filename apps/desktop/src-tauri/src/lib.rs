@@ -6,7 +6,10 @@
 //! - Domain logic lives in `crates/*`, never here.
 //! - The WebView is never handed raw filesystem or process APIs. The dialog
 //!   plugin is registered so the core can show the native directory picker
-//!   from Rust; the WebView is granted none of its commands. External URLs
+//!   from Rust; the WebView is granted none of its commands. The notification
+//!   plugin (T223) is registered on the same terms — a notification is raised
+//!   from Rust, from the place that already observes the roster diff, and the
+//!   WebView is granted none of its commands either. External URLs
 //!   are opened by the core's shell service (T050) through [`shell::SystemOpener`],
 //!   and a navigation guard keeps the WebView on the application origin.
 //! - Session persistence (T060): the application data directory is resolved
@@ -16,6 +19,7 @@
 mod commands;
 pub mod core;
 mod file_drop;
+mod notifications;
 mod shell;
 pub mod window_state;
 
@@ -157,12 +161,21 @@ pub fn run() {
 /// Tauri's mock runtime (which never runs `setup`; tests call [`attach_core`]
 /// themselves).
 pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+    let builder = builder.plugin(tauri_plugin_dialog::init());
+    // T223. Registered so the *core* can raise a notification from Rust;
+    // `capabilities/default.json` grants its `notify`, `requestPermission` and
+    // `isPermissionGranted` commands to nobody, so the WebView gains nothing
+    // from it. It is registered on macOS only — the target table in
+    // `Cargo.toml` says why, and `notifications.rs` says what the other
+    // platforms get instead, which is a notifier that reports itself
+    // unsupported.
+    let builder = notifications::register(builder);
     builder
-        .plugin(tauri_plugin_dialog::init())
         .plugin(navigation_guard())
         .on_window_event(|window, event| {
             window_state::on_window_event(window, event);
             file_drop::on_window_event(window, event);
+            on_focus_event(window, event);
         })
         .setup(|app| {
             attach_core(app.handle());
@@ -207,6 +220,9 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::workstreams_update,
             commands::workstreams_transition,
             commands::workstreams_remove,
+            commands::workstreams_link_agent,
+            commands::workstreams_unlink_agent,
+            commands::workstreams_agent_links,
             commands::decisions_list,
             commands::decisions_raise,
             commands::decisions_resolve,
@@ -224,7 +240,30 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::agents_integration_status,
             commands::agents_integration_install,
             commands::agents_integration_uninstall,
+            commands::agents_notifications,
+            commands::agents_set_notifications,
         ])
+}
+
+/// Tell the core whether the user is looking at Gritty (T223 §3).
+///
+/// Focus is a *process* concern, like window geometry, so it is captured here
+/// and pushed into the core rather than asked for from the domain. The core
+/// starts believing the window is focused and stays silent until told
+/// otherwise: a missed notification is better than one over the user's face.
+fn on_focus_event<R: tauri::Runtime>(window: &tauri::Window<R>, event: &tauri::WindowEvent) {
+    let tauri::WindowEvent::Focused(focused) = event else {
+        return;
+    };
+    // The main window only. A future secondary window is not what "the user is
+    // looking at the island" means.
+    if window.label() != "main" {
+        return;
+    }
+    let app = window.app_handle();
+    if let Some(core) = app.try_state::<core::Core>() {
+        core.agents.set_window_focused(*focused);
+    }
 }
 
 /// Build the core (event bus, operation registry, workspace and document

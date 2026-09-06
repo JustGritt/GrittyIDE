@@ -63,9 +63,12 @@ everything else, instead of each small one resolving against it.
 
 | PR | What | Order | Why / what the loser fixes |
 |---|---|---|---|
-| `docs-spec-wave-1` | six task specs (T070, T080, T100, T110, T300, T326) | 1 | Claims no version constant and no migration number. Documents only. Its seams are `docs/tasks/README.md` (generated — take this branch's file and re-run `agent-board.py render --index`, never hand-merge rows), `docs/plans/roadmap.md`, `docs/plans/execution-board.md` and this file's queue table. Smallest of the three and first for that reason. |
-| `docs-review-findings` | verification of the twelve tasks at `review` | 2 | One new file, `docs/testing/review-findings.md`. No seam with anything. Ordered second only because it is trivially rebased. |
-| `t223-agent-attention` | T223 attention + workstream link | 3 | **Spends `PROTOCOL_VERSION` 2.11.0, `SCHEMA_VERSION` 4 and migration `0004_agent_links.sql`.** The only code branch of the three, and last so it resolves once. It shares `docs/tasks/README.md` and this file with row 1: after row 1 lands, rebase, re-run `cargo test -p gritty-core`, commit the regenerated types, and re-run `render --index` rather than hand-merging the table. |
+| [#27](https://github.com/JustGritt/GrittyIDE/pull/27) | T223 attention + workstream link | 1 | **Spends `PROTOCOL_VERSION` 2.11.0, `SCHEMA_VERSION` 4 and migration `0004_agent_links.sql`.** Rebased onto #25 and #26; the one conflict this table predicted — this file — is resolved, and `docs/tasks/README.md` came through clean. Alone in the queue now. |
+
+**#25 and #26 landed on 2026-09-06**, in the order this table gave them, and
+the collision it predicted is the one that happened: #25 and #27 both edited
+this file's claim paragraph. The resolution was to keep both halves, which is
+why the seams list below survives. Their rows are deleted per the rule below.
 
 **#22, #23, #21 and #24 landed on 2026-09-06** in the order this table gave
 them, and the one collision it predicted is the one that happened: #23's
@@ -80,13 +83,22 @@ file decides.
 
 | Thing | Value | Branch |
 |---|---|---|
-| migration `0004` | `0004_agent_links.sql` | T223, specified only |
+| `PROTOCOL_VERSION` | **2.11.0** | `t223-agent-attention` |
+| `SCHEMA_VERSION` | **4** | `t223-agent-attention` |
+| migration `0004` | `0004_agent_links.sql` | `t223-agent-attention` |
 
 `PROTOCOL_VERSION` **2.10.0**, `SCHEMA_VERSION` **3** and migration `0003` were
 #21's and are now on `main`. `t223-agent-attention` is spending 2.11.0, 4 and
 `0004`, so the next free values after it are **2.12.0**, **5** and **`0005`**.
 The per-lane minors in `execution-board.md` are a planning hint and are already
 wrong: 2.11 was reserved there for T070 and T223 took it.
+
+T223's other seams, for whoever lands beside it:
+`docs/architecture/{agent-sessions,workstreams,persistence}.md`,
+`crates/gritty-core/src/protocol/export.rs`, `crates/persistence/src/store.rs`
+and `packages/protocol/src/{client,commands,types}.ts`. It adds **no**
+`CoreEvent` variant — its commands return their own fresh snapshot instead — so
+the enum #20 and #21 collided on is not one of them.
 
 When a PR merges, delete its rows. This file describes what is *in flight*; git
 history describes what happened.

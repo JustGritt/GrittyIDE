@@ -35,3 +35,12 @@ gritty-terminal = { workspace = true }
 
 [lints]
 workspace = true
+
+# T223. macOS only, and deliberately so. Nobody has run a notification on any
+# other platform, so shipping the dependency everywhere would claim support
+# that was never verified (rule 11) — and on Linux it drags `notify-rust`,
+# `zbus` and `dbus` into every test binary, which is what made `rust-lld` die
+# linking them in CI. The adapter answers "not supported" where the plugin is
+# absent, which is what T223's failure table asks for.
+[target.'cfg(target_os = "macos")'.dependencies]
+tauri-plugin-notification = { workspace = true }

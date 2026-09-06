@@ -42,7 +42,7 @@ the workflow below are hand-maintained.
 | [T220](T220-agent-session-discovery.md) | Agent session discovery: what is running, and on what | 3 | T010, T020, T210 | review |
 | [T221](T221-agent-hook-bridge.md) | Agent hook bridge: earning `BLOCKED` | 3 | T220, T230, ADR-018 | review |
 | [T222](T222-agent-providers.md) | More providers: Codex first, then what can be verified | 3 | T220, T221 | todo |
-| [T223](T223-agent-attention.md) | Attention: notify when an agent needs you, and link it to the work | 3 | T200, T210, T220, T221 | doing |
+| [T223](T223-agent-attention.md) | Attention: notify when an agent needs you, and link it to the work | 3 | T200, T210, T220, T221 | review |
 | [T224](T224-reveal-terminal.md) | Reveal the terminal a session is running in | 3 | T220 | todo |
 | [T230](T230-agent-timeline.md) | Agent timeline: what a session is actually doing | 3 | T020, T220 | review |
 | [T231](T231-agent-rail.md) | The agent rail: a dedicated region for running agents | 3 | T046, T060, T220, T230 | review |

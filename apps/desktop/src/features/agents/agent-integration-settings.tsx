@@ -8,6 +8,7 @@ import {
   installBlockedReason,
   integrationSummary,
 } from './agent-integration';
+import { AgentNotificationSetting } from './agent-notification-setting';
 
 /**
  * The hook integration, offered in settings and nowhere else (T221 §25,
@@ -94,6 +95,12 @@ export function AgentIntegrationSettings() {
         ⋯
       </summary>
       <div className="prefs__form">
+        {/* Whether Gritty tells you at all (T223). First, because it is the
+            setting that decides what the hook below is *for*: the hook earns
+            `BLOCKED`, and this is what does something with it while you are
+            looking somewhere else. */}
+        <AgentNotificationSetting />
+
         <p className="agents__hint">
           Gritty can ask Claude Code to tell it when a session stops at a permission prompt, by
           adding one entry to <code>{status?.configPath ?? '~/.claude/settings.json'}</code>. Other

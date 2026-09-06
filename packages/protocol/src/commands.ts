@@ -41,6 +41,9 @@ export const COMMANDS = {
   'workstreams.update': 'workstreams_update',
   'workstreams.transition': 'workstreams_transition',
   'workstreams.remove': 'workstreams_remove',
+  'workstreams.linkAgent': 'workstreams_link_agent',
+  'workstreams.unlinkAgent': 'workstreams_unlink_agent',
+  'workstreams.agentLinks': 'workstreams_agent_links',
   'decisions.list': 'decisions_list',
   'decisions.raise': 'decisions_raise',
   'decisions.resolve': 'decisions_resolve',
@@ -58,6 +61,8 @@ export const COMMANDS = {
   'agents.integrationStatus': 'agents_integration_status',
   'agents.integrationInstall': 'agents_integration_install',
   'agents.integrationUninstall': 'agents_integration_uninstall',
+  'agents.notifications': 'agents_notifications',
+  'agents.setNotifications': 'agents_set_notifications',
 } as const;
 
 export type CommandName = keyof typeof COMMANDS;

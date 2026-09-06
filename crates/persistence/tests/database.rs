@@ -5,7 +5,8 @@ use std::fs;
 use std::io::{Seek, SeekFrom, Write};
 
 use gritty_persistence::store::{
-    decisions, operations, ownership, session, snapshots, tabs, window, workspace, workstreams,
+    agent_links, decisions, operations, ownership, session, snapshots, tabs, window, workspace,
+    workstreams,
 };
 use gritty_persistence::testing::TempDir;
 use gritty_persistence::{DB_FILE_NAME, Database, PersistenceError, SCHEMA_VERSION};
@@ -970,6 +971,219 @@ fn a_database_written_before_ownership_existed_migrates_forward_with_its_rows() 
         opened
             .database
             .read(|c| ownership::list_held(c, "/repo"))
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+/// T223. The link table's whole contract in one test: a duplicate is a no-op,
+/// one session may serve two workstreams, an unlink that removes nothing is
+/// not an error, and everything cascades with the workstream.
+#[test]
+fn agent_links_are_keyed_by_the_triple_and_cascade_with_their_workstream() {
+    let database = Database::open_in_memory().unwrap();
+    let workstream = |id: &str, root: &str| workstreams::WorkstreamRow {
+        id: id.into(),
+        workspace_root: root.into(),
+        title: format!("title {id}"),
+        goal: None,
+        state: "IN_PROGRESS".into(),
+        created_at: 1,
+        updated_at: 1,
+    };
+    let link = |workstream_id: &str, session_id: &str, at: i64| agent_links::AgentLinkRow {
+        workstream_id: workstream_id.into(),
+        provider: "CLAUDE_CODE".into(),
+        session_id: session_id.into(),
+        linked_at: at,
+    };
+    database
+        .write(|tx| {
+            workstreams::insert(tx, &workstream("auth", "/repo"))?;
+            workstreams::insert(tx, &workstream("search", "/repo"))?;
+            workstreams::insert(tx, &workstream("elsewhere", "/other"))
+        })
+        .unwrap();
+
+    assert!(
+        database
+            .write(|tx| agent_links::insert(tx, &link("auth", "claude-code:s-1", 10)))
+            .unwrap()
+    );
+    // The same triple again writes nothing and says so, keeping the original
+    // `linked_at`: the link started then, not now.
+    assert!(
+        !database
+            .write(|tx| agent_links::insert(tx, &link("auth", "claude-code:s-1", 99)))
+            .unwrap()
+    );
+    // The same session on a second workstream is a different row.
+    assert!(
+        database
+            .write(|tx| agent_links::insert(tx, &link("search", "claude-code:s-1", 11)))
+            .unwrap()
+    );
+    // A second session on the first workstream is another.
+    assert!(
+        database
+            .write(|tx| agent_links::insert(tx, &link("auth", "claude-code:s-2", 12)))
+            .unwrap()
+    );
+    // Another workspace entirely, which must never appear below.
+    database
+        .write(|tx| agent_links::insert(tx, &link("elsewhere", "claude-code:s-3", 13)))
+        .unwrap();
+
+    let of_auth = database
+        .read(|c| agent_links::list_for_workstream(c, "auth"))
+        .unwrap();
+    assert_eq!(
+        of_auth
+            .iter()
+            .map(|row| row.session_id.as_str())
+            .collect::<Vec<_>>(),
+        ["claude-code:s-1", "claude-code:s-2"]
+    );
+    assert_eq!(of_auth[0].linked_at, 10, "the duplicate did not overwrite");
+    assert_eq!(
+        database
+            .read(|c| agent_links::count_for_workstream(c, "auth"))
+            .unwrap(),
+        2
+    );
+
+    let of_workspace = database
+        .read(|c| agent_links::list_for_workspace(c, "/repo"))
+        .unwrap();
+    assert_eq!(of_workspace.len(), 3, "{of_workspace:?}");
+    assert!(
+        of_workspace
+            .iter()
+            .all(|row| row.workstream_id != "elsewhere")
+    );
+
+    // Unlinking twice leaves the same state, and the second one says nothing
+    // happened rather than failing.
+    assert!(
+        database
+            .write(|tx| agent_links::delete(tx, "auth", "CLAUDE_CODE", "claude-code:s-2"))
+            .unwrap()
+    );
+    assert!(
+        !database
+            .write(|tx| agent_links::delete(tx, "auth", "CLAUDE_CODE", "claude-code:s-2"))
+            .unwrap()
+    );
+    // A provider that does not match is a different key, so nothing is removed.
+    assert!(
+        !database
+            .write(|tx| agent_links::delete(tx, "auth", "SOMETHING_ELSE", "claude-code:s-1"))
+            .unwrap()
+    );
+
+    // Deleting the workstream takes its links with it and leaves the other
+    // workstream's link to the same session alone.
+    database
+        .write(|tx| workstreams::delete(tx, "auth"))
+        .unwrap();
+    assert!(
+        database
+            .read(|c| agent_links::list_for_workstream(c, "auth"))
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        database
+            .read(|c| agent_links::list_for_workstream(c, "search"))
+            .unwrap()
+            .len(),
+        1,
+        "removing a link never touches the session or anyone else's link"
+    );
+}
+
+/// T223. The 3 → 4 upgrade, on a database with rows in it: the workstreams and
+/// leases that were there survive, and the new table works against them.
+#[test]
+fn a_database_written_before_agent_links_existed_migrates_forward_with_its_rows() {
+    let dir = TempDir::new("migrate-v4");
+    let path = dir.join(DB_FILE_NAME);
+
+    // Schema 3 exactly as it shipped: the runner applied up to ownership and
+    // stopped.
+    {
+        let conn = rusqlite::Connection::open(&path).expect("open");
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        conn.execute_batch(
+            "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)",
+        )
+        .unwrap();
+        for migration in gritty_persistence::MIGRATIONS.iter().take(3) {
+            conn.execute_batch(migration.sql).expect("apply");
+            conn.execute(
+                "INSERT INTO schema_version (version, applied_at) VALUES (?1, 0)",
+                [migration.version],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO workstream (id, workspace_root, title, goal, state, created_at, updated_at)
+             VALUES ('kept', '/repo', 'Authentication', NULL, 'IN_PROGRESS', 1, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO ownership_lease (id, workspace_root, workstream_id, agent_run_id,
+                 target_kind, target_pattern, mode, note, acquired_at, expires_at, state,
+                 released_at)
+             VALUES ('l-kept', '/repo', 'kept', NULL, 'DIRECTORY', 'src/auth/**', 'WRITE', NULL,
+                 2, NULL, 'ACTIVE', NULL)",
+            [],
+        )
+        .unwrap();
+    }
+
+    let opened = Database::open(&path).expect("migrate the old database");
+    assert_eq!(opened.migrations.from, 3);
+    assert_eq!(opened.migrations.to, SCHEMA_VERSION);
+
+    // Everything that was there is still there.
+    let existing = opened
+        .database
+        .read(|c| workstreams::get(c, "kept"))
+        .unwrap()
+        .expect("the workstream survived");
+    assert_eq!(existing.title, "Authentication");
+    assert_eq!(
+        opened
+            .database
+            .read(|c| ownership::list_held(c, "/repo"))
+            .unwrap()
+            .len(),
+        1,
+        "the lease survived"
+    );
+
+    // And the new table works against the rows that were already there.
+    opened
+        .database
+        .write(|tx| {
+            agent_links::insert(
+                tx,
+                &agent_links::AgentLinkRow {
+                    workstream_id: "kept".into(),
+                    provider: "CLAUDE_CODE".into(),
+                    session_id: "claude-code:s-1".into(),
+                    linked_at: 3,
+                },
+            )
+        })
+        .unwrap();
+    assert_eq!(
+        opened
+            .database
+            .read(|c| agent_links::list_for_workspace(c, "/repo"))
             .unwrap()
             .len(),
         1

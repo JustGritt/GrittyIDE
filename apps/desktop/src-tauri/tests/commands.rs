@@ -1519,3 +1519,165 @@ fn shutdown_terminates_every_terminal() {
         assert!(session.is_finished(), "a shell survived shutdown");
     }
 }
+
+#[test]
+fn linking_an_agent_session_to_a_workstream_round_trips_through_the_adapters() {
+    let root = TempWorkspace::new("agent-link");
+    let harness = Harness::new();
+    let workspace = harness.open_workspace(&root.0);
+    let workspace_id = workspace["id"].clone();
+
+    let workstream = harness
+        .session(
+            "workstreams_create",
+            json!({ "workspaceId": workspace_id, "title": "Attention queue" }),
+        )
+        .expect("create the workstream");
+    let workstream_id = workstream["id"].clone();
+
+    // A session id the roster has never reported. Allowed on purpose: a link
+    // records a fact about the past, and the roster is a snapshot of now.
+    let link = json!({
+        "workspaceId": workspace_id,
+        "workstreamId": workstream_id,
+        "provider": "CLAUDE_CODE",
+        "sessionId": "claude_code:pid-42",
+    });
+    let change = harness
+        .session("workstreams_link_agent", link.clone())
+        .expect("link");
+    assert_eq!(change["changed"], true);
+    assert_eq!(change["links"].as_array().unwrap().len(), 1);
+    assert_eq!(change["links"][0]["sessionId"], "claude_code:pid-42");
+    assert_eq!(change["links"][0]["provider"], "CLAUDE_CODE");
+
+    // The same link again: a no-op that says so rather than a second row.
+    let again = harness
+        .session("workstreams_link_agent", link.clone())
+        .expect("duplicate");
+    assert_eq!(again["changed"], false);
+    assert_eq!(again["links"].as_array().unwrap().len(), 1);
+
+    let listed = harness
+        .session(
+            "workstreams_agent_links",
+            json!({ "workspaceId": workspace_id }),
+        )
+        .expect("list the workspace's links");
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+
+    // A link is not a change to the workstream, so nothing was emitted for it.
+    assert!(
+        !harness
+            .event_names()
+            .iter()
+            .any(|name| name == "WorkstreamChanged"),
+        "the command returns its own snapshot instead (T047's precedent)"
+    );
+
+    // The workstream's own wire shape is untouched by having a link.
+    let relisted = harness
+        .session("workstreams_list", json!({ "workspaceId": workspace_id }))
+        .expect("list");
+    assert_eq!(
+        relisted[0], workstream,
+        "hard rule 6: no provider field appeared"
+    );
+
+    let removed = harness
+        .session("workstreams_unlink_agent", link)
+        .expect("unlink");
+    assert_eq!(removed["changed"], true);
+    assert!(removed["links"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn a_malformed_link_request_is_invalid_input_and_writes_nothing() {
+    let root = TempWorkspace::new("agent-link-bad");
+    let harness = Harness::new();
+    let workspace = harness.open_workspace(&root.0);
+    let workspace_id = workspace["id"].clone();
+    let workstream = harness
+        .session(
+            "workstreams_create",
+            json!({ "workspaceId": workspace_id, "title": "Bounded" }),
+        )
+        .expect("create");
+
+    // An unknown provider never reaches the domain: it is not one of the
+    // enum's values, so the request does not parse.
+    let error = harness
+        .invoke(
+            "workstreams_link_agent",
+            json!({ "request": {
+                "workspaceId": workspace_id,
+                "workstreamId": workstream["id"],
+                "provider": "SOME_OTHER_CLI",
+                "sessionId": "s-1",
+            }}),
+        )
+        .expect_err("unknown provider");
+    assert_eq!(error["code"], "InvalidInput");
+
+    let listed = harness
+        .session(
+            "workstreams_agent_links",
+            json!({ "workspaceId": workspace_id }),
+        )
+        .expect("list");
+    assert!(listed.as_array().unwrap().is_empty());
+}
+
+#[test]
+fn notifications_are_off_until_the_setting_is_turned_on_through_the_adapter() {
+    // The plugin is a macOS dependency, so `configure` registers it there and
+    // nowhere else. The contract is the same either way and is what this
+    // asserts: the setting reports what the platform can actually do, rather
+    // than a value baked in at the time the test was written.
+    const SUPPORTED: bool = cfg!(target_os = "macos");
+
+    let harness = Harness::new();
+    // Whatever the platform supports, the setting still starts off — nothing
+    // about launching the application arms it (T223 §2).
+    let settings = harness
+        .invoke("agents_notifications", json!({}))
+        .expect("read");
+    assert_eq!(settings["supported"], SUPPORTED);
+    assert_eq!(settings["enabled"], false);
+
+    let after = harness
+        .session("agents_set_notifications", json!({ "enabled": true }))
+        .expect("set");
+    if SUPPORTED {
+        // The desktop plugin answers `Granted` without a prompt of its own; the
+        // real permission is the operating system's, and it is asked for by the
+        // first notification rather than by this call. What is asserted here is
+        // that the setting follows the platform's answer instead of assuming one.
+        assert_eq!(after["enabled"], after["permission"] == "GRANTED");
+    } else {
+        // Absent rather than broken, which is the failure table's wording:
+        // asking for a notification Gritty cannot raise leaves the setting off
+        // and does not fail the command.
+        assert_eq!(after["enabled"], false);
+        assert_ne!(after["permission"], "GRANTED");
+    }
+    assert_eq!(
+        harness
+            .invoke("agents_notifications", json!({}))
+            .expect("read back")["enabled"],
+        after["enabled"]
+    );
+
+    let off = harness
+        .session("agents_set_notifications", json!({ "enabled": false }))
+        .expect("set");
+    assert_eq!(off["enabled"], false);
+
+    let malformed = harness
+        .invoke(
+            "agents_set_notifications",
+            json!({ "request": { "enabled": 7 } }),
+        )
+        .expect_err("malformed");
+    assert_eq!(malformed["code"], "InvalidInput");
+}

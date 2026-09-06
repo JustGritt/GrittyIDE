@@ -289,6 +289,16 @@ fn manager_with_hooks(
     runner: Arc<dyn CommandRunner>,
     hooks: Option<PathBuf>,
 ) -> (Arc<AgentSessionManager>, Arc<RecordingSink>) {
+    manager_with(runner, hooks, None)
+}
+
+/// The same, with an injected attention notifier (T223). Nothing in this file
+/// reaches a real notification centre.
+fn manager_with(
+    runner: Arc<dyn CommandRunner>,
+    hooks: Option<PathBuf>,
+    notifier: Option<Arc<dyn AttentionNotifier>>,
+) -> (Arc<AgentSessionManager>, Arc<RecordingSink>) {
     let sink = Arc::new(RecordingSink::default());
     let events = EventBus::new(FanOutSink::new(vec![sink.clone()]));
     let handle = Handle::current();
@@ -308,6 +318,7 @@ fn manager_with_hooks(
             home: Some(PathBuf::from("/Users/someone")),
             hooks: hooks.map(gritty_agents::HookScanOptions::rooted_at),
             hook_binary: None,
+            notifier,
         },
     );
     (manager, sink)
@@ -656,6 +667,7 @@ fn manager_over_with(
             home: Some(PathBuf::from("/Users/someone")),
             hooks: root.hooks(),
             hook_binary: None,
+            notifier: None,
         },
     );
     (manager, sink)
@@ -1239,6 +1251,7 @@ impl TempHome {
                     self.0.join("data/agents/state"),
                 )),
                 hook_binary,
+                notifier: None,
             },
         )
     }
@@ -1386,6 +1399,195 @@ async fn a_build_that_cannot_find_its_own_hook_binary_installs_nothing() {
     assert!(
         !home.config().exists(),
         "and no entry that would be broken the moment it was written"
+    );
+    manager.shutdown();
+}
+
+// ---------------------------------------------------------------------------
+// Attention notifications (T223)
+//
+// The policy itself is tested in `attention.rs`, without a manager or a clock.
+// What is tested here is the *wiring*: that the manager arms nothing by
+// itself, that a refusal leaves it off, and that a roster transition observed
+// by the real publish path reaches the platform exactly once.
+// ---------------------------------------------------------------------------
+
+/// A `ps` whose output the test changes between scans, so a roster can
+/// actually transition.
+struct SwitchableRunner(Mutex<String>);
+
+impl SwitchableRunner {
+    fn new(initial: &str) -> Self {
+        Self(Mutex::new(initial.to_owned()))
+    }
+
+    fn set(&self, ps: &str) {
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = ps.to_owned();
+    }
+}
+
+impl CommandRunner for SwitchableRunner {
+    fn run(&self, program: &str, _args: &[&str], _timeout: Duration) -> Option<String> {
+        (program == "/bin/ps").then(|| {
+            self.0
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone()
+        })
+    }
+}
+
+struct RecordingNotifier {
+    answer: AgentNotificationPermission,
+    asked: Mutex<u32>,
+    shown: Mutex<Vec<AttentionAlert>>,
+}
+
+impl RecordingNotifier {
+    fn answering(answer: AgentNotificationPermission) -> Arc<Self> {
+        Arc::new(Self {
+            answer,
+            asked: Mutex::new(0),
+            shown: Mutex::new(Vec::new()),
+        })
+    }
+
+    fn shown(&self) -> Vec<AttentionAlert> {
+        self.shown
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    fn asked(&self) -> u32 {
+        *self.asked.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl AttentionNotifier for RecordingNotifier {
+    fn supported(&self) -> bool {
+        true
+    }
+
+    fn permission(&self) -> AgentNotificationPermission {
+        // Reading the state never counts as asking.
+        self.answer
+    }
+
+    fn request_permission(&self) -> AgentNotificationPermission {
+        *self.asked.lock().unwrap_or_else(PoisonError::into_inner) += 1;
+        self.answer
+    }
+
+    fn show(&self, alert: &AttentionAlert) {
+        self.shown
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(alert.clone());
+    }
+}
+
+const ONE_CLAUDE: &str = " 42 1 ttys001  claude\n";
+
+#[tokio::test]
+async fn notifications_are_off_until_the_user_asks_and_asking_is_what_prompts() {
+    let notifier = RecordingNotifier::answering(AgentNotificationPermission::Granted);
+    let (manager, _sink) = manager_with(
+        Arc::new(FakeRunner(Some(ONE_CLAUDE.to_owned()))),
+        None,
+        Some(notifier.clone()),
+    );
+
+    let settings = manager.notification_settings();
+    assert!(!settings.enabled, "off by default");
+    assert!(settings.supported);
+    assert_eq!(
+        notifier.asked(),
+        0,
+        "reading the setting must never produce a permission prompt"
+    );
+
+    let enabled = manager.set_notifications(true);
+    assert!(enabled.enabled);
+    assert_eq!(notifier.asked(), 1, "the first enable is what asks");
+    assert!(manager.notification_settings().enabled);
+
+    manager.set_notifications(false);
+    assert!(!manager.notification_settings().enabled);
+    assert_eq!(notifier.asked(), 1, "turning it off asks nobody");
+    manager.shutdown();
+}
+
+#[tokio::test]
+async fn a_refusal_leaves_the_setting_off_and_is_reported_rather_than_retried() {
+    let notifier = RecordingNotifier::answering(AgentNotificationPermission::Denied);
+    let (manager, _sink) = manager_with(
+        Arc::new(FakeRunner(Some(ONE_CLAUDE.to_owned()))),
+        None,
+        Some(notifier.clone()),
+    );
+
+    let settings = manager.set_notifications(true);
+    assert!(!settings.enabled);
+    assert_eq!(settings.permission, AgentNotificationPermission::Denied);
+    assert!(settings.supported);
+    // The roster is unaffected by any of this.
+    assert_eq!(manager.list().await.sessions.len(), 1);
+    assert!(notifier.shown().is_empty());
+    manager.shutdown();
+}
+
+#[tokio::test]
+async fn a_build_without_a_notifier_reports_the_setting_as_unsupported() {
+    let (manager, _sink) = manager(Arc::new(FakeRunner(Some(ONE_CLAUDE.to_owned()))));
+    let settings = manager.notification_settings();
+    assert!(!settings.supported, "the setting is absent, not broken");
+    assert!(!settings.enabled);
+    // And enabling it changes nothing rather than pretending to work.
+    assert!(!manager.set_notifications(true).enabled);
+    manager.shutdown();
+}
+
+#[tokio::test]
+async fn a_session_that_arrives_needing_you_notifies_once_and_not_per_poll() {
+    let runner = Arc::new(SwitchableRunner::new(""));
+    let notifier = RecordingNotifier::answering(AgentNotificationPermission::Granted);
+    let (manager, _sink) = manager_with(runner.clone(), None, Some(notifier.clone()));
+    manager.set_window_focused(false);
+    assert!(manager.set_notifications(true).enabled);
+
+    // The first roster is what Gritty has just noticed; it notifies nothing.
+    assert!(manager.list().await.sessions.is_empty());
+    assert!(notifier.shown().is_empty());
+
+    runner.set(ONE_CLAUDE);
+    let roster = manager.refresh().await;
+    assert_eq!(roster.sessions[0].activity, AgentActivity::Waiting);
+    let shown = notifier.shown();
+    assert_eq!(shown.len(), 1, "{shown:?}");
+    assert_eq!(shown[0].session_id, "claude_code:pid-42");
+
+    // Still waiting on the next two polls: the roster is polled, and this is
+    // exactly the level-triggered notification rule 8 forbids.
+    manager.refresh().await;
+    manager.refresh().await;
+    assert_eq!(notifier.shown().len(), 1);
+    manager.shutdown();
+}
+
+#[tokio::test]
+async fn nothing_is_raised_while_the_window_has_focus() {
+    let runner = Arc::new(SwitchableRunner::new(""));
+    let notifier = RecordingNotifier::answering(AgentNotificationPermission::Granted);
+    let (manager, _sink) = manager_with(runner.clone(), None, Some(notifier.clone()));
+    assert!(manager.set_notifications(true).enabled);
+
+    manager.list().await;
+    runner.set(ONE_CLAUDE);
+    manager.refresh().await;
+    assert!(
+        notifier.shown().is_empty(),
+        "a manager starts focused, and while it is focused the island is the notification"
     );
     manager.shutdown();
 }

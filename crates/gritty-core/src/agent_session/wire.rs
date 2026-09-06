@@ -15,6 +15,7 @@ use gritty_workspace::WorkspacePath;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::protocol::error::CoreError;
 use crate::protocol::time::Timestamp;
 
 /// Which agent CLI produced a session. Additive: an unknown value from a newer
@@ -23,6 +24,28 @@ use crate::protocol::time::Timestamp;
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AgentProvider {
     ClaudeCode,
+}
+
+impl AgentProvider {
+    pub const ALL: &'static [Self] = &[Self::ClaudeCode];
+
+    /// The stored and transmitted spelling, which is the serde one. A
+    /// workstream link (T223) keeps this in a column of its own, so the two
+    /// have to agree — hence one function rather than a round trip through
+    /// serde at every call site.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "CLAUDE_CODE",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Result<Self, CoreError> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|provider| provider.as_str() == raw)
+            .ok_or_else(|| CoreError::internal(format!("unknown agent provider {raw:?}")))
+    }
 }
 
 /// Which sources saw the session. Surfaced rather than hidden so the UI can be

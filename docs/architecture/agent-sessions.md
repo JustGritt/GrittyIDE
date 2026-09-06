@@ -393,17 +393,121 @@ and `agents.integrationUninstall` commands carry the command line and the events
 it lands on — never the configuration's contents, which would put whatever else
 lives in that file into an event payload for no gain.
 
-## Specified but not built (T222, T223, T224)
+## Attention (T223)
+
+Two things, both about not having to look at the island to find out that
+something needs you.
+
+### The notification
+
+```
+publish(roster)                   ← the one place a roster change is observed
+      │
+      ▼
+AttentionTracker::advance(roster, now, enabled, focused)  ← pure: no clock, no I/O
+      │  the sessions that just *entered* BLOCKED or WAITING
+      ▼
+AttentionNotifier (composition root)  →  tauri-plugin-notification
+```
+
+The policy is `agent_session::attention` and it is pure, because every rule in
+it is a rule about **not** notifying:
+
+- **Edge-triggered.** A session still blocked on the next tick produces nothing.
+  The roster is polled, so a level-triggered notification would fire every six
+  seconds for a session that is simply still waiting (rule 8).
+- **The very first roster of a process notifies about nothing.** Those sessions'
+  state did not change; Gritty's knowledge did, and a launch that fires three
+  notifications for work that has been sitting there an hour is noise. A session
+  that appears *after* that is a real arrival and does notify.
+- **Silent while the window has focus** — the island is already saying it — and
+  focus that was never reported counts as focused. A missed notification is
+  better than one over the user's face.
+- **Throttled** to one per session per five minutes and **capped** at three per
+  minute across every session, so ten agents finishing at once is one thing to
+  look at rather than ten.
+- **Off by default, every run.** Turning it on is the only thing in Gritty that
+  can produce a notification permission prompt; nothing about starting the
+  application arms it. A refusal is reported as a value, leaves the setting off,
+  and nothing retries.
+
+The body names the session's task and its working directory — both untrusted
+transcript text, so both are collapsed, stripped of control characters and
+bounded in the core before they leave (rule 13), and neither is a path the
+notification can open.
+
+It is raised from **Rust**, from the same place that already observes the roster
+diff, so the renderer neither decides nor sends one. The plugin is registered in
+the composition root and `capabilities/default.json` grants its `notify`,
+`requestPermission` and `isPermissionGranted` commands to nobody: the WebView
+gains no new permission from this.
+
+**What the desktop plugin does not give us**, recorded rather than implied away
+(rule 12). Its `request_permission` and `permission_state` both return `Granted`
+unconditionally on desktop — the real prompt is the operating system's, raised
+the first time a notification is shown — so on macOS Gritty cannot report a
+refusal, and the setting reports what the plugin says rather than inventing an
+answer. And the desktop implementation drops the notification handle, so there
+is **no click callback**: clicking a notification does not focus the window or
+open the island, and nothing in the code pretends it does.
+
+### The workstream link
+
+The roster answers *what is running*; the workstream model (T200) answers *what
+the work is*. The link is the join, and it is where observability starts paying
+into the domain instead of sitting beside it.
+
+It is a **table**, `workstream_agent_link (workstream_id, provider, session_id,
+linked_at)`, keyed by the triple. Three reasons, in order of weight:
+
+1. Hard rule 6. A `provider` on `Workstream` is precisely the provider-specific
+   field the rule names, and `providerSessionId` is the same thing wearing a
+   neutral name.
+2. Lifetimes disagree. A workstream is durable; a discovered session is in
+   memory, rediscovered each launch, with an id belonging to a process that may
+   be long dead. Putting the ephemeral inside the durable would make every
+   workstream read carry a claim that is usually stale.
+3. Cardinality. One workstream legitimately accumulates several sessions over
+   its life — resumed, restarted, a second agent on the same goal — and a single
+   field would silently mean *the most recent one*.
+
+`workstreams.linkAgent`, `workstreams.unlinkAgent` and `workstreams.agentLinks`
+follow T200's rules exactly: a blocking worker, the database read back rather
+than a cache trusted, the workspace open, and `Io` without a database. They
+**return the fresh set** and emit no event (T047's precedent): the island and
+the queue share one controller, so the caller of the mutation is the only
+consumer, and an event nothing subscribes to is a contract maintained for
+nobody.
+
+Four things the link deliberately allows or refuses:
+
+- **Linking a session that is not in the roster is allowed.** The roster is a
+  snapshot of now; a link records a fact about the past, and refusing would make
+  a link impossible for a session that ended two seconds ago.
+- **A link whose session is gone reads as "linked, not running"** — never an
+  error, never an invented row, and never "ended", which would be a claim about
+  a process Gritty cannot see. The core stores the link and publishes the
+  roster; it never joins them, because the answer changes between one read and
+  the next. The join is the renderer's
+  (`features/workstreams/agent-links.ts`).
+- **Nothing links automatically.** A heuristic that attached a session to a
+  workstream because their directories looked alike would write a false claim
+  into durable state. The user links, explicitly, in the island.
+- **A linked `BLOCKED` session does not move its workstream to `BLOCKED`.** That
+  coupling belongs to runs Gritty owns (T300/T330), where the agent is a
+  participant in the domain rather than something observed next to it. Raising a
+  *decision* from an observation is the same mistake.
+
+Deleting a workstream cascades its links; removing a link never touches the
+session, which Gritty does not own in the first place.
+
+## Specified but not built (T222, T224)
 
 Everything above this line is implemented. Everything below is written down and
 not yet built; nothing here may be described as behaviour Gritty has.
 
-**The rest.** T222 adds Codex. T223 notifies on entering `BLOCKED`/`WAITING`
-and links a session to a workstream — through a separate table, never a field
-on `Workstream`, because the domain model takes no provider-specific fields
-(rule 6) and a durable row must not carry an ephemeral session id. T224 turns
-the pid and tty into a "reveal the terminal" action behind a new platform
-crate.
+**The rest.** T222 adds Codex. T224 turns the pid and tty into a "reveal the
+terminal" action behind a new platform crate.
 
 **Still deliberately absent afterwards:** any control (prompting, answering,
 approving, keystroke injection), any screen-scraping of another terminal, a
