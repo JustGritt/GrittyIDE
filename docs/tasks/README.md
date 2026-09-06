@@ -86,8 +86,8 @@ the workflow below are hand-maintained.
 | T233 | Agents in the left sidebar, or not (the 12a/12b divergence) | 3 | – | unspec |
 | T300-C | The run contract, alone (Gate D) | 4 | T200, T210 | review |
 | T300-CMD | runs.* adapters, and the minimal surface | 4 | T300-C | review |
-| T300-CORE | The run manager: supervision, cancellation, bounded events | 4 | T300-C | doing |
-| T300-FAKE | gritty-agent-fake: a scripted, deterministic adapter | 4 | T300-C | doing |
+| T300-CORE | The run manager: supervision, cancellation, bounded events | 4 | T300-C | review |
+| T300-FAKE | gritty-agent-fake: a scripted, deterministic adapter | 4 | T300-C | review |
 | T400-R | Worktree create and remove | 5 | T100 | unspec |
 <!-- board:table end -->
 
