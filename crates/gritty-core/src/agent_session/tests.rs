@@ -62,6 +62,7 @@ fn hook(phase: HookPhase, age_ms: i64, tool: Option<&str>) -> HookState {
         event: "PermissionRequest".to_owned(),
         tool: tool.map(str::to_owned),
         cwd: None,
+        ask: None,
     }
 }
 
@@ -582,6 +583,7 @@ impl TempTranscripts {
             event: "PermissionRequest".to_owned(),
             tool: tool.map(str::to_owned),
             cwd: Some("/Users/a/p".to_owned()),
+            ask: None,
         };
         assert_eq!(
             gritty_agents::hook::write(&self.hook_dir(), &state),

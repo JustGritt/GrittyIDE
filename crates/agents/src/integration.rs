@@ -218,10 +218,37 @@ pub fn hook_command(hook_binary: &Path, state_dir: &Path, provider: Provider) ->
     let binary = quotable(hook_binary)?;
     let state_dir = quotable(state_dir)?;
     Some(format!(
-        "'{binary}' --provider {} --state-dir '{state_dir}'",
+        "'{binary}' --provider {} --state-dir '{state_dir}' --ask-timeout {ASK_WAIT_SECONDS}",
         provider.as_str().to_ascii_lowercase()
     ))
 }
+
+/// How long the hook may be held waiting for the user to answer (ADR-020).
+///
+/// Long enough to be worth having — a person who is looking at something else
+/// takes minutes, not seconds — and finite, because the ceiling on how long an
+/// agent can be held has to be a number somebody chose rather than an accident.
+pub const ASK_WAIT_SECONDS: u64 = 300;
+
+/// The `timeout` written onto the `PermissionRequest` entry itself.
+///
+/// **Strictly greater than [`ASK_WAIT_SECONDS`], and that ordering is the whole
+/// point.** Claude Code discards a hook's output once the entry's timeout
+/// passes (measured, ADR-020), so a wait that ran to its own deadline must
+/// still have room to be heard. Written into the user's own configuration
+/// rather than hidden in the binary, because it is the real bound on how long
+/// their agent can sit waiting and they are entitled to see it.
+pub const ASK_ENTRY_TIMEOUT_SECONDS: u64 = ASK_WAIT_SECONDS + 30;
+
+// Asserted at compile time rather than in a test, the way the migration table
+// asserts its own contiguity: if these two ever cross, every slowly-answered
+// prompt would silently fall back to the terminal, and no test would have to
+// be running for that to be true.
+const _: () = assert!(ASK_ENTRY_TIMEOUT_SECONDS > ASK_WAIT_SECONDS);
+
+/// The one event whose entry carries a timeout, because it is the one event
+/// that waits.
+pub const ASKING_EVENT: &str = "PermissionRequest";
 
 /// A path that can be put inside single quotes without escaping.
 fn quotable(path: &Path) -> Option<&str> {
@@ -655,10 +682,19 @@ fn append_entry(root: &mut Vec<(String, Json)>, event: &str, command: &str) {
     let Some(entries) = entries.as_array_mut() else {
         return;
     };
-    let hook = Json::Object(vec![
+    let mut hook = vec![
         ("type".to_owned(), Json::String("command".to_owned())),
         ("command".to_owned(), Json::String(command.to_owned())),
-    ]);
+    ];
+    // Only the asking event waits, so only the asking event needs room to. A
+    // timeout on the others would be a number with nothing behind it.
+    if event == ASKING_EVENT {
+        hook.push((
+            "timeout".to_owned(),
+            Json::Number(ASK_ENTRY_TIMEOUT_SECONDS.into()),
+        ));
+    }
+    let hook = Json::Object(hook);
     let group = Json::Object(vec![
         ("matcher".to_owned(), Json::String("*".to_owned())),
         ("hooks".to_owned(), Json::Array(vec![hook])),
@@ -1316,6 +1352,46 @@ mod tests {
     }
 
     #[test]
+    fn only_the_asking_event_carries_a_timeout_and_it_outlasts_the_wait() {
+        // Claude Code discards a hook's output once the entry's own timeout
+        // passes (measured, ADR-020). That the entry outlasts the wait is
+        // asserted at compile time beside the two constants; this is about
+        // which events carry it.
+        let home = TempHome::new("entry-timeout");
+        home.write_config("{}");
+        install(
+            &home.target(),
+            &home.hook_binary(),
+            &home.state_dir(),
+            true,
+            1_700,
+        )
+        .expect("install");
+
+        let raw = home.read_config();
+        let written: serde_json::Value = serde_json::from_str(&raw).expect("valid json");
+        let hooks = &written["hooks"];
+        for event in CLAUDE_CODE_EVENTS {
+            let ours = hooks[event]
+                .as_array()
+                .expect("an array")
+                .iter()
+                .find(|group| {
+                    group["hooks"][0]["command"]
+                        .as_str()
+                        .is_some_and(|command| command.contains("gritty-agent-hook"))
+                })
+                .expect("our group");
+            let timeout = ours["hooks"][0].get("timeout").and_then(|t| t.as_u64());
+            if *event == ASKING_EVENT {
+                assert_eq!(timeout, Some(ASK_ENTRY_TIMEOUT_SECONDS), "{event}");
+            } else {
+                assert_eq!(timeout, None, "{event} does not wait, so it needs no room");
+            }
+        }
+    }
+
+    #[test]
     fn the_command_carries_the_state_directory_so_the_hook_guesses_at_nothing() {
         let command = hook_command(
             Path::new("/Applications/Gritty.app/Contents/MacOS/gritty-agent-hook"),
@@ -1326,7 +1402,8 @@ mod tests {
         assert_eq!(
             command,
             "'/Applications/Gritty.app/Contents/MacOS/gritty-agent-hook' --provider claude_code \
-             --state-dir '/Users/a/Library/Application Support/gritty/agents/state'"
+             --state-dir '/Users/a/Library/Application Support/gritty/agents/state' \
+             --ask-timeout 300"
         );
         assert_eq!(
             gritty_binary_in(&command),
