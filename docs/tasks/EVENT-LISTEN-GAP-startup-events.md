@@ -1,7 +1,7 @@
 # Task EVENT-LISTEN-GAP — An event emitted before the WebView is listening reaches nobody
 
 - **Phase:** 1
-- **Status:** todo
+- **Status:** review
 - **Depends on:** T010 (Gate A: the event envelope, `seq`, the transport
   contract)
 
