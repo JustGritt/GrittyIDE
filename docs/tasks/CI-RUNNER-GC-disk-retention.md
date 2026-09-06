@@ -1,7 +1,7 @@
 # Task CI-RUNNER-GC — The only CI machine has 4 GB left and nothing ever frees it
 
 - **Phase:** Ops (cross-cutting; not on the phase/gate roadmap)
-- **Status:** doing
+- **Status:** review
 - **Depends on:** – (no upstream contract gate; motivated by CI-COST and
   sharpened by CI-LINUX-DARK — see Motivation)
 
