@@ -63,7 +63,7 @@ everything else, instead of each small one resolving against it.
 
 | PR | What | Order | Why / what the loser fixes |
 |---|---|---|---|
-| – | nothing queued | | |
+| [#24](https://github.com/JustGritt/GrittyIDE/pull/24) | the ticket board | 1 | Claims no version constant and no migration number. Its seam is `docs/tasks/README.md`, whose table it makes **generated**: anything else editing that table conflicts, and the resolution is to take this branch's file and re-run `agent-board.py render --index` rather than hand-merge rows. Also rewrites `AGENTS.md` step 1/6 and this file. |
 
 **#22, #23 and #21 landed in that order on 2026-09-06**, which is the order this
 table gave them, and the one collision it predicted is the one that happened:
