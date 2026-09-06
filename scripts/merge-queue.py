@@ -29,7 +29,6 @@ import json
 import re
 import shutil
 import subprocess
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -109,19 +108,20 @@ class Pull:
         return hit
 
 
-def run(cmd: list[str], *, check: bool = False) -> str | None:
-    """Stdout, or `None` when the command is unavailable or refuses."""
+def run(cmd: list[str]) -> str | None:
+    """Stdout, or `None` when the command is unavailable or refuses.
+
+    Stderr is swallowed on purpose: every caller has a better message for its
+    own failure than the tool's, and `git show` failing on a ref that does not
+    carry a file is an ordinary answer here, not an error.
+    """
     try:
         done = subprocess.run(
             cmd, cwd=REPO, capture_output=True, text=True, timeout=60, check=False
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    if done.returncode != 0:
-        if check:
-            sys.stderr.write(done.stderr.strip() + "\n")
-        return None
-    return done.stdout
+    return done.stdout if done.returncode == 0 else None
 
 
 def value_at(ref: str, path: str, pattern: str) -> str | None:
@@ -142,11 +142,15 @@ def load() -> list[Pull] | None:
         [
             "gh", "pr", "list", "--state", "open", "--limit", "50",
             "--json", "number,title,headRefName,baseRefName,isDraft,mergeable,mergeStateStatus",
-        ],
-        check=True,
+        ]
     )
     if listing is None:
-        print("gh could not list the pull requests (not authenticated, or offline).")
+        # Three ways to get here and they are not the same problem, so name all
+        # three rather than guessing at one.
+        print(
+            "gh could not list the pull requests: not authenticated (`gh auth status`), "
+            "offline, or run from outside the repository."
+        )
         return None
 
     pulls = [

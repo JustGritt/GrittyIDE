@@ -58,10 +58,18 @@ the unlucky one.
 
 Hand-maintained: the order and the reason. Run the script for live status.
 
-| PR | What | Must land | Why / what the loser fixes |
+Smallest first, biggest last: the large PR then resolves **once** against
+everything else, instead of each small one resolving against it.
+
+| PR | What | Order | Why / what the loser fixes |
 |---|---|---|---|
-| [#22](https://github.com/JustGritt/GrittyIDE/pull/22) | roadmap: the agent rail landed | first | One paragraph of `docs/plans/roadmap.md`. #21 added a section *below* the one this edits, so it should still merge cleanly either way — but this is the cheap one to land, so land it. |
-| [#21](https://github.com/JustGritt/GrittyIDE/pull/21) | T325 workspace ownership | after #22 | Already merged `main` once, for #20. Takes `PROTOCOL_VERSION` **2.10.0** (leaving 2.8/2.9 to the timeline series) and `SCHEMA_VERSION` **3** with migration `0003_ownership.sql`. If #22 lands first, `git merge main` again and re-run `pnpm check`. |
+| [#22](https://github.com/JustGritt/GrittyIDE/pull/22) | roadmap: the agent rail landed | 1 | One paragraph of `docs/plans/roadmap.md`. |
+| [#23](https://github.com/JustGritt/GrittyIDE/pull/23) | this file, and the script | 2 | Adds one sentence to `docs/tasks/README.md` step 3, in a different region from #21's table changes. |
+| [#21](https://github.com/JustGritt/GrittyIDE/pull/21) | T325 workspace ownership | 3 | 64 files, and already merged `main` once for #20. Touches both seams above, so it absorbs them together: `git merge main`, then re-run `pnpm check` — the generated-types check is the last step in the gate and the first thing a merge invalidates. Holds `PROTOCOL_VERSION` **2.10.0** (2.8/2.9 went to the timeline series) and `SCHEMA_VERSION` **3**. |
+
+The script found the #23/#21 row itself, from the file lists, before anyone
+wrote it down here. That is the intended division of labour: it notices, this
+file decides.
 
 ### Claimed, so nobody else takes them
 
