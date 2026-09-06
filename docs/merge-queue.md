@@ -63,12 +63,14 @@ everything else, instead of each small one resolving against it.
 
 | PR | What | Order | Why / what the loser fixes |
 |---|---|---|---|
-| [#24](https://github.com/JustGritt/GrittyIDE/pull/24) | the ticket board | 1 | Claims no version constant and no migration number. Its seam is `docs/tasks/README.md`, whose table it makes **generated**: anything else editing that table conflicts, and the resolution is to take this branch's file and re-run `agent-board.py render --index` rather than hand-merge rows. Also rewrites `AGENTS.md` step 1/6 and this file. |
+| `docs-spec-wave-1` | six task specs (T070, T080, T100, T110, T300, T326) | 1 | Claims no version constant and no migration number. Documents only. Its seams are `docs/tasks/README.md` (generated — take this branch's file and re-run `agent-board.py render --index`, never hand-merge rows), `docs/plans/roadmap.md`, `docs/plans/execution-board.md` and this file's queue table. Smallest of the three and first for that reason. |
+| `docs-review-findings` | verification of the twelve tasks at `review` | 2 | One new file, `docs/testing/review-findings.md`. No seam with anything. Ordered second only because it is trivially rebased. |
+| `t223-agent-attention` | T223 attention + workstream link | 3 | **Spends `PROTOCOL_VERSION` 2.11.0, `SCHEMA_VERSION` 4 and migration `0004_agent_links.sql`.** The only code branch of the three, and last so it resolves once. It shares `docs/tasks/README.md` and this file with row 1: after row 1 lands, rebase, re-run `cargo test -p gritty-core`, commit the regenerated types, and re-run `render --index` rather than hand-merging the table. |
 
-**#22, #23 and #21 landed in that order on 2026-09-06**, which is the order this
-table gave them, and the one collision it predicted is the one that happened:
-#23's sentence in `docs/tasks/README.md` step 3 met a later branch editing the
-same step. Their rows are deleted per the rule below; what they did is in git.
+**#22, #23, #21 and #24 landed on 2026-09-06** in the order this table gave
+them, and the one collision it predicted is the one that happened: #23's
+sentence in `docs/tasks/README.md` step 3 met a later branch editing the same
+step. Their rows are deleted per the rule below; what they did is in git.
 
 The script found the #23/#21 row itself, from the file lists, before anyone
 wrote it down here. That is the intended division of labour: it notices, this
@@ -81,7 +83,10 @@ file decides.
 | migration `0004` | `0004_agent_links.sql` | T223, specified only |
 
 `PROTOCOL_VERSION` **2.10.0**, `SCHEMA_VERSION` **3** and migration `0003` were
-#21's and are now on `main`; the next free values are 2.11.0, 4 and `0004`.
+#21's and are now on `main`. `t223-agent-attention` is spending 2.11.0, 4 and
+`0004`, so the next free values after it are **2.12.0**, **5** and **`0005`**.
+The per-lane minors in `execution-board.md` are a planning hint and are already
+wrong: 2.11 was reserved there for T070 and T223 took it.
 
 When a PR merges, delete its rows. This file describes what is *in flight*; git
 history describes what happened.

@@ -33,27 +33,27 @@ the workflow below are hand-maintained.
 | [T098](T098-terminal-colours-and-rooting.md) | Terminal session colours, and starting where you work | 0/2 | T047, T090, T095, T096 | review |
 | Phase 0 tests | `docs/plans/phase-0-spike.md` sections B–D | 0 | T060, T090 | doing |
 | ADR-001 | Confirm or reject Tauri | 0 | Phase 0 tests | todo |
-| T070 | File watcher | 1A/2 | T020, ADR-001 | unspec |
-| T080 | Search | 2 | T020, ADR-001 | unspec |
-| T100 | Git baseline | 2 | ADR-001 | unspec |
-| T110 | Diagnostics | 2 | ADR-001 | unspec |
+| [T070](T070-file-watcher.md) | File watcher | 1A/2 | T020, T030, ADR-001 | todo |
+| [T080](T080-search.md) | Search | 2 | T020, T070, ADR-001 | todo |
+| [T100](T100-git-baseline.md) | Git baseline | 2 | T020, ADR-001 | todo |
+| [T110](T110-diagnostics.md) | Diagnostics | 2 | T060, T090, T220, T325, ADR-001 | todo |
 | [T200](T200-workstream-model.md) | Workstream model + decisions (Gate C) | 3 | T010, T020, T060 | review |
 | [T210](T210-workstream-ui.md) | Workstream UI: the island and the attention queue | 3 | T200 | review |
 | [T220](T220-agent-session-discovery.md) | Agent session discovery: what is running, and on what | 3 | T010, T020, T210 | review |
 | [T221](T221-agent-hook-bridge.md) | Agent hook bridge: earning `BLOCKED` | 3 | T220, T230, ADR-018 | review |
 | [T222](T222-agent-providers.md) | More providers: Codex first, then what can be verified | 3 | T220, T221 | todo |
-| [T223](T223-agent-attention.md) | Attention: notify when an agent needs you, and link it to the work | 3 | T200, T210, T220, T221 | todo |
+| [T223](T223-agent-attention.md) | Attention: notify when an agent needs you, and link it to the work | 3 | T200, T210, T220, T221 | doing |
 | [T224](T224-reveal-terminal.md) | Reveal the terminal a session is running in | 3 | T220 | todo |
 | [T230](T230-agent-timeline.md) | Agent timeline: what a session is actually doing | 3 | T020, T220 | review |
 | [T231](T231-agent-rail.md) | The agent rail: a dedicated region for running agents | 3 | T046, T060, T220, T230 | review |
 | [T232](T232-timeline-view.md) | The timeline view, and the files an agent touched | 3 | T030, T230, T231 | review |
-| T300 | Agent event protocol + deterministic fake agent (Gate D) | 4 | T200, T210 | unspec |
+| [T300](T300-agent-protocol-fake.md) | Agent event protocol + deterministic fake agent (Gate D) | 4 | T200, T210 | todo |
 | T305 | Agent capability model | 4 | T300 | unspec |
 | T310 | First real adapter | 4 | T300, T305 | unspec |
 | T315 | Live agent activity | 4 | T310 | superseded by T220/T230/T231/T232 |
 | T320 | Context manifest | 4 | T300 | unspec |
 | [T325](T325-workspace-ownership.md) | Workspace ownership registry | 4 | T200, T210, ADR-019 | review |
-| T326 | Observed ownership violations | 4 | T325, T223 | unspec |
+| [T326](T326-ownership-violations.md) | Observed ownership violations | 4 | T223, T230, T325 | todo |
 | T330 | Write interception (enforced ownership) | 4 | T325, ADR-018 amendment | unspec |
 | T335 | Decision interruption | 4 | T300, T200 | unspec |
 | T400 | Worktree isolation | 5 | T100, T325 | unspec |

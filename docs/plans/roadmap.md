@@ -40,6 +40,43 @@ ADR-001 confirm or reject Tauri
 T070 (watcher), T080 (search) and the rest of Phases 1–2 start only after the
 Phase 0 runtime decision is recorded. Task specs live in `docs/tasks/`.
 
+## Phases 1–2 and Gate D, specified ahead of implementation
+
+Six task files were written in one batch on 2026-09-06 — T070, T080, T100,
+T110, T300 and T326 — taking the board from fourteen unspecified tasks to
+eight. None of them is started. Writing a spec is not starting the task, and
+the sentence above still holds: T070, T080, T100 and T110 wait on the Phase 0
+runtime decision, and their `Depends on` rows say `ADR-001` for that reason.
+T300 and T326 sit in Phase 4 behind Gate C rather than behind the runtime
+decision.
+
+Three of the six raise a question the spec deliberately does not answer:
+
+- **T080** recommends the in-process `grep`/`ignore` library family over
+  spawning `ripgrep`: cancellation through the existing operation model
+  instead of a second process-tree kill path, and no bundled binary whose
+  support would be claimed on a platform nobody has run. It needs an ADR.
+- **T100** recommends `gix` over shelling out to `git` or wrapping `git2`.
+  Repository content is untrusted input (rule 13), and parsing another
+  program's porcelain while inheriting the user's Git configuration as
+  ambient authority is the worse of the three. It needs an ADR.
+- **T300** proposes no persistence for an owned `AgentRun`, which sits
+  awkwardly beside ADR-005's "state and results are persisted" and the
+  recoverability priority. A fake agent has nothing to lose across a restart
+  and a real one does, so the question is due before T310, not before T300.
+
+T300 also settles a naming collision the coordination plan carries into the
+code: §§5–7 call things `AgentSession` and `AgentActivity`, and both names
+already mean something else in `agent_session/wire.rs`. Everything an owned
+run brings is `AgentRun`-prefixed, so Lane A and Lane O cannot come to share a
+type by accident.
+
+None of the six claims a `PROTOCOL_VERSION`. The per-lane reservations in
+`execution-board.md` are a planning hint that has already been overtaken once
+— 2.11 was reserved for T070 and spent by T223 — so each spec takes the next
+free value from `docs/merge-queue.md`, which is the record, immediately before
+its PR opens.
+
 ## Agent observability (T221 and T230–T232 built; T222–T224 specified only)
 
 T220 landed read-only discovery of the agent sessions already running on the
