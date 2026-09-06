@@ -1,7 +1,7 @@
 # Task T200 — Workstream model (Gate C)
 
 - **Phase:** 3
-- **Status:** review
+- **Status:** done
 - **Depends on:** T010 (protocol), T020 (workspace), T060 (persistence)
 
 ## Objective

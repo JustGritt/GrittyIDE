@@ -1,7 +1,7 @@
 # Task T051 — Launcher resume rail
 
 - **Phase:** 0/1B
-- **Status:** review
+- **Status:** done
 - **Depends on:** T049 (startup screen), T060 (session persistence)
 
 ## Objective

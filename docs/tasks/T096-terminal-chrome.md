@@ -1,7 +1,7 @@
 # Task T096 — Terminal chrome from design artboard 8a
 
 - **Phase:** 0 / 2
-- **Status:** review
+- **Status:** done
 - **Depends on:** T047, T048, T090, T095
 
 ## Objective

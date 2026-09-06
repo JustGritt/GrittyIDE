@@ -1,7 +1,7 @@
 # Task T210 — Workstream UI: the island and the attention queue
 
 - **Phase:** 3
-- **Status:** review
+- **Status:** tofix
 - **Depends on:** T200 (workstream model), T048 (shell UI), T049 (startup screen)
 
 ## Objective

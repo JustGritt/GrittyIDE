@@ -1,7 +1,7 @@
 # Task T230 — Agent timeline: what a session is actually doing
 
 - **Phase:** 3
-- **Status:** review
+- **Status:** done
 - **Depends on:** T020 (workspace), T220 (agent session discovery)
 
 ## Objective
