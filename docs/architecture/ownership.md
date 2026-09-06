@@ -25,12 +25,15 @@ not blocked, and the UI says so where the claims are. §20 of the coordination
 plan is explicit that filesystem observation must not be presented as
 equivalent to pre-write interception, and this document holds that line.
 
-Two things would change it, and each is a separate task:
+One of the two things that would change it has happened, and it did not change
+this:
 
-- **T326** would notice a violation *after* it happened, by cross-checking the
-  files an agent touched (T230's timeline already reports them) against the
-  registry. It needs to know which workstream a session belongs to, which is
-  T223's link.
+- **T326 notices a violation *after* it happened.** Every tick of the agent
+  rail already reports the files a session touched (T230); those are
+  cross-checked against the registry, attributed through T223's
+  session→workstream link, and a write that landed inside another workstream's
+  lease is recorded as a conflict in a fourth state, `OBSERVED`. It is a
+  record, not a refusal: the file was written, and nothing undoes it.
 - **T330** would stop the write. Claude Code's `PreToolUse` hook accepts a
   `permissionDecision: "deny"` reply — `scripts/agent-lease.py` uses exactly
   that — but `gritty-agent-hook` deliberately cannot answer one: ADR-018 §5,
@@ -72,8 +75,18 @@ id that exists only while a process does (the same argument
 | `stale` | The holder is `DONE` or `ABANDONED` — derived, reported, never repaired |
 
 A conflict records a refusal: who asked, who holds, which lease is in the way,
-what was asked for, and `WAITING | RESOLVED | CANCELLED | OVERRIDDEN`. It is
-persisted, so a blocker is still in the attention queue after a restart.
+what was asked for, and `WAITING | RESOLVED | CANCELLED | OVERRIDDEN |
+OBSERVED`. It is persisted, so a blocker is still in the attention queue after
+a restart.
+
+`OBSERVED` is the one that is not a refusal (T326). It records a write that
+already happened on another workstream's ground: `requestedBy` is whoever
+wrote, and `target` is the single file, not the pattern the holder claimed. It
+shares the row rather than getting a table because the queue, the island and
+the panel all draw one thing — *someone is in someone else's way* — and a
+second shape for it would be a second thing to keep in step. Two verbs still
+resolve it: `CANCEL` means "acknowledged", and `OVERRIDE` is refused, because
+there is no pending request to unblock.
 
 ## Targets, and one matcher
 
@@ -161,7 +174,12 @@ that vanished on its own would be the worse failure.
 | `ownership.acquire` | `GRANTED` **or** `CONFLICTED`, never both and never silently |
 | `ownership.release` | releases; conflicts waiting on that lease become `RESOLVED` |
 | `ownership.check` | every lease overlapping a target — *who owns this file* |
-| `ownership.resolve` | `CANCEL` (the requester withdraws) or `OVERRIDE` (the holder's lease is released, on the record) |
+| `ownership.resolve` | `CANCEL` (the requester withdraws, or acknowledges a violation) or `OVERRIDE` (the holder's lease is released, on the record; `InvalidInput` on an `OBSERVED` row) |
+
+There is no command for T326's detection, and deliberately: it is not something
+a client asks for. It rides the per-tick delta the agent rail already produces,
+so the registry never subscribes to `agents.timeline` — that is a read for a
+human, not a feed for a checker — and a tick that finds nothing emits nothing.
 
 One event, `OwnershipChanged`, carrying the whole map. The map is small and
 bounded (200 leases, 200 conflicts), so a consumer that missed an event
@@ -227,8 +245,8 @@ conflict between two pieces of work is meaningless once one of them is gone.
 
 ## Deliberately not here
 
-- **Enforcement** (T330), and **violation detection** (T326). See the top of
-  this document.
+- **Enforcement** (T330). See the top of this document. Detection landed with
+  T326 and is *not* enforcement: it runs after the write.
 - **Ownership-aware scheduling** (T405): comparing a workstream's intended
   scope against the registry *before* an agent starts, and recommending a wait
   or a worktree.

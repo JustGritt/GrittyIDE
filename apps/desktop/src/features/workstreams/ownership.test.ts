@@ -1,8 +1,20 @@
-import type { LeaseId, OwnershipLease, OwnershipMap, WorkstreamId } from '@gritty/protocol';
+import type {
+  LeaseId,
+  OwnershipConflict,
+  OwnershipLease,
+  OwnershipMap,
+  WorkstreamId,
+} from '@gritty/protocol';
 import { describe, expect, it } from 'vitest';
 import {
   buildTarget,
+  conflictCancelLabel,
+  conflictHeadline,
+  conflictHint,
+  conflictResolutions,
+  conflictSummary,
   heldLeases,
+  isViolation,
   leaseStateLabel,
   leasesOf,
   leaseTone,
@@ -128,5 +140,81 @@ describe('ownership map', () => {
       },
     ];
     expect(waitingConflicts({ leases: [], conflicts }).map((entry) => entry.id)).toEqual(['c1']);
+  });
+});
+
+describe('an observed violation (T326)', () => {
+  function violation(patch: Partial<OwnershipConflict> = {}): OwnershipConflict {
+    return {
+      id: 'v1' as OwnershipConflict['id'],
+      workspaceId: 'w-1' as OwnershipLease['workspaceId'],
+      requestedBy: 'b' as WorkstreamId,
+      ownedBy: 'a' as WorkstreamId,
+      holdingLeaseId: 'held' as LeaseId,
+      target: { type: 'FILE', path: 'src/auth/session.ts' },
+      createdAt: 4,
+      state: 'OBSERVED',
+      ...patch,
+    };
+  }
+
+  const refusal = violation({
+    id: 'r1' as OwnershipConflict['id'],
+    state: 'WAITING',
+    target: { type: 'DIRECTORY', path: 'src/auth' },
+  });
+
+  it('reaches the queue beside an ordinary refusal', () => {
+    const conflicts = [
+      refusal,
+      violation(),
+      violation({ id: 'done' as OwnershipConflict['id'], state: 'CANCELLED' }),
+    ];
+    expect(waitingConflicts({ leases: [], conflicts }).map((entry) => entry.id)).toEqual([
+      'r1',
+      'v1',
+    ]);
+  });
+
+  it('is told apart from a refusal by state, not by shape', () => {
+    expect(isViolation(violation())).toBe(true);
+    expect(isViolation(refusal)).toBe(false);
+  });
+
+  it('says a write happened where a refusal says a request was made', () => {
+    expect(conflictHeadline(violation(), 'Payments', 'Authentication')).toBe(
+      'Payments wrote src/auth/session.ts while Authentication held it.',
+    );
+    expect(conflictHeadline(refusal, 'Payments', 'Authentication')).toBe(
+      'Payments asked for src/auth/, which Authentication already holds.',
+    );
+    expect(conflictSummary(violation(), 'Authentication')).toBe(
+      'Wrote src/auth/session.ts, owned by Authentication.',
+    );
+    expect(conflictSummary(refusal, 'Authentication')).toBe(
+      'Wants src/auth/, owned by Authentication.',
+    );
+  });
+
+  it('never calls either one locked or blocked', () => {
+    // Gritty observes ownership; it does not enforce it, and the words next to
+    // a claim are where that promise is either kept or quietly broken.
+    const words = [
+      conflictHeadline(violation(), 'Payments', 'Authentication'),
+      conflictHeadline(refusal, 'Payments', 'Authentication'),
+      conflictSummary(violation(), 'Authentication'),
+      conflictHint(violation(), 'Payments'),
+      conflictHint(refusal, 'Payments'),
+    ].join(' ');
+    expect(words).not.toMatch(/locked|blocked/i);
+  });
+
+  it('offers OVERRIDE only where there is something to unblock', () => {
+    // The core answers InvalidInput for an override on a violation, so the
+    // refusal is rendered as an absent button rather than a failed click.
+    expect(conflictResolutions(violation())).toEqual(['CANCEL']);
+    expect(conflictResolutions(refusal)).toEqual(['CANCEL', 'OVERRIDE']);
+    expect(conflictCancelLabel(violation())).toBe('Acknowledge');
+    expect(conflictCancelLabel(refusal)).toBe('Withdraw the request');
   });
 });

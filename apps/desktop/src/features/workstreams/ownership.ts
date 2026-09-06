@@ -68,9 +68,79 @@ export function leasesOf(map: OwnershipMap, workstreamId: WorkstreamId): Ownersh
   return map.leases.filter((lease) => lease.workstreamId === workstreamId);
 }
 
-/** The conflicts that are still blocking someone. What the queue draws. */
+/**
+ * The conflicts the user has still to deal with. What the queue draws.
+ *
+ * Two states, not one (T326). A `WAITING` row is a request that was refused
+ * before the work started; an `OBSERVED` row is a write that already happened
+ * on somebody else's ground. They are the same shape — someone is in someone
+ * else's way — so they share a row, a filter and a queue, and differ only in
+ * what the words say. There is deliberately no fifth `AttentionFilter`: the
+ * user is looking for ownership trouble, not for a taxonomy of it.
+ */
 export function waitingConflicts(map: OwnershipMap): OwnershipConflict[] {
-  return map.conflicts.filter((conflict) => conflict.state === 'WAITING');
+  return map.conflicts.filter(
+    (conflict) => conflict.state === 'WAITING' || conflict.state === 'OBSERVED',
+  );
+}
+
+/** Whether this row is a write that already landed, rather than a refusal. */
+export function isViolation(conflict: OwnershipConflict): boolean {
+  return conflict.state === 'OBSERVED';
+}
+
+/**
+ * The one line a row leads with, in the two tenses that separate them.
+ *
+ * A refusal is about a request: "Payments asked for src/auth/, which
+ * Authentication already holds." A violation is about a write that is already
+ * on disk: "Payments wrote src/auth/session.ts while Authentication held it."
+ * Neither says *locked* or *blocked*, because nothing was: Gritty observes
+ * ownership, it does not enforce it (`docs/architecture/ownership.md` 17-26).
+ */
+export function conflictHeadline(
+  conflict: OwnershipConflict,
+  requester: string,
+  owner: string,
+): string {
+  const target = targetLabel(conflict.target);
+  return isViolation(conflict)
+    ? `${requester} wrote ${target} while ${owner} held it.`
+    : `${requester} asked for ${target}, which ${owner} already holds.`;
+}
+
+/** The same distinction, at row length, under the name in the queue. */
+export function conflictSummary(conflict: OwnershipConflict, owner: string): string {
+  const target = targetLabel(conflict.target);
+  return isViolation(conflict)
+    ? `Wrote ${target}, owned by ${owner}.`
+    : `Wants ${target}, owned by ${owner}.`;
+}
+
+/**
+ * Which of `ownership.resolve`'s two verbs this row accepts.
+ *
+ * `OVERRIDE` releases the holder's lease so a *pending* request can be made
+ * again (ADR-019 §8). A violation has no pending request — the toucher already
+ * wrote — so the core answers `InvalidInput`, and the button is not offered
+ * rather than offered and refused.
+ */
+export function conflictResolutions(
+  conflict: OwnershipConflict,
+): readonly ('CANCEL' | 'OVERRIDE')[] {
+  return isViolation(conflict) ? ['CANCEL'] : ['CANCEL', 'OVERRIDE'];
+}
+
+/** What `CANCEL` means here: withdrawing a request, or acknowledging a write. */
+export function conflictCancelLabel(conflict: OwnershipConflict): string {
+  return isViolation(conflict) ? 'Acknowledge' : 'Withdraw the request';
+}
+
+/** Why the row is here at all, under the actions. */
+export function conflictHint(conflict: OwnershipConflict, requester: string): string {
+  return isViolation(conflict)
+    ? `Gritty noticed this after the write. Nothing was stopped, and nothing is undone — release the claim, or acknowledge it and ${requester} keeps going.`
+    : `Releasing it does not hand the ground over: ${requester} has to claim it again.`;
 }
 
 /** The dot's colour role, from the tokens rather than a palette of its own. */

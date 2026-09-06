@@ -47,6 +47,8 @@ use std::time::{Duration, Instant};
 
 use gritty_agents::hook::{HookPhase, HookScanOptions, HookState};
 use gritty_agents::integration::{self, HookTarget, IntegrationError};
+use gritty_workspace::WorkspacePath;
+
 use gritty_agents::{
     CommandRunner, DiscoveredSession, Discovery, ScanOptions, SystemCommandRunner,
 };
@@ -164,6 +166,15 @@ pub struct AgentDiscoveryConfig {
     /// `None` alongside `hooks: None`: a build that cannot read an ask has
     /// nothing to answer.
     pub permissions: Option<PermissionPaths>,
+    /// The registry the files an agent touched are cross-checked against
+    /// (T326), or `None` for a build with no session database — and then no
+    /// violation is found rather than a half-checked one being reported.
+    ///
+    /// The rail hands over what a tick already produced; the ownership pass
+    /// decides everything else. This direction is deliberate: the registry does
+    /// not subscribe to `agents.timeline`, which is a read for a human and not
+    /// a feed for a checker (T326 §1).
+    pub ownership: Option<Arc<crate::ownership::OwnershipManager>>,
 }
 
 /// The two paths ADR-020 adds, beside the state directory.
@@ -207,6 +218,7 @@ impl AgentDiscoveryConfig {
             hook_binary: None,
             notifier: None,
             permissions: None,
+            ownership: None,
         }
     }
 
@@ -237,6 +249,17 @@ impl AgentDiscoveryConfig {
     /// core still tracks the transitions and simply raises nothing.
     pub fn with_notifier(mut self, notifier: Option<Arc<dyn AttentionNotifier>>) -> Self {
         self.notifier = notifier;
+        self
+    }
+
+    /// Which registry a touched file is checked against (T326). Left unset, the
+    /// rail behaves exactly as it did before: the check is the only thing that
+    /// does not happen.
+    pub fn with_ownership(
+        mut self,
+        ownership: Option<Arc<crate::ownership::OwnershipManager>>,
+    ) -> Self {
+        self.ownership = ownership;
         self
     }
 }
@@ -658,6 +681,17 @@ impl AgentSessionManager {
         };
         self.record_tick(reads, batches.len(), started.elapsed());
 
+        // What this tick says the agents wrote, taken before the batches are
+        // consumed by the emit below (T326). Collected here and checked after,
+        // so the rail is never waiting on a database.
+        let touched: Vec<(String, Vec<WorkspacePath>)> = batches
+            .iter()
+            .filter_map(|batch| {
+                let paths = touched_paths(&batch.entries);
+                (!paths.is_empty()).then(|| (batch.session_id.clone(), paths))
+            })
+            .collect();
+
         // Emitted outside the lock: a sink may re-enter this manager.
         for batch in batches {
             if batch.dropped > 0 || batch.restarted {
@@ -678,6 +712,44 @@ impl AgentSessionManager {
                 },
                 CoreEvent::AgentTimelineAppended(batch),
             );
+        }
+
+        self.observe_ownership(touched).await;
+    }
+
+    /// Cross-check what this tick reported against the ownership registry
+    /// (T326).
+    ///
+    /// The batch carries only a session id; the roster is what knows the
+    /// provider, and T223's link is keyed on the pair precisely so that two
+    /// providers reusing one session id cannot be confused for each other.
+    /// The **cached** roster, never a scan: a check must not cost a `ps`.
+    ///
+    /// Everything here is best-effort by design. No registry, no roster row, no
+    /// link, no open workspace: no finding, and no error either — a violation
+    /// nobody can attribute is not one. A failure costs this tick, not the loop.
+    async fn observe_ownership(&self, touched: Vec<(String, Vec<WorkspacePath>)>) {
+        let Some(ownership) = self.config.ownership.clone() else {
+            return;
+        };
+        if touched.is_empty() {
+            return;
+        }
+        let Some(roster) = self.cached() else {
+            return;
+        };
+        for (session_id, paths) in touched {
+            let Some(provider) = roster
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .map(|session| session.provider)
+            else {
+                continue;
+            };
+            if let Err(error) = ownership.observe_touches(provider, session_id, paths).await {
+                tracing::debug!(%error, "ownership violation check failed");
+            }
         }
     }
 
@@ -1392,6 +1464,28 @@ fn integration_error(error: IntegrationError) -> CoreError {
         IntegrationError::Unreadable { .. } => CoreErrorCode::Io,
     };
     CoreError::new(code, error.to_string())
+}
+
+/// The files one batch says were written, in order and without repeats (T326).
+///
+/// Only [`AgentTimelineKind::FileTouched`] with a `path` counts. A `FileTouched`
+/// with none is a file outside the open workspace by construction, and there is
+/// nothing in the registry it could be checked against; every other kind — a
+/// tool call, a reply, a notice — is not a write at all. `display` is never
+/// looked at: it is a string for a human, and matching on it would be matching
+/// on something that was never a path (rule 13).
+fn touched_paths(entries: &[AgentTimelineEntry]) -> Vec<WorkspacePath> {
+    let mut seen = std::collections::HashSet::new();
+    entries
+        .iter()
+        .filter_map(|entry| match &entry.kind {
+            AgentTimelineKind::FileTouched {
+                path: Some(path), ..
+            } => Some(path.clone()),
+            _ => None,
+        })
+        .filter(|path| seen.insert(path.clone()))
+        .collect()
 }
 
 /// The roster row's id: unique across providers, stable for the life of the

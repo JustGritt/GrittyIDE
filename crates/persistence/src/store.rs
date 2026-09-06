@@ -695,6 +695,10 @@ pub mod ownership {
 
     pub const ACTIVE: &str = "ACTIVE";
     pub const WAITING: &str = "WAITING";
+    /// A write that already happened on another workstream's ground (T326).
+    /// The `state` column is unconstrained `TEXT`, so a fourth value costs one
+    /// constant here and one match arm in the core, not a migration.
+    pub const OBSERVED: &str = "OBSERVED";
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct LeaseRow {
@@ -913,19 +917,23 @@ pub mod ownership {
             .map_err(Into::into)
     }
 
-    /// Close one waiting conflict. `false` when it is gone or already closed.
+    /// Close one open conflict. `false` when it is gone or already closed.
+    ///
+    /// Open means `WAITING` **or** `OBSERVED` (T326 §8): a violated lease that
+    /// is released has to take its observed rows with it, or they would stay in
+    /// the queue for ever with nothing left to point at.
     pub fn close_conflict(conn: &Connection, id: &str, state: &str, now: i64) -> Result<bool> {
         let changed = conn.execute(
             &format!(
                 "UPDATE ownership_conflict SET state = ?2, resolved_at = ?3
-                 WHERE id = ?1 AND state = '{WAITING}'"
+                 WHERE id = ?1 AND state IN ('{WAITING}', '{OBSERVED}')"
             ),
             params![id, state, now],
         )?;
         Ok(changed > 0)
     }
 
-    /// Close every conflict still waiting on this lease: the blocker is gone.
+    /// Close every conflict still open on this lease: the blocker is gone.
     /// Returns how many, so the caller knows whether anything changed.
     pub fn close_conflicts_for_lease(
         conn: &Connection,
@@ -937,7 +945,7 @@ pub mod ownership {
         let changed = conn.execute(
             &format!(
                 "UPDATE ownership_conflict SET state = ?2, resolved_at = ?3
-                 WHERE holding_lease_id = ?1 AND state = '{WAITING}'
+                 WHERE holding_lease_id = ?1 AND state IN ('{WAITING}', '{OBSERVED}')
                    AND (?4 IS NULL OR id <> ?4)"
             ),
             params![lease_id, state, now, except],

@@ -332,6 +332,7 @@ fn manager_with(
             hooks: hooks.map(gritty_agents::HookScanOptions::rooted_at),
             hook_binary: None,
             notifier,
+            ownership: None,
         },
     );
     (manager, sink)
@@ -722,6 +723,7 @@ fn manager_over_with(
             hooks: root.hooks(),
             hook_binary: None,
             notifier: None,
+            ownership: None,
         },
     );
     (manager, sink)
@@ -1307,6 +1309,7 @@ impl TempHome {
                 )),
                 hook_binary,
                 notifier: None,
+                ownership: None,
             },
         )
     }
@@ -1852,4 +1855,417 @@ async fn the_liveness_marker_is_what_lets_a_hook_wait_at_all() {
         "the fast loop refreshes it"
     );
     manager.shutdown();
+}
+
+// ------------------------------------------- T326: violations, through a tick
+use crate::protocol::ids::CorrelationId;
+
+impl TempTranscripts {
+    /// [`Self::seed`], for a session whose working directory is a real path on
+    /// this machine — which is what makes a touched file resolve *inside* an
+    /// open workspace, and so what makes it checkable at all (T326).
+    fn seed_in(&self, session: &str, cwd: &str) -> String {
+        let opening = format!(
+            r#"{{"type":"user","cwd":"{cwd}","sessionId":"{session}","timestamp":"2026-09-05T13:49:47.770Z","message":{{"role":"user","content":[{{"type":"text","text":"ship the rail"}}]}}}}"#
+        );
+        std::fs::write(self.transcript(session), format!("{opening}\n")).expect("write transcript");
+        format!("claude_code:{session}")
+    }
+}
+
+//
+// The detector itself is unit-tested in `ownership::tests`, against leases,
+// links and paths. What is only provable here is the wiring: that a real tick
+// over a real transcript reaches the registry at all, and that what it hands
+// over is what `absorb` actually kept.
+
+/// Everything one violation needs: a workspace on disk, a session database, a
+/// lease held by one workstream, and a transcript whose working directory *is*
+/// that workspace — which is what makes `FileTouched` carry a path at all.
+struct ViolationRig {
+    _db: gritty_persistence::testing::TempDir,
+    _work: gritty_persistence::testing::TempDir,
+    transcripts: TempTranscripts,
+    manager: Arc<AgentSessionManager>,
+    ownership: Arc<crate::ownership::OwnershipManager>,
+    workspace: crate::workspace::Workspace,
+    sink: Arc<RecordingSink>,
+    session: String,
+}
+
+impl ViolationRig {
+    /// `holder` claims `target`; `toucher` is linked to the session that will
+    /// write. Both workstreams exist before the first tick.
+    async fn new(name: &str) -> Self {
+        use crate::ownership::{AcquireOwnershipRequest, OwnershipManager, OwnershipTarget};
+        use crate::workspace::UnsavedPolicy;
+        use crate::workstream::{CreateWorkstreamRequest, LinkAgentRequest, WorkstreamManager};
+        use gritty_persistence::testing::TempDir;
+        use gritty_persistence::{DB_FILE_NAME, Database};
+        use gritty_workspace::WorkspacePath;
+
+        let db = TempDir::new(&format!("t326-db-{name}"));
+        let work = TempDir::new(&format!("t326-ws-{name}"));
+        std::fs::create_dir_all(work.join("src/auth")).expect("seed the workspace");
+        std::fs::write(work.join("src/auth/session.ts"), "// hi\n").expect("seed a file");
+        let database = Arc::new(
+            Database::open(&db.join(DB_FILE_NAME))
+                .expect("open the test database")
+                .database,
+        );
+
+        let sink = Arc::new(RecordingSink::default());
+        let events = EventBus::new(FanOutSink::new(vec![sink.clone()]));
+        let handle = Handle::current();
+        let registry = OperationRegistry::new(handle.clone(), events.clone());
+        let workspaces = WorkspaceManager::new(handle.clone(), events.clone(), registry);
+        let workspace = workspaces
+            .open(
+                work.path(),
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
+            .expect("open the workspace");
+        let workstreams = WorkstreamManager::new(
+            handle.clone(),
+            events.clone(),
+            workspaces.clone(),
+            Some(database.clone()),
+        );
+        let ownership = OwnershipManager::new(
+            handle.clone(),
+            events.clone(),
+            workspaces.clone(),
+            Some(database),
+        );
+
+        // The canonical root, which is what the workspace opened as and
+        // therefore what a transcript has to say for its paths to resolve.
+        let cwd = workspace.root.clone();
+        let transcripts = TempTranscripts::new(&format!("t326-{name}"));
+        let session = transcripts.seed_in(TEST_SESSION, &cwd);
+
+        let holder = workstreams
+            .create(
+                CreateWorkstreamRequest {
+                    workspace_id: workspace.id.clone(),
+                    title: "Authentication".to_owned(),
+                    goal: None,
+                },
+                Actor::User,
+                CorrelationId::new(),
+            )
+            .await
+            .expect("create the holder");
+        let toucher = workstreams
+            .create(
+                CreateWorkstreamRequest {
+                    workspace_id: workspace.id.clone(),
+                    title: "Payments".to_owned(),
+                    goal: None,
+                },
+                Actor::User,
+                CorrelationId::new(),
+            )
+            .await
+            .expect("create the toucher");
+        ownership
+            .acquire(
+                AcquireOwnershipRequest {
+                    workspace_id: workspace.id.clone(),
+                    workstream_id: holder.id.clone(),
+                    target: OwnershipTarget::Directory {
+                        path: WorkspacePath::parse("src/auth").expect("path"),
+                    },
+                    expires_at: None,
+                    note: None,
+                },
+                Actor::User,
+                CorrelationId::new(),
+            )
+            .await
+            .expect("claim src/auth");
+        workstreams
+            .link_agent(
+                LinkAgentRequest {
+                    workspace_id: workspace.id.clone(),
+                    workstream_id: toucher.id.clone(),
+                    provider: AgentProvider::ClaudeCode,
+                    session_id: session.clone(),
+                },
+                CorrelationId::new(),
+            )
+            .await
+            .expect("link the session");
+
+        let manager = AgentSessionManager::start(
+            handle,
+            events,
+            workspaces,
+            AgentDiscoveryConfig {
+                scan: Some(gritty_agents::ScanOptions::rooted_at(transcripts.0.clone())),
+                runner: Arc::new(FakeMachine(String::new())),
+                poll_interval: Duration::from_secs(3_600),
+                timeline_interval: Duration::from_secs(3_600),
+                idle_after: DEFAULT_IDLE_AFTER,
+                home: Some(PathBuf::from("/Users/someone")),
+                permissions: None,
+                hooks: None,
+                hook_binary: None,
+                notifier: None,
+                ownership: Some(ownership.clone()),
+            },
+        );
+
+        Self {
+            _db: db,
+            _work: work,
+            transcripts,
+            manager,
+            ownership,
+            workspace,
+            sink,
+            session,
+        }
+    }
+
+    async fn conflicts(&self) -> Vec<crate::ownership::OwnershipConflict> {
+        self.ownership
+            .list(
+                crate::ownership::ListOwnershipRequest {
+                    workspace_id: self.workspace.id.clone(),
+                },
+                CorrelationId::new(),
+            )
+            .await
+            .expect("list ownership")
+            .conflicts
+    }
+
+    /// What the agent's transcript says when it writes a file, with the working
+    /// directory this rig's workspace actually opened at.
+    fn touch_line(&self, tracking: &str) -> String {
+        format!(
+            r#"{{"type":"file-history-delta","sessionId":"{TEST_SESSION}","cwd":"{}","trackingPath":"{tracking}"}}"#,
+            self.workspace.root
+        )
+    }
+
+    fn ownership_events(&self) -> usize {
+        self.sink
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|envelope| matches!(envelope.event, CoreEvent::OwnershipChanged(_)))
+            .count()
+    }
+}
+
+/// The integration case: one fake transcript, one `FileTouched` inside a lease
+/// another workstream holds, one real tick — one persisted `OBSERVED` conflict
+/// and one `OwnershipChanged`.
+#[tokio::test]
+async fn one_tick_records_a_violation_and_says_so_once() {
+    let rig = ViolationRig::new("tick").await;
+    rig.manager
+        .open_timeline(&rig.session)
+        .await
+        .expect("open the timeline");
+    let before = rig.ownership_events();
+
+    rig.transcripts
+        .append(TEST_SESSION, &rig.touch_line("src/auth/session.ts"));
+    rig.manager.follow_once().await;
+
+    let batches = rig.sink.batches();
+    assert_eq!(batches.len(), 1, "one tick, one batch");
+    assert!(
+        matches!(
+            &batches[0].entries[0].kind,
+            AgentTimelineKind::FileTouched { path: Some(path), .. }
+                if path.as_str() == "src/auth/session.ts"
+        ),
+        "the path resolved inside the open workspace, or there is nothing to check"
+    );
+
+    let observed: Vec<_> = rig
+        .conflicts()
+        .await
+        .into_iter()
+        .filter(|conflict| conflict.state == crate::ownership::ConflictState::Observed)
+        .collect();
+    assert_eq!(observed.len(), 1, "one violation, persisted");
+    assert_eq!(
+        rig.ownership_events() - before,
+        1,
+        "and said once, not once per tick"
+    );
+
+    // A second tick with nothing new writes nothing and says nothing.
+    let after = rig.ownership_events();
+    rig.manager.follow_once().await;
+    assert_eq!(rig.ownership_events(), after);
+    rig.manager.shutdown();
+    assert_eq!(rig.conflicts().await.len(), 1);
+}
+
+/// A file the agent touched *outside* any lease is not a violation, and the
+/// tick that carried it still costs nothing.
+#[tokio::test]
+async fn a_touch_outside_every_lease_records_nothing() {
+    let rig = ViolationRig::new("free").await;
+    rig.manager
+        .open_timeline(&rig.session)
+        .await
+        .expect("open the timeline");
+    let before = rig.ownership_events();
+
+    rig.transcripts
+        .append(TEST_SESSION, &rig.touch_line("README.md"));
+    rig.manager.follow_once().await;
+    rig.manager.shutdown();
+
+    assert!(rig.conflicts().await.is_empty());
+    assert_eq!(rig.ownership_events(), before);
+}
+
+/// The ring-overflow row of the failure table, asserted rather than reasoned
+/// about: when one tick appends more than the ring holds, `absorb` truncates
+/// `undelivered` *before* the batch is emitted, so the oldest touches are never
+/// handed to the detector at all. That is a real gap — a file written and never
+/// checked — and this pins what the detector actually saw.
+#[tokio::test]
+async fn a_tick_over_the_ring_checks_only_what_survived_it() {
+    let rig = ViolationRig::new("ring").await;
+    rig.manager
+        .open_timeline(&rig.session)
+        .await
+        .expect("open the timeline");
+
+    // Comfortably more than the ring, each one a distinct file inside the
+    // lease, so every survivor is its own violation.
+    let overflow = MAX_TIMELINE_ENTRIES + 40;
+    for index in 0..overflow {
+        rig.transcripts.append(
+            TEST_SESSION,
+            &rig.touch_line(&format!("src/auth/f{index}.ts")),
+        );
+    }
+    rig.manager.follow_once().await;
+
+    let batches = rig.sink.batches();
+    assert_eq!(batches.len(), 1);
+    let batch = &batches[0];
+    assert!(batch.dropped > 0, "the ring reported the loss (T230)");
+    let delivered = touched_paths(&batch.entries);
+    assert_eq!(
+        delivered.len(),
+        MAX_TIMELINE_ENTRIES,
+        "the detector sees the batch, and the batch is the ring"
+    );
+    assert!(
+        !delivered
+            .iter()
+            .any(|path| path.as_str() == "src/auth/f0.ts"),
+        "the oldest touch was pruned before the batch existed, so it is never checked"
+    );
+
+    let conflicts = rig.conflicts().await;
+    rig.manager.shutdown();
+    assert!(
+        conflicts
+            .iter()
+            .all(|conflict| conflict.state == crate::ownership::ConflictState::Observed),
+        "every row this tick produced is a violation"
+    );
+    // The map is bounded at `MAX_CONFLICTS` on the *read*, which is T325's
+    // bound and unmodified here: 500 surviving touches wrote 500 rows and the
+    // snapshot shows the newest 200 of them. That bound is now reachable by an
+    // agent rather than only by a user asking 200 times, which is the honest
+    // cost of reusing the row (T326 §6) and is recorded as a follow-up.
+    assert_eq!(conflicts.len(), crate::ownership::MAX_CONFLICTS);
+    assert!(
+        !conflicts.iter().any(|conflict| conflict.target
+            == crate::ownership::OwnershipTarget::File {
+                path: gritty_workspace::WorkspacePath::parse("src/auth/f0.ts").expect("path"),
+            }),
+        "the pruned touch produced no row, because the detector never saw it"
+    );
+}
+
+/// A build with no ownership registry behaves exactly as T230 did: the rail is
+/// unchanged and the check is the only thing that does not happen.
+#[tokio::test]
+async fn without_a_registry_the_rail_is_unchanged() {
+    let root = TempTranscripts::new("t326-none");
+    let id = root.seed(TEST_SESSION);
+    let (manager, sink) = manager_over(&root);
+    manager.open_timeline(&id).await.expect("open");
+
+    root.append(TEST_SESSION, &assistant_line("still fine"));
+    manager.follow_once().await;
+    manager.shutdown();
+
+    assert_eq!(sink.batches().len(), 1);
+}
+
+/// What a batch hands to the detector, and what it deliberately does not.
+///
+/// A `FileTouched` with no path is a file outside the open workspace by
+/// construction (T230, ADR-010): there is no `WorkspacePath` for it, so there
+/// is nothing in the registry it could be compared with. `display` is a string
+/// for a human and is never matched on — matching it would be matching
+/// something that was never a path (rule 13).
+#[test]
+fn only_a_resolved_touched_path_is_checked() {
+    fn entry(seq: u64, kind: AgentTimelineKind) -> AgentTimelineEntry {
+        AgentTimelineEntry {
+            seq,
+            at: None,
+            kind,
+            sidechain: false,
+        }
+    }
+    fn touched(raw: Option<&str>, display: &str) -> AgentTimelineKind {
+        AgentTimelineKind::FileTouched {
+            path: raw.map(|value| WorkspacePath::parse(value).expect("valid path")),
+            display: display.to_owned(),
+        }
+    }
+
+    let entries = vec![
+        entry(
+            1,
+            AgentTimelineKind::AssistantText {
+                text: "src/auth/session.ts".to_owned(),
+            },
+        ),
+        entry(
+            2,
+            touched(Some("src/auth/session.ts"), "src/auth/session.ts"),
+        ),
+        // Outside the open workspace: shown, never resolved, never checked.
+        entry(3, touched(None, "/Users/a/elsewhere/secrets.env")),
+        // The same file again in one batch is still one path to check.
+        entry(
+            4,
+            touched(Some("src/auth/session.ts"), "src/auth/session.ts"),
+        ),
+        entry(5, touched(Some("src/auth/token.ts"), "src/auth/token.ts")),
+        entry(
+            6,
+            AgentTimelineKind::ToolCall {
+                tool_use_id: None,
+                name: "Write".to_owned(),
+                detail: Some("src/auth/other.ts".to_owned()),
+            },
+        ),
+    ];
+
+    let checked = touched_paths(&entries);
+    let paths: Vec<&str> = checked.iter().map(WorkspacePath::as_str).collect();
+    assert_eq!(paths, ["src/auth/session.ts", "src/auth/token.ts"]);
+    assert!(touched_paths(&[]).is_empty());
 }

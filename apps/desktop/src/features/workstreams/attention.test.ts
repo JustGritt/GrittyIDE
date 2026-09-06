@@ -124,13 +124,40 @@ describe('attention items', () => {
     }
   });
 
-  it('ignores conflicts that are no longer waiting', () => {
+  it('ignores conflicts that are no longer open', () => {
     const settled = ownership([
       conflict('resolved', { state: 'RESOLVED' }),
       conflict('cancelled', { state: 'CANCELLED' }),
       conflict('overridden', { state: 'OVERRIDDEN' }),
     ]);
     expect(attentionItems([workstream('a'), workstream('b')], [], settled)).toEqual([]);
+  });
+
+  it('lists an observed violation in the same queue, under the same filter', () => {
+    // T326 adds a state, not a kind: a violation and a refusal are both
+    // "someone is in someone else's way", so there is no fifth filter and the
+    // row is filed the same way — under whoever wrote, naming whoever held it.
+    const items = attentionItems(
+      [workstream('a'), workstream('b')],
+      [],
+      ownership([conflict('v1', { state: 'OBSERVED', createdAt: 20 })]),
+    );
+    expect(items.map((item) => item.id)).toEqual(['conflict:v1']);
+    const [first] = items;
+    expect(first?.kind).toBe('conflict');
+    if (first?.kind === 'conflict') {
+      expect(first.workstream.id).toBe('b');
+      expect(first.owner.id).toBe('a');
+      expect(first.conflict.state).toBe('OBSERVED');
+    }
+    expect(filterItems(items, 'conflict')).toHaveLength(1);
+    expect(
+      attentionCount(
+        [workstream('a'), workstream('b')],
+        [],
+        ownership([conflict('v1', { state: 'OBSERVED' })]),
+      ),
+    ).toBe(1);
   });
 
   it('drops a conflict whose two sides the renderer has not both got', () => {
