@@ -219,17 +219,11 @@ tasks are already queued.
 `0004_agent_links.sql` for T223. Claim there, not here. The per-lane protocol
 minors above are a hint for planning; the queue is the record.
 
-One correction this file owes that document, because the two disagree.
-`merge-queue.md` rule 2 says to leave gaps rather than reuse a
-`PROTOCOL_VERSION` — correct, semver gaps cost nothing. Rule 3 says migration
-numbers are claimed "the same way", and **for migrations a gap is not harmless**:
-`migrations_are_numbered_contiguously_from_one` in
-`crates/persistence/src/migrations.rs` asserts `version == index + 1`, so a
-claimed-but-unspent number breaks the build for whoever comes next. (The
-`const assert!` beside it only checks the *last* entry, which is what an earlier
-draft of this file got wrong.) The rule for migrations is therefore: **take the
-next free number immediately before opening the PR, and renumber on rebase if you
-lost the race.**
+The one thing worth repeating here, because a lane plans against it: a
+`PROTOCOL_VERSION` gap is free, and a **migration gap is not** — migrations must
+stay contiguous, so take the next free number immediately before opening the PR
+and renumber if you lost the race. `docs/merge-queue.md` carries the reasoning
+and the assertion that enforces it.
 
 **New crates are pre-assigned** too, because two lanes inventing
 `crates/git` differently is worse than a rebase: `gritty-search` (W),

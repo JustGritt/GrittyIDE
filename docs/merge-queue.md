@@ -63,9 +63,12 @@ everything else, instead of each small one resolving against it.
 
 | PR | What | Order | Why / what the loser fixes |
 |---|---|---|---|
-| [#22](https://github.com/JustGritt/GrittyIDE/pull/22) | roadmap: the agent rail landed | 1 | One paragraph of `docs/plans/roadmap.md`. |
-| [#23](https://github.com/JustGritt/GrittyIDE/pull/23) | this file, and the script | 2 | Adds one sentence to `docs/tasks/README.md` step 3, in a different region from #21's table changes. |
-| [#21](https://github.com/JustGritt/GrittyIDE/pull/21) | T325 workspace ownership | 3 | 64 files, and already merged `main` once for #20. Touches both seams above, so it absorbs them together: `git merge main`, then re-run `pnpm check` — the generated-types check is the last step in the gate and the first thing a merge invalidates. Holds `PROTOCOL_VERSION` **2.10.0** (2.8/2.9 went to the timeline series) and `SCHEMA_VERSION` **3**. |
+| – | nothing queued | | |
+
+**#22, #23 and #21 landed in that order on 2026-09-06**, which is the order this
+table gave them, and the one collision it predicted is the one that happened:
+#23's sentence in `docs/tasks/README.md` step 3 met a later branch editing the
+same step. Their rows are deleted per the rule below; what they did is in git.
 
 The script found the #23/#21 row itself, from the file lists, before anyone
 wrote it down here. That is the intended division of labour: it notices, this
@@ -75,13 +78,21 @@ file decides.
 
 | Thing | Value | Branch |
 |---|---|---|
-| `PROTOCOL_VERSION` | 2.10.0 | #21 |
-| `SCHEMA_VERSION` | 3 | #21 |
-| migration `0003` | `0003_ownership.sql` | #21 |
 | migration `0004` | `0004_agent_links.sql` | T223, specified only |
+
+`PROTOCOL_VERSION` **2.10.0**, `SCHEMA_VERSION` **3** and migration `0003` were
+#21's and are now on `main`; the next free values are 2.11.0, 4 and `0004`.
 
 When a PR merges, delete its rows. This file describes what is *in flight*; git
 history describes what happened.
+
+One correction to rule 3 above, from
+`crates/persistence/src/migrations.rs`. Migration numbers are claimed like a
+version but they are **not** spent like one: a `PROTOCOL_VERSION` gap costs
+nothing, and a migration gap breaks the build, because
+`migrations_are_numbered_contiguously_from_one` asserts `version == index + 1`.
+So a claimed migration number must actually be spent, in order — and whoever
+loses a race for one renumbers rather than leaving the hole.
 
 ## What the script checks
 
