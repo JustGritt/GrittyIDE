@@ -31,7 +31,9 @@
 //!   `CancellationToken`, `MAX_CONCURRENT_RUNS`, the bounded ring that
 //!   [`wire::MAX_RUN_EVENTS`] sizes, and the reactions that stop a run being
 //!   orphaned when its workstream is removed, its workspace closes or the app
-//!   shuts down.
+//!   shuts down. It is [`manager`] and [`ring`], and it is here: the contract's
+//!   two known gaps — an unenforced `MAX_RUN_EVENTS` and a run nothing
+//!   supervised — are closed.
 //! - **T300-FAKE** owns `gritty-agent-fake`: a deterministic, caller-driven
 //!   script with its **own** step vocabulary. That vocabulary is deliberately
 //!   not [`wire::AgentRunEvent`] — the translation between them is the seam
@@ -51,9 +53,17 @@
 //! the untrusted side, and never in the renderer, which would be trusting it.
 //! Tracing carries a run's id, state, provider and duration; never event text.
 
+pub mod manager;
+mod ring;
 pub mod state;
 pub mod wire;
 
+#[cfg(test)]
+mod tests;
+
+pub use manager::{
+    AgentRunContext, AgentRunManager, AgentRunSpec, FINISHED_RETENTION, MAX_CONCURRENT_RUNS,
+};
 pub use state::AgentRunState;
 pub use wire::{
     AgentRun, AgentRunActivity, AgentRunActivityKind, AgentRunChangedPayload, AgentRunEvent,
