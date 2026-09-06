@@ -83,15 +83,16 @@ Rules that live in the core rather than in the UI:
 - Answering an already-answered decision is a `Conflict`, detected by the
   conditional `UPDATE ... WHERE state = 'OPEN'` rather than by a read-then-write.
 
-## Storage (schema version 2)
+## Storage
 
-Migration `0002_workstreams.sql`, in the session database
-(`docs/architecture/persistence.md`).
+Migrations `0002_workstreams.sql` (schema 2) and `0004_agent_links.sql`
+(schema 4), in the session database (`docs/architecture/persistence.md`).
 
 | Table | Key | Columns |
 |---|---|---|
 | `workstream` | `id` | `workspace_root`, `title`, `goal`, `state`, `created_at`, `updated_at`; indexed by `(workspace_root, created_at)` |
 | `decision` | `id` | `workstream_id` (`REFERENCES workstream ON DELETE CASCADE`), `question`, `options` (JSON), `state`, `chosen`, `rationale`, `raised_by` (JSON `Actor`), `raised_at`, `resolved_at`; indexed by `(workstream_id, raised_at)` and `(state, raised_at)` |
+| `workstream_agent_link` | `(workstream_id, provider, session_id)` | `linked_at`; `workstream_id` cascades. Which observed agent session is working on this (T223) — a table and never a field, see below; indexed by `(session_id)` |
 
 Every command runs on a blocking worker and reads the database back rather than
 trusting a cache: there is no in-memory copy that a failed write could leave
@@ -110,6 +111,20 @@ exit.
 | `workstreams.remove` | Deletes it and its decisions; `ABANDONED` is the reversible version |
 | `decisions.list` | Oldest first — the order a queue triages in; filterable by workstream and by open-only |
 | `decisions.raise` / `.resolve` / `.dismiss` | See the rules above |
+| `workstreams.linkAgent` / `.unlinkAgent` | Attach or detach an observed agent session (T223). Both answer with the workstream's links as they are afterwards, and `changed: false` for a duplicate link or an unlink of something that was not there — a no-op that says so, because both leave the state the caller asked for |
+| `workstreams.agentLinks` | Every link of the workspace, or of one workstream |
+
+**The agent link is a table, not a field** (T223). A `provider` on `Workstream`
+is precisely the provider-specific field rule 6 names; a workstream is durable
+and a discovered session is not; and one workstream legitimately accumulates
+several sessions over its life, which a single field would silently reduce to
+*the most recent one*. The full argument, and what the link deliberately does
+not grant, is in `agent-sessions.md`.
+
+Those three emit **no event**, unlike everything below. A link is not a change
+to the workstream, and the two surfaces that draw links share one controller, so
+the command returning its own fresh snapshot is enough — T047's precedent, and
+an event nothing subscribes to is a contract maintained for nobody.
 
 Events: `WorkstreamCreated`, `WorkstreamChanged`, `WorkstreamRemoved`,
 `DecisionRequested`, `DecisionResolved` (dismissal included; the payload's
@@ -150,7 +165,13 @@ arrived with ownership (T325, `ownership.md`).
 
 - **Agent runs, providers, capabilities, permissions** (T300/T310, ADR-005).
   `Actor::Agent { runId }` is the only seam agents need. No provider concept
-  may become a `Workstream` field (rule 6).
+  may become a `Workstream` field (rule 6) — which is why T223's session link
+  is its own table, and why `Workstream`'s wire shape is unchanged by having
+  one.
+- **Any coupling from an observed session's state to a workstream's** (T223).
+  A linked session that goes `BLOCKED` does not move its workstream, and does
+  not raise a decision. That belongs to runs Gritty owns (T300/T330), where the
+  agent is a participant in the domain rather than something watched beside it.
 - **`ChangeSet`, revisions, worktrees** (T100/T400, ADR-007, addendum §7). A
   ChangeSet will reference `workstream_id`; nothing here reaches into Git, and
   raw `git diff` is never the domain model.

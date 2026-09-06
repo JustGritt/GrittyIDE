@@ -15,7 +15,7 @@ WebView side.
 | Moved-aside copies | `gritty.sqlite.corrupt-<unix-ms>` next to it, kept for inspection |
 | Mode | WAL, `synchronous = NORMAL`, `foreign_keys = ON`, `busy_timeout = 5 s` |
 
-## Schema (version 2)
+## Schema (version 4)
 
 Owned by the runner: `schema_version (version PK, applied_at)`. Migrations
 (`crates/persistence/src/migrations/NNNN_*.sql`) are applied in order, one
@@ -32,11 +32,20 @@ build knows is refused.
 | `operation_record` | `id` | `kind`, `workspace_root`, `status`, `correlation_id`, `created_at`, `started_at`, `finished_at`, `updated_at` | writer, for `durable` operations; `INTERRUPTED` at startup |
 | `workstream` | `id` | `workspace_root`, `title`, `goal`, `state`, `created_at`, `updated_at` | `workstreams.*` commands, synchronously (T200) |
 | `decision` | `id` | `workstream_id` (cascade), `question`, `options`, `state`, `chosen`, `rationale`, `raised_by`, `raised_at`, `resolved_at` | `decisions.*` commands, synchronously (T200) |
+| `ownership_lease` | `id` | `workspace_root`, `workstream_id` (cascade), `agent_run_id`, `target_kind`, `target_pattern`, `mode`, `note`, `acquired_at`, `expires_at`, `state`, `released_at` | `ownership.*` commands, synchronously (T325) |
+| `ownership_conflict` | `id` | `workspace_root`, `requested_by` / `owned_by` (both cascade), `holding_lease_id` (cascade), `target_kind`, `target_pattern`, `created_at`, `state`, `resolved_at` | `ownership.*` commands, synchronously (T325) |
+| `workstream_agent_link` | `(workstream_id, provider, session_id)` | `linked_at`; `workstream_id` cascades | `workstreams.linkAgent` / `.unlinkAgent`, synchronously (T223) |
 
-The last two are the workstream domain (T200); their rules live in
-`docs/architecture/workstreams.md`. Unlike everything above them they do not go
-through the debounced writer: a workstream is committed by the command that
-creates it, so nothing is lost if the process dies a moment later.
+The last five are the workstream domain and what hangs off it — T200's
+workstreams and decisions, T325's ownership (`ownership.md`) and T223's agent
+links (`agent-sessions.md`). Unlike everything above them they do not go through
+the debounced writer: a workstream is committed by the command that creates it,
+so nothing is lost if the process dies a moment later.
+
+`workstream_agent_link` is the one table whose rows point at something Gritty
+does not own. `session_id` is an *observed* agent session's id, opaque here and
+never resolved; a link outlives the process it names, which is exactly why it is
+a table beside `workstream` and not a column on it (rule 6, and lifetimes).
 
 `session.lastSession` (T051) reads the newest `workspace` row together with
 its `workspace_tab` and `buffer_snapshot` rows to tell the launcher what the

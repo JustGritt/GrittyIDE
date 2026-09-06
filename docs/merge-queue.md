@@ -80,13 +80,22 @@ file decides.
 
 | Thing | Value | Branch |
 |---|---|---|
-| migration `0004` | `0004_agent_links.sql` | T223, specified only |
+| `PROTOCOL_VERSION` | **2.11.0** | `t223-agent-attention` |
+| `SCHEMA_VERSION` | **4** | `t223-agent-attention` |
+| migration `0004` | `0004_agent_links.sql` | `t223-agent-attention` |
 
 `PROTOCOL_VERSION` **2.10.0**, `SCHEMA_VERSION` **3** and migration `0003` were
 #21's and are now on `main`. `t223-agent-attention` is spending 2.11.0, 4 and
 `0004`, so the next free values after it are **2.12.0**, **5** and **`0005`**.
 The per-lane minors in `execution-board.md` are a planning hint and are already
 wrong: 2.11 was reserved there for T070 and T223 took it.
+
+T223's other seams, for whoever lands beside it:
+`docs/architecture/{agent-sessions,workstreams,persistence}.md`,
+`crates/gritty-core/src/protocol/export.rs`, `crates/persistence/src/store.rs`
+and `packages/protocol/src/{client,commands,types}.ts`. It adds **no**
+`CoreEvent` variant — its commands return their own fresh snapshot instead — so
+the enum #20 and #21 collided on is not one of them.
 
 When a PR merges, delete its rows. This file describes what is *in flight*; git
 history describes what happened.

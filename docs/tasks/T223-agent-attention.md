@@ -1,7 +1,7 @@
 # Task T223 — Attention: notify when an agent needs you, and link it to the work
 
 - **Phase:** 3
-- **Status:** todo
+- **Status:** review
 - **Depends on:** T200 (workstream model), T210 (island), T220 (discovery), T221 (`BLOCKED`)
 
 ## Objective
@@ -156,8 +156,14 @@ observability starts paying into the domain instead of sitting beside it.
     nothing, if nothing else needs to react. Prefer the latter and say why in
     the completion report; T047 set the precedent that a command returning its
     own snapshot need not emit.
-15. Protocol version bumps MINOR; schema version 2 → 3 with the migration
-    tested for both a fresh database and an upgrade from 2.
+15. Protocol version bumps MINOR; schema version 3 → 4 with the migration
+    tested for both a fresh database and an upgrade from 3.
+
+    *Corrected during implementation.* This line and the acceptance criterion
+    below said 2 → 3, which was written before T325 landed and spent schema 3
+    on `0003_ownership.sql`. `migrations_are_numbered_contiguously_from_one`
+    asserts `version == index + 1`, so the number claimed for this task in
+    `docs/merge-queue.md` — `0004` — has to be the one actually spent.
 
 ### The UI
 
@@ -195,8 +201,8 @@ observability starts paying into the domain instead of sitting beside it.
 - Deleting the workstream removes the link; the roster row is unaffected.
 - `Workstream`'s wire shape is unchanged — verified by diffing the generated
   types.
-- A database at schema 2 upgrades to 3 in place, and a fresh database arrives at
-  3; both are tested.
+- A database at schema 3 upgrades to 4 in place, and a fresh database arrives at
+  4; both are tested. (Corrected from "2 → 3" for the reason in §15.)
 - `pnpm check` green; generated protocol types fresh and committed.
 
 ## Tests required
@@ -226,6 +232,267 @@ pnpm check
 
 ## Completion report
 
-_(filled in by the implementing session — including the `tauri-plugin-notification`
-justification required by the dependency policy, and the §14 decision on whether
-a link emits an event)_
+### Summary
+
+Two halves that share a task file and almost nothing else.
+
+**Notify.** `gritty_core::agent_session::attention` is the whole policy, and it
+is pure — no clock, no I/O, no Tauri — because every rule in it is a rule about
+*not* notifying, and those are the ones worth testing. It folds each published
+roster in and answers with the sessions that just **entered** `BLOCKED` or
+`WAITING`; the first roster of a process answers nothing, because those
+sessions' state did not change, Gritty's knowledge did. It is advanced from
+`AgentSessionManager::publish`, the one place a roster change is already
+observed, so the six-second loop and the fast loop cannot disagree about what a
+transition is. What crosses into the platform is an `AttentionAlert` and an
+injected `AttentionNotifier`; the composition root implements it over
+`tauri-plugin-notification`, and tests record instead.
+
+**Link.** `workstream_agent_link` is a table keyed by
+`(workstream_id, provider, session_id)`, and `Workstream` does not change — its
+generated TypeScript is byte-identical, verified by diffing. Three commands in
+the `workstreams.*` namespace follow T200's rules exactly and **emit nothing**;
+they answer with the workstream's links as they are afterwards, read back from
+the database. The core stores the link and publishes the roster but never joins
+them: whether a session is running *now* changes between one read and the next,
+so the join is the renderer's, which is what lets a link whose session has gone
+render as "linked, not running" rather than vanish.
+
+Protocol `2.11.0`, schema `4`, migration `0004_agent_links.sql`, one new
+dependency.
+
+### Files changed
+
+**Core** — `agent_session/attention.rs` (new: the policy, the notifier trait,
+the settings wire types); `agent_session/mod.rs` (the tracker, the enabled and
+focused flags, `raise_attention`, `notification_settings`, `set_notifications`,
+`set_window_focused`, `AgentDiscoveryConfig::with_notifier`);
+`agent_session/wire.rs` (`AgentProvider::{ALL,as_str,parse}` — the link stores
+the provider in a column, so the stored and transmitted spellings must be one
+function); `agent_session/tests.rs`; `workstream/link.rs` (new: the link domain
+and its wire types, as a second `impl WorkstreamManager`); `workstream/mod.rs`;
+`workstream/tests.rs`; `protocol/export.rs`; `protocol/mod.rs`
+(2.10.0 → **2.11.0**). `event/mod.rs` is **untouched** — see decision 1.
+
+**Persistence** — `migrations/0004_agent_links.sql` (new); `migrations.rs`
+(`SCHEMA_VERSION` 3 → **4**, and the fresh-database test now names the ownership
+tables it had been missing since T325); `store.rs` (`agent_links` module);
+`tests/database.rs`.
+
+**Desktop shell** — `src-tauri/src/notifications.rs` (new: `PluginNotifier`,
+and the two things the desktop plugin cannot do, written down);
+`src-tauri/src/core.rs` (build the notifier from the app handle, like the event
+sink); `src-tauri/src/lib.rs` (register the plugin, five commands, and
+`on_focus_event`); `src-tauri/src/commands.rs` (five adapters);
+`src-tauri/tests/commands.rs`; `src-tauri/Cargo.toml`; root `Cargo.toml`,
+`Cargo.lock`. `capabilities/default.json` is **untouched**, deliberately: the
+WebView is granted none of the plugin's commands.
+
+**Protocol** — `client.ts` (`workstreams.{linkAgent,unlinkAgent,agentLinks}`,
+`agents.{notifications,setNotifications}`), `commands.ts`, `types.ts`,
+`workstream-client.test.ts`, `agents-client.test.ts`, and **8 new generated
+files** plus `version.ts`. `Workstream.ts` is unchanged, byte for byte.
+
+**UI** — `features/workstreams/agent-links.ts` + `.test.ts` (new: the join and
+its labels, pure); `features/workstreams/agent-link-panel.tsx` (new: the island
+section, the per-workstream list, the link form);
+`features/agents/agent-notification-setting.tsx` (new: the switch);
+`features/workstreams/{use-workstreams.ts,island.tsx,attention-queue.tsx}`;
+`features/agents/agent-integration-settings.tsx`; `App.tsx` (one prop: the
+queue needs the roster to say what is working on an item); `app.css`.
+
+**Docs** — `docs/architecture/agent-sessions.md` (an "Attention (T223)" section;
+"specified but not built" is now T222 and T224 only),
+`docs/architecture/workstreams.md`, `docs/architecture/persistence.md` (the
+header said schema 2 and the table was missing T325's two rows as well as this
+one), `docs/merge-queue.md`, this file.
+
+### Tests actually executed, and results
+
+| Command | Result |
+|---|---|
+| `cargo test -p gritty-persistence` | green — 7 unit + **20** integration (18 → 20) |
+| `cargo test -p gritty-core` | green — **304** (280 → 304, +24) + 3 crash-recovery |
+| `cargo clippy --workspace --all-targets -- -D warnings` | green, no warnings |
+| `cargo test -p gritty-desktop` | green — 16 lib (14 → 16) + **35** adapter (32 → 35) |
+| `pnpm test` (vitest) | green — **500** across 66 files (491 → 500, +9) |
+| `pnpm check` | green — lint, typecheck, vitest, `cargo fmt --check`, clippy, `cargo test --workspace`, generated-types freshness |
+
+The +24 in the core are 11 for the notification policy alone (edge-trigger,
+persistence across ticks, transition out, the cooldown, the global cap and its
+recovery, focus, off-by-default, the first roster, bounding untrusted text,
+forgetting sessions that left), 5 for the manager wiring, and 8 for the link
+(a session nobody can see, restart, several sessions on one workstream and one
+session on two, duplicate and absent-unlink no-ops, cascade, cross-workspace
+`NotFound`, the bounds, `Io` without a database, and the wire shape).
+
+Migration 0004 is tested **both** ways, per `persistence.md`:
+`migrates_an_empty_database_to_the_latest_version` and
+`migrates_from_each_prior_version` cover the fresh database and every prior
+version, and
+`a_database_written_before_agent_links_existed_migrates_forward_with_its_rows`
+builds a real schema-3 file with a workstream and an ownership lease in it,
+opens it, and asserts `from == 3`, that both rows survived, and that the new
+table works against them.
+
+**Not executed: everything on a screen.** See below.
+
+### Architectural decisions
+
+1. **A link returns its own snapshot and emits no event** (§14). T047's
+   precedent, and the reason it applies here rather than being cited: the two
+   surfaces that draw links — the island and the attention queue — read one
+   `WorkstreamsController`, which is T210's rule precisely so they cannot
+   disagree. The mutation's caller is therefore the only consumer, and
+   `WorkstreamAgentLinkChanged` would be a contract maintained for nobody. The
+   rail was the one plausible second consumer, and it reads the same controller
+   through a prop instead. `changed: false` on the response is what makes a
+   duplicate link and an absent unlink *report* their no-op rather than lie
+   about having written. If a consumer outside this controller ever appears —
+   the most likely is T326 cross-checking touched files — the event is additive
+   and costs a MINOR bump then, which is cheaper than an event with no
+   subscriber now (rule 9).
+2. **The link is a table; `Workstream` does not grow a field.** Rule 6 is the
+   first reason and the weakest to argue from alone, so two more: a durable row
+   must not carry an id belonging to a process that may be long dead, and one
+   workstream legitimately accumulates several sessions, which a field would
+   silently reduce to *the most recent one*. Verified rather than asserted —
+   `linking_does_not_change_the_workstreams_wire_shape` compares the serialised
+   workstream before and after a link, the adapter test compares the whole
+   listed object, and `packages/protocol/src/generated/Workstream.ts` is
+   byte-identical to `origin/main`'s.
+3. **The notification policy is pure and the platform is injected.** The core
+   never depends on Tauri, and the rules that matter — edge-triggering, the
+   throttle, the cap, focus suppression — are unit tests over a function with a
+   clock argument rather than claims about a timer.
+4. **The first roster of a process notifies about nothing.** §1 says "from
+   something else", and a first sighting has no something-else. It is also the
+   difference between launching Gritty and being told three times about work
+   that has been sitting there for an hour. A session that appears on any
+   *later* roster is a real arrival and does notify.
+5. **Focus suppression is suppression, not deferral.** A transition that
+   happened while the window was focused is not replayed when it loses focus:
+   the user was looking at the island, which is where that session already was.
+6. **The setting is per process and off at every launch.** §2 says off by
+   default and that enabling is what asks for permission; storing "enabled"
+   would mean either re-arming at startup (which §2 forbids) or inventing a
+   settings-persistence mechanism this repository does not have (rule 14). The
+   cost is real and is in the limitations below.
+7. **`ENDED` and `IDLE` never notify.** `AgentActivity::needs_you` already
+   answers this and is what the island counts; using the same predicate is what
+   keeps the notification and the badge from disagreeing.
+8. **The bound on links is checked after the insert, inside the transaction.**
+   So a *duplicate* at the bound stays the no-op it is instead of being refused
+   for asking for something already true; the refusal rolls its own insert back,
+   which a test asserts rather than assumes.
+9. **An unreadable stored provider skips its row and logs**, rather than failing
+   the whole read. It can only come from a hand-edited database (a newer schema
+   is refused outright), and losing one row from a list is a smaller lie than
+   telling the user their workstreams are unreadable.
+10. **`tauri-plugin-notification 2.4.0`, pinned in the workspace table.**
+    *Justification, per the dependency policy:* nothing in the tree can raise a
+    system notification, and hand-rolling `UNUserNotificationCenter` would need
+    an `unsafe_code` allow against a workspace-wide deny. It overlaps no
+    existing dependency; its only new transitive weight is `notify-rust` and the
+    `objc2` notification bindings, which are platform shims rather than a
+    framework. It is used from Rust only, and the WebView is granted none of its
+    three commands — `capabilities/default.json` is unchanged, which is the
+    enforcement, not the intent.
+
+### Known limitations
+
+- **Not executed — human manual check: the notification on screen.** No agent
+  session on this machine has a screen. That a notification actually appears
+  while the window is backgrounded, what it looks like, and whether macOS
+  prompts for permission the first time are **not verified and are not claimed**
+  here. What is verified is everything up to the platform call: the transition
+  detection, the throttle, the cap, the focus suppression, the off-by-default
+  setting, and that the manager hands exactly one alert to an injected notifier
+  for one arrival and none for the ticks after it.
+- **Clicking a notification does nothing** (§6 unimplemented). The desktop half
+  of `tauri-plugin-notification` spawns `notify_rust`'s `show()` and drops the
+  handle, so there is no callback to focus the window from. Implementing §6
+  would mean bypassing the plugin for `notify-rust` directly — a second
+  dependency and a platform-specific action loop — which is a task, not a line.
+  Nothing in the code or the UI copy suggests the click does anything.
+- **Permission cannot be refused, reported or asked for on desktop.** The
+  plugin's `request_permission` and `permission_state` both return `Granted`
+  unconditionally there; the real prompt is the operating system's, raised by
+  the first notification shown. So the "permission denied" branch of the failure
+  table is implemented, typed and unit-tested against a fake notifier, and
+  **cannot currently be reached on macOS**. The setting reports what the plugin
+  says rather than inventing an answer.
+- **The setting does not survive a restart.** Deliberate (decision 6), and
+  still annoying: a user who wants notifications must turn them on each launch.
+  The follow-up below is where it belongs.
+- **Nothing was seen on a screen at all.** The island's Linked-work section, the
+  linked count on a roster row, the queue's agent list and the notification
+  switch have never been rendered. Every claim about them below the type level
+  is reasoned from the code — the same admission T325 made, for the same reason.
+- **The link form only offers sessions in the current roster.** The *command*
+  deliberately accepts an id that is not, and a test pins that, but a picker of
+  sessions nobody can see would be a worse control than none. Linking a session
+  that ended before you got to the island is therefore not possible from the UI
+  today.
+- **Nothing links automatically, and nothing suggests a link.** Not even
+  "this session's working directory is the open workspace root", which is the
+  obvious heuristic and is exactly the false claim in durable state the non-goals
+  forbid.
+- **50 links per workstream and 200 characters per session id** are guesses at
+  "more than anyone needs", not measurements — the same honesty T325 owed for
+  its 200-lease cap.
+- **The five-minute cooldown and three-per-minute cap are judgement, not data.**
+  They were picked so a session flapping between `WORKING` and `WAITING` cannot
+  nag and ten agents finishing at once are one interruption. Nobody has lived
+  with them yet.
+- **A link is not shown in the agent rail**, which is where the roster actually
+  lives since T231. The island says which sessions a workstream has; the rail
+  does not yet say which workstream a session belongs to.
+
+### Follow-up tasks
+
+- **T326 — observed violations.** T325 named this and named T223's link as the
+  missing piece: a `FILE_TOUCHED` timeline entry can now be attributed to a
+  workstream through the session that produced it. Both halves exist; the
+  cross-check does not.
+- **T224 — reveal the terminal.** A linked session that is `BLOCKED` is exactly
+  the row a user wants to jump to, and the pid and tty are already on the wire.
+- **A durable settings surface**, which the notification switch is the first
+  real customer for. Today the only user-facing settings that survive a restart
+  are the editor preferences and layout blobs, which are UI-owned; a boolean the
+  *core* acts on has nowhere to live. Whoever builds it should keep §2's rule
+  that restoring "enabled" must not re-ask for permission at startup.
+- **§6, if it is still wanted**: click-to-focus needs `notify-rust` directly and
+  a per-platform action loop.
+- **Show the link in the rail**, so the roster row says which workstream it is
+  working on — the mirror of what the island now does.
+- **T410** aggregates attention across workspaces; the notification policy is
+  already workspace-agnostic (the roster is machine-wide) and would need only a
+  place to send the user.
+
+### Remaining risks
+
+- **The half of this task that is easiest to get wrong is the half nobody has
+  seen.** Notification behaviour is judged by how it feels over a week, and
+  every rule here was chosen to fail towards silence: off by default, silent
+  while focused, silent on the first roster, silent inside the cooldown, silent
+  past the cap. If it turns out to be *too* quiet, that is a constant to change;
+  the alternative bias would have been a burst on launch, which is the failure
+  users do not forgive.
+- **A link is a claim the user makes, and nothing checks it.** Gritty records
+  that a session is working on a workstream because someone said so. A wrong
+  link is not detectable and stays until it is removed — which is the price of
+  refusing the automatic heuristic, and the right price, but it is a price.
+- **Two versions of the protocol may be in flight again.** This branch takes
+  2.11.0 and schema 4 off `main`'s 2.10.0 and 3, and has written both into
+  `docs/merge-queue.md`. Whoever merges second must check the constants rather
+  than trust a clean merge — two branches agreeing on a number is the unlucky
+  outcome the queue exists to prevent, and a migration number in particular
+  *must* be spent in order, because
+  `migrations_are_numbered_contiguously_from_one` asserts it.
+- **`workstream_agent_link` is the first table whose rows point at something
+  Gritty does not own.** The rows are correct as history and increasingly stale
+  as fact, and every read of them has to keep saying so. The place that will
+  forget is a future feature that treats a link as "the agent working on this
+  right now" — which is exactly what a field on `Workstream` would have
+  encouraged, and why it is not one.
