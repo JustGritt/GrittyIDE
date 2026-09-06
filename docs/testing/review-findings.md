@@ -5,6 +5,8 @@ all at `review` on the board, and all of their code is already on `main`
 (`e32ee97`). What is missing is a person's sign-off. This document is the
 paperwork half of that, done first, so the 105 minutes in
 `docs/testing/phase-0-manual-pass.md` go to the checks only an eye can make.
+(That runbook is ~170 minutes now: finding 6 below is what grew it, and the
+extra 65 are the sessions these twelve tasks never had.)
 
 ## What was checked
 
@@ -46,11 +48,10 @@ suggestion, a runbook step that cannot be performed, three tasks landed in one
 unreviewed commit alongside a fourth that has no ticket at all. Every "not
 executed" admission in the twelve was checked and every one of them is true.
 
-**Findings 1, 2 and 3 were fixed on 2026-09-06** and are stamped where they
+**Findings 1, 2, 3 and 6 were fixed on 2026-09-06** and are stamped where they
 stand, as is the ticketing half of finding 4. What is left — the shape of
-`cb9e08a` itself, two missing "Tests executed" sections, files touched but not
-listed, and seven tasks with no manual-pass session — is history and paperwork
-rather than code, and is open.
+`cb9e08a` itself, two missing "Tests executed" sections, and files touched but
+not listed — is history and paperwork rather than code, and is open.
 
 ---
 
@@ -242,6 +243,15 @@ commit message is not where a completion report goes.
 **Time to confirm.** Five minutes.
 
 ## 6. Seven of the twelve have no session in the manual-pass runbook
+
+> **Resolved 2026-09-06** — `MANUAL-PASS-COVERAGE: the runbook covers every
+> task at review`. T051 became steps 1B.3a–1B.3e and 1B.16a; T210 and T325
+> became **Session 8**; T220, T231, T232 and T221 became **Session 9**, whose
+> hook half runs in two stages so the safe part never touches a real
+> `~/.claude/settings.json`. The header no longer claims a completeness it did
+> not have, and the time is now the sum of the sessions (~170 min) rather than
+> a number that had gone stale. Every step traces to a claim in the next
+> section.
 
 **What the runbook claims.** `docs/testing/phase-0-manual-pass.md`: "This is
 every outstanding human check in one ordered session. It replaces the 'Not
@@ -539,7 +549,7 @@ item exists nowhere but the completion report that promised it.
 | Persist terminal sessions per workspace | T051 | Task file only |
 | The rail could name *why* the last session did not come back | T051 | Task file only |
 | Shell integration and command blocks | T096 | T097 (`todo`, task file, ADR-017) |
-| A jsdom vitest project so `.tsx` can be tested at all | T096 **and** T232 | Task files only — promised twice, tracked neither time |
+| A jsdom vitest project so `.tsx` can be tested at all | T096 **and** T232 | `JSDOM-VITEST` (`todo`, board row, no file) — added 2026-09-06 after being promised twice and tracked neither time |
 | Reordering terminal pills by drag | T096 | Task file only |
 | Artboard 8b's session rail | T096 | Task file only |
 | Colour the terminal surface's edge | T098 | Task file only |
@@ -555,7 +565,7 @@ item exists nowhere but the completion report that promised it.
 | Link a session to a workstream | T220 | T223 (`doing`, task file) |
 | Jump to the terminal a session runs in | T220 | T224 (`todo`, task file) |
 | `AgentSessionsChanged` should become a delta if the roster grows | T220 | Task file only |
-| **Bundle `gritty-agent-hook` as a sidecar resource** | T221 | **Nothing.** T221's own Allowed scope named `tauri.conf.json` for exactly this; without it a packaged build reports `hookAvailable: false` |
+| **Bundle `gritty-agent-hook` as a sidecar resource** | T221 | **T225** (`review`, task file) — built 2026-09-06. `Contents/MacOS/` now carries the hook beside the app; manual-pass step 6.8 is the standing check |
 | **Render `AgentTimeline.pending`** | T221 | **Nothing.** This is finding 1 |
 | **Surface `activitySource` on a rail row** | T221 | **Nothing.** This is finding 2, and §24 required it |
 | A signal for "your timeline closed because the workspace changed" | T230 | Task file only |
@@ -566,7 +576,7 @@ item exists nowhere but the completion report that promised it.
 | Name the rail's collapsed strip width as a token | T231 | Task file only |
 | A diff view for a touched file, on ADR-007's `ChangeSet` | T232 | Task file only — ADR-007 does not record it |
 | `AgentTimelineAppendedPayload` carries no `transcriptEvidence` | T232 | Task file only |
-| `crates/terminal/tests/pty.rs::kill_terminates_the_whole_process_tree` is flaky under load | T232 | **Nothing.** Its sibling flake, `a_changed_roster_emits_once_more`, was fixed after the report by `2b3a45e` (`interval_at` at `crates/gritty-core/src/agent_session/mod.rs:483` and `:683`); the PTY one was not |
+| `crates/terminal/tests/pty.rs::kill_terminates_the_whole_process_tree` is flaky under load | T232 | `PTY-FLAKE` (`todo`, board row, no file) — added 2026-09-06. Its sibling flake, `a_changed_roster_emits_once_more`, was fixed after the report by `2b3a45e` (`interval_at` at `crates/gritty-core/src/agent_session/mod.rs:483` and `:683`); the PTY one was not |
 | Incremental row mapping for a very long feed | T232 | Task file only |
 | Observed ownership violations | T325 | T326 (`unspec` ticket, no file) |
 | Write interception, after an ADR-018 amendment | T325 | T330 (`unspec` ticket, no file) |

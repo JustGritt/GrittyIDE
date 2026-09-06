@@ -3,6 +3,8 @@ node_modules/
 dist/
 /target/
 **/src-tauri/gen/
+# Sidecar binaries staged by apps/desktop/scripts/prepare-sidecar.mjs (T225)
+**/src-tauri/binaries/
 *.tsbuildinfo
 .vite/
 coverage/

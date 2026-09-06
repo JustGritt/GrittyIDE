@@ -10,43 +10,53 @@ enforcement; this is the plan the leases implement.
 
 ---
 
-## Where things stand — 2026-09-06
+## Where things stand — 2026-09-06 (evening)
+
+**This section is the one that goes stale.** It has done so once already — it
+described `e32ee97`, protocol 2.10.0 and twelve unreviewed tasks well after all
+three had moved. `scripts/agent-board.py list` is the live answer and this table
+is a snapshot; when they disagree, believe the board and fix this.
 
 | | |
 |---|---|
-| `main` | `e32ee97` — everything below has landed on it |
-| Protocol | **2.10.0** (on `main`) |
-| Schema | **3** (`0003_ownership.sql`, on `main`) |
-| Open PRs | none. #20–#24 are merged and the queue is empty |
-| At `review`, merged but unreviewed | T049, T051, T096, T098, T200, T210, T220, T221, T230, T231, T232, T325 — **twelve tasks**, all of whose code is on `main`; what is missing is a reviewer, not a merge |
-| `in-progress` | T045 drag and drop (holderless — see below) · T223 attention |
-| Specified, not started | T097, T222, T224 |
+| `main` | `cc69e79` — everything below has landed on it |
+| Protocol | **2.11.0** (on `main`) |
+| Schema | **4** (`0004_agent_links.sql`, on `main`) |
+| Open PRs | none. #20–#29 are merged and the queue is empty |
+| At `review`, merged but unreviewed | T041, T045, T210, T221, T225, T232 — six. Ten were reviewed and set `done` by PR #28 (T049, T051, T096, T098, T200, T220, T223, T230, T231, T325); T210, T221 and T232 came back through `tofix` in the same pass and were fixed by #29 |
+| `in-progress` | nothing implementation-side. `PHASE-0-TESTS` is holderless |
+| Specified, not started | T070, T080, T097, T100, T110, T222, T224, T300, T326 — Wave 1 wrote all six missing specs |
 | Not specified | T305, T310, T320, T330, T335, T400, T405, T410 |
 
-Everything below is downstream of three things that are not code.
+Everything below is downstream of two things that are not code — the third
+blocker is gone.
 
-### The three blockers, in order
+### The blockers, in order
 
 **1. ADR-001 is still `Proposed`, and only a human can close it.**
-`docs/testing/phase-0-manual-pass.md` is ~105 minutes of clicking that no agent
+`docs/testing/phase-0-manual-pass.md` is ~170 minutes of clicking that no agent
 on this machine can do: Monaco input in WKWebView, PTY under `vim`/`less`/Ctrl-C,
 a `kill -9` with dirty buffers, typing latency, the packaged bundle. It fills the
 `–` rows in `platform-matrix.md`, the perceptual rows of `phase-0-spike.md` §C,
 and the §D go/no-go answers. Until it runs, every Phase 1–2 task starts against a
 runtime decision that is formally open.
 
+Only **Sessions 1–7** (~130 min) bear on ADR-001. Sessions 8 and 9 close the
+review queue instead and can wait, which is worth knowing when the evening is
+short.
+
 This is the single highest-leverage block of time in the project, and it is the
 only work here that parallelises with everything else: agents write specs while
 it happens.
 
-**2. Twelve tasks sit at `review` and none of them has been driven by a pointer.**
-The completion reports say so honestly. Reviewing twelve tasks is the real
-bottleneck on this board — not the lease file, not build capacity. Merge before
-adding.
+**2. GitHub Actions will not start a job at all.** The account's billing has
+failed, so every check on every PR comes back in ~2 s with a payment message.
+A local `pnpm check` — the same command CI runs — is the only evidence any
+branch has. **Fix the billing before reading a red check as a code problem.**
 
-**3. The lease system is uncommitted.** `scripts/agent-lease.py`, the `AGENTS.md`
-section, the `.gitignore` line and `.claude/settings.json` are working-tree
-changes. Concurrency has no backstop until they land. This is wave 0.
+**3. ~~The lease system is uncommitted.~~** Landed in `3df11c4`, together with
+the ticket board that replaced the hand-maintained parts of this file.
+Concurrency has its backstop; wave 0 is done.
 
 ### The gate that was already crossed once
 
@@ -84,7 +94,9 @@ crates/search/**                        (T080, new)
 apps/desktop/src/features/search/**     (T080, new)
 ```
 
-Reserved protocol minors: **2.11** (T070), **2.12** (T080).
+Reserved protocol minors: ~~2.11~~ → **2.12** (T070), **2.13** (T080). 2.11.0 was
+spent by T223 and `main` is already on it; `docs/merge-queue.md` is the record,
+and the numbers below shift with it rather than being renumbered here.
 
 ### Lane G — git · T100 → T400
 
@@ -118,11 +130,12 @@ docs/decisions/ADR-017-terminal-command-blocks.md
 
 Reserved protocol minor: **2.15**.
 
-### Lane A — agent observability · T223 → T326 → T222 → T224
+### Lane A — agent observability · ~~T223~~ → T326 → T222 → T224
 
-T325 shipped a registry that knows a workstream owns a path. It cannot yet
-notice that an agent wrote there anyway, because nothing connects a discovered
-session to a workstream — that link is T223's second half. T326 is what turns the
+T325 shipped a registry that knows a workstream owns a path. It could not
+notice that an agent wrote there anyway, because nothing connected a discovered
+session to a workstream — that link was T223's second half, and it landed
+(`workstream_agent_link`, migration 0004). T326 is what turns the
 registry from a table into a thing that detects something, and it is the cheapest
 remaining step that makes T325 pay. T222 and T224 are additive and can slip.
 
@@ -193,35 +206,38 @@ No agent claims this lane and no agent may write ADR-001's verdict.
 ## Waves
 
 ```
-Wave 0  ── serial, one session ────────────────────────────────────────────
-        commit the lease system · merge #21 and #22 · rebase every branch
+Wave 0  ── done ───────────────────────────────────────────────────────────
+        the lease system and the ticket board landed (3df11c4); #21, #22 merged
 
-Wave 1  ── parallel with Lane H ───────────────────────────────────────────
+Wave 1  ── done, except Lane H ────────────────────────────────────────────
         six spec agents, one task file each        │  Alexis: manual pass
-        T070 T080 T100 T110 T300 T326              │  → ADR-001 verdict
-                                                    │  → the twelve reviews
+        T070 T080 T100 T110 T300 T326 — all six    │  → ADR-001 verdict
+        written, plus T223 built and ten reviews   │  → six reviews left
+                                                    │    (T041 T045 T210
+                                                    │     T221 T225 T232)
 
 Wave 2  ── four lanes, once ADR-001 is recorded ───────────────────────────
-        W: T070      G: T100      T: T097      A: T223
+        W: T070      G: T100      T: T097      A: T326
+                                   (ADR-017 first)
 
 Wave 3  ── the same four lanes, next task ─────────────────────────────────
-        W: T080      G: T400      T: —         A: T326    O: T300
+        W: T080      G: T400      T: —         A: T222    O: T300
 
 Wave 4  ── Gate D ─────────────────────────────────────────────────────────
-        O: T305 → T310 → T320    A: T222, T224    D: T110
+        O: T305 → T310 → T320    A: T224    D: T110
 
 Wave 5  ── enforcement and supervision ────────────────────────────────────
         T330 (ADR-018 amendment first)  T335  T405  T410
 ```
 
-Wave 1 is the one to start now, because spec-writing is the most parallel work in
-the project and the least blocked: six new files in `docs/tasks/`, one shared
-magnet touched for a minute each, and no dependency on ADR-001. It matches how
-T221–T224 and T230–T232 were written — one batch, ahead of implementation.
+**Wave 1's agent half is finished, and Lane H is the whole of what is left
+before Wave 2.** T223 shipped inside it, the ten reviews landed with #28, and
+the three tasks that came back through `tofix` were fixed by #29. What did not
+happen is the manual pass, which is the only thing standing between here and a
+recorded ADR-001.
 
 **Run three or four lanes at once, not six.** The binding constraint is not the
-lease file or the machine; it is that one person reviews everything and twelve
-tasks are already queued.
+lease file or the machine; it is that one person reviews everything.
 
 ---
 
