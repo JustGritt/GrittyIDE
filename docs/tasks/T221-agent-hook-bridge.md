@@ -489,3 +489,68 @@ no row — so the combination cannot occur.
 - `since` is the hook's own clock. Two machines sharing a home directory over a
   network would disagree about staleness; the comparison saturates at zero
   rather than going negative, but it is still a clock nobody validated.
+
+---
+
+## Fix pass — 2026-09-06
+
+Sent back to `tofix` by `gritt` with finding 2 of `docs/testing/review-findings.md`
+attached: *§24 is not implemented, and the report describes the state wrongly.*
+
+### What was wrong
+
+Two things, and the second is the one worth remembering.
+
+**§24 was never built.** `AgentSession.activitySource` reached the wire and no
+component read it. `activitySourceLabel` at `agent-status.ts:103` was written,
+widened for a source a newer core might send, and unit-tested — and its only
+caller was its own test.
+
+**The follow-up describing it was wrong twice over.** It said "`activitySourceLabel`
+is exported and tested but only the settings surface is wired today". The
+settings surface is not wired to it either: `agent-integration-settings.tsx`
+never mentions `activitySource`. And §24 is a *Required behavior* item, not
+something to "consider" — demoting it to a follow-up is what let it ship
+unnoticed, because a reviewer reading that sentence would conclude the label was
+on screen somewhere.
+
+Nothing here was a claim of work not done. It is the smaller failure of an
+accurate report about the wrong thing.
+
+### What changed
+
+| File | What |
+|---|---|
+| `agent-rail.tsx` | `AgentRow`'s foot draws `activitySourceLabel(session.activitySource)` beside the status badge |
+| `app.css` | `.agent-rail__source`, quiet, from existing tokens |
+| `agent-rail-render.test.ts` | new — 4 cases, rendering the real `AgentRail` to static markup |
+
+Two decisions:
+
+1. **On the rail row, not in `AgentStatusBadge`.** The badge is shared with the
+   island's reduced row (`agents-panel.tsx`), and the island pill is the
+   deliberately terse surface — a summary that grows a provenance clause per row
+   stops being a summary. The rail is where a row has space to be attributable.
+2. **The test renders the component.** A view-model test could not have caught
+   this defect, because the view model was correct: the label existed and
+   returned the right string. What was missing was a caller. So the new test
+   asserts markup, and it covers all three sources plus one a newer core might
+   send, rather than one representative case — three sources that can disagree
+   is the whole reason §24 exists.
+
+That test immediately earned itself: it was written asserting a `BLOCKED` row
+reads "Blocked", and the render showed it reads **"Pending validation"** — which
+is exactly the phrase §24 calls magic without an attribution beside it.
+
+### Tests actually executed
+
+- `pnpm vitest run apps/desktop/src/features/agents` — 9 files, 96 tests, green.
+- `pnpm check` — the shared run covering all three fixes in this pull request.
+
+### Still not executed
+
+Everything in the original report's "not executed" list stands: the installer
+has still never been run against a real `~/.claude/settings.json`, and the hook
+binary is still not bundled as a sidecar, so Session 6 of the manual pass cannot
+exercise the install path. This fix changes what a row *says*, not what produces
+what it says — a `HOOK` verdict on screen still needs an installed hook.

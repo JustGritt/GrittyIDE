@@ -3145,6 +3145,17 @@ textarea:focus-visible {
   color: var(--fg-faint);
 }
 
+/* Where the badge beside it got its verdict (T221 §24). Quiet, because it is
+   the footnote to a status and not a status of its own — but present, because
+   a `BLOCKED` row with no provenance is a claim the user cannot check. */
+.agent-rail__source {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-label);
+  color: var(--fg-faint);
+}
+
 /* The selected session's feed, and the files it touched (T232). */
 .agent-rail__timeline {
   display: flex;
