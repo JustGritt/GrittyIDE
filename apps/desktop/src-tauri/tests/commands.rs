@@ -1681,3 +1681,283 @@ fn notifications_are_off_until_the_setting_is_turned_on_through_the_adapter() {
         .expect_err("malformed");
     assert_eq!(malformed["code"], "InvalidInput");
 }
+
+// ---------------------------------------------------------------------------
+// Runs Gritty owns (T300-WIRE)
+// ---------------------------------------------------------------------------
+
+impl Harness {
+    /// Open a workspace and create a workstream in it: everything a run needs
+    /// before it can exist.
+    fn workspace_and_workstream(&self, root: &std::path::Path) -> (Value, Value) {
+        let workspace = self.open_workspace(root);
+        let workspace_id = workspace["id"].clone();
+        let workstream = self
+            .session(
+                "workstreams_create",
+                json!({ "workspaceId": workspace_id, "title": "Gate D" }),
+            )
+            .expect("create the workstream");
+        (workspace_id, workstream["id"].clone())
+    }
+
+    fn run(&self, id: &Value, workspace_id: &Value) -> Value {
+        let list = self
+            .session("runs_list", json!({ "workspaceId": workspace_id }))
+            .expect("list runs");
+        list.as_array()
+            .unwrap()
+            .iter()
+            .find(|run| run["id"] == *id)
+            .cloned()
+            .unwrap_or_else(|| panic!("run {id} missing from {list}"))
+    }
+
+    /// Poll `runs.list` until the run's state satisfies the predicate. Polling
+    /// rather than listening: this is the surface the panel actually uses, and
+    /// a state it cannot read back is a state the panel cannot draw.
+    fn run_until(&self, id: &Value, workspace_id: &Value, want: impl Fn(&str) -> bool) -> Value {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let run = self.run(id, workspace_id);
+            if want(run["state"].as_str().expect("a run has a state")) {
+                return run;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for {id}: {run}"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+}
+
+fn is_terminal(state: &str) -> bool {
+    matches!(state, "FINISHED" | "FAILED" | "CANCELLED" | "INTERRUPTED")
+}
+
+/// Gate D end to end through the IPC the WebView uses: start a scripted run,
+/// watch it finish, read its log back.
+#[test]
+fn a_fake_run_starts_finishes_and_reports_what_it_did() {
+    let root = TempWorkspace::new("run-finish");
+    let harness = Harness::new();
+    let (workspace_id, workstream_id) = harness.workspace_and_workstream(&root.0);
+
+    let started = harness
+        .session(
+            "runs_start_fake",
+            json!({
+                "workspaceId": workspace_id,
+                "workstreamId": workstream_id,
+                "script": "quick",
+            }),
+        )
+        .expect("start the run");
+    assert_eq!(started["state"], "STARTING");
+    assert_eq!(started["provider"], "FAKE");
+    assert_eq!(started["workstreamId"], workstream_id);
+    let run_id = started["id"].clone();
+
+    let ended = harness.run_until(&run_id, &workspace_id, is_terminal);
+    assert_eq!(ended["state"], "FINISHED");
+    assert!(ended["finishedAt"].is_number());
+
+    let log = harness
+        .session("runs_events", json!({ "runId": run_id }))
+        .expect("read the log back");
+    let kinds: Vec<&str> = log["events"]
+        .as_array()
+        .expect("a log has events")
+        .iter()
+        .map(|record| record["event"]["type"].as_str().expect("a typed event"))
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            "RUN_STARTED",
+            "PROMPT_STARTED",
+            "PROMPT_FINISHED",
+            "RUN_FINISHED"
+        ]
+    );
+
+    // The renderer is told, not only able to ask.
+    assert!(
+        harness
+            .event_names()
+            .iter()
+            .any(|name| name == "AgentRunChanged"),
+        "the run was announced: {:?}",
+        harness.event_names()
+    );
+}
+
+/// The two checks `AgentRunSpec` delegates to this adapter, and the shape check
+/// the request type already made.
+#[test]
+fn starting_a_run_refuses_an_unknown_workstream_script_or_workspace() {
+    let root = TempWorkspace::new("run-refuse");
+    let harness = Harness::new();
+    let (workspace_id, workstream_id) = harness.workspace_and_workstream(&root.0);
+
+    let unknown_workstream = harness
+        .session(
+            "runs_start_fake",
+            json!({ "workspaceId": workspace_id, "workstreamId": "ws-nope" }),
+        )
+        .expect_err("an unknown workstream is refused");
+    assert_eq!(unknown_workstream["code"], "NotFound");
+
+    let unknown_script = harness
+        .session(
+            "runs_start_fake",
+            json!({
+                "workspaceId": workspace_id,
+                "workstreamId": workstream_id,
+                "script": "no-such-script",
+            }),
+        )
+        .expect_err("an unknown script is refused");
+    assert_eq!(unknown_script["code"], "InvalidInput");
+    assert_eq!(unknown_script["details"]["field"], "script");
+
+    let blank_script = harness
+        .session(
+            "runs_start_fake",
+            json!({
+                "workspaceId": workspace_id,
+                "workstreamId": workstream_id,
+                "script": "   ",
+            }),
+        )
+        .expect_err("a blank script name is refused");
+    assert_eq!(blank_script["code"], "InvalidInput");
+
+    let closed_workspace = harness
+        .session(
+            "runs_start_fake",
+            json!({ "workspaceId": "ws-gone", "workstreamId": workstream_id }),
+        )
+        .expect_err("a workspace that is not open is refused");
+    assert_eq!(closed_workspace["code"], "NotFound");
+
+    // None of the refusals created anything.
+    let listed = harness
+        .session("runs_list", json!({ "workspaceId": workspace_id }))
+        .expect("list runs");
+    assert!(listed.as_array().unwrap().is_empty(), "{listed}");
+}
+
+/// The acceptance script parks on a permission nothing can answer yet, which is
+/// T300-WIRE's one deliberate gap. `runs.cancel` is what ends it, and an
+/// already-ended run cancels idempotently.
+#[test]
+fn a_parked_run_is_ended_by_cancelling_it() {
+    let root = TempWorkspace::new("run-cancel");
+    let harness = Harness::new();
+    let (workspace_id, workstream_id) = harness.workspace_and_workstream(&root.0);
+
+    let started = harness
+        .session(
+            "runs_start_fake",
+            json!({
+                "workspaceId": workspace_id,
+                "workstreamId": workstream_id,
+                "script": "fullLifecycle",
+            }),
+        )
+        .expect("start the run");
+    let run_id = started["id"].clone();
+
+    let blocked = harness.run_until(&run_id, &workspace_id, |state| state == "BLOCKED");
+    assert_eq!(blocked["activity"]["kind"], "REQUESTING_PERMISSION");
+
+    harness
+        .session("runs_cancel", json!({ "runId": run_id }))
+        .expect("cancel the parked run");
+    let ended = harness.run_until(&run_id, &workspace_id, is_terminal);
+    assert_eq!(ended["state"], "CANCELLED");
+
+    // Idempotent: cancelling an ended run returns its snapshot, not an error.
+    let again = harness
+        .session("runs_cancel", json!({ "runId": run_id }))
+        .expect("a second cancel is a no-op");
+    assert_eq!(again["state"], "CANCELLED");
+
+    let unknown = harness
+        .session("runs_cancel", json!({ "runId": "run-nope" }))
+        .expect_err("an unknown run is refused");
+    assert_eq!(unknown["code"], "NotFound");
+}
+
+/// The first of the two reactions T300-CORE proved and nothing called: a run
+/// whose workstream is removed has nothing left to be doing, and is cancelled
+/// rather than left running against work that no longer exists.
+#[test]
+fn removing_a_workstream_cancels_the_runs_against_it() {
+    let root = TempWorkspace::new("run-workstream-gone");
+    let harness = Harness::new();
+    let (workspace_id, workstream_id) = harness.workspace_and_workstream(&root.0);
+
+    let started = harness
+        .session(
+            "runs_start_fake",
+            json!({
+                "workspaceId": workspace_id,
+                "workstreamId": workstream_id,
+                "script": "fullLifecycle",
+            }),
+        )
+        .expect("start the run");
+    let run_id = started["id"].clone();
+    harness.run_until(&run_id, &workspace_id, |state| state == "BLOCKED");
+
+    harness
+        .session(
+            "workstreams_remove",
+            json!({ "workspaceId": workspace_id, "workstreamId": workstream_id }),
+        )
+        .expect("remove the workstream");
+
+    let ended = harness.run_until(&run_id, &workspace_id, is_terminal);
+    assert_eq!(
+        ended["state"], "CANCELLED",
+        "the run outlived the work it was doing"
+    );
+}
+
+/// The second reaction: closing a workspace stops Gritty being able to watch a
+/// run, which is `INTERRUPTED` and not `CANCELLED` — nobody asked it to stop.
+#[test]
+fn closing_a_workspace_interrupts_the_runs_inside_it() {
+    let root = TempWorkspace::new("run-workspace-closed");
+    let harness = Harness::new();
+    let (workspace_id, workstream_id) = harness.workspace_and_workstream(&root.0);
+
+    let started = harness
+        .session(
+            "runs_start_fake",
+            json!({
+                "workspaceId": workspace_id,
+                "workstreamId": workstream_id,
+                "script": "fullLifecycle",
+            }),
+        )
+        .expect("start the run");
+    let run_id = started["id"].clone();
+    harness.run_until(&run_id, &workspace_id, |state| state == "BLOCKED");
+
+    harness
+        .session("workspace_close", json!({ "workspaceId": workspace_id }))
+        .expect("close the workspace");
+
+    // `runs.list` needs no open workspace: an ended run stays listable so the
+    // panel can still say what became of it.
+    let ended = harness.run_until(&run_id, &workspace_id, is_terminal);
+    assert_eq!(ended["state"], "INTERRUPTED");
+    assert!(
+        ended["error"].is_null(),
+        "an interruption is not a failure: {ended}"
+    );
+}

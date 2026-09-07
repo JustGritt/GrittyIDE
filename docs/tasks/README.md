@@ -84,11 +84,17 @@ the workflow below are hand-maintained.
 | T222-CODEX | Codex, as one provider file | 3 | T222-SEAM | todo |
 | T222-SEAM | A provider registry, so providers stop being serial | 3 | T220 | unspec |
 | T233 | Agents in the left sidebar, or not (the 12a/12b divergence) | 3 | – | unspec |
+| T300-ANSWER | Answer a permission or decision on a run Gritty owns | 4 | T300-WIRE | unspec |
 | T300-C | The run contract, alone (Gate D) | 4 | T200, T210 | review |
 | T300-CMD | runs.* adapters, and the minimal surface | 4 | T300-C | review |
 | T300-CORE | The run manager: supervision, cancellation, bounded events | 4 | T300-C | review |
 | T300-FAKE | gritty-agent-fake: a scripted, deterministic adapter | 4 | T300-C | review |
+| T300-PANEL | A run belongs on its workstream's island row, not a fourth roster | 4 | T300-WIRE | unspec |
+| T300-WIRE | Connect the three Gate D halves: fake driver, manager, runs.* adapters | 4 | T300-CORE | review |
 | T400-R | Worktree create and remove | 5 | T100 | unspec |
+| T233-M | The roster row model: owned runs and observed sessions in one list | 3 | T300-C | doing |
+| T233-S | The Agents section in the left sidebar, and the sidebar tab strip (12a) | 3 | T233-M | unspec |
+| T233-C | The full-height agent console, and retiring the right rail (12a) | 3 | T233-S,T232 | unspec |
 <!-- board:table end -->
 
 ## Dependency graph (architecture addendum §2)

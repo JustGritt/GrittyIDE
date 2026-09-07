@@ -11,6 +11,10 @@ use std::path::PathBuf;
 use std::sync::Once;
 use std::time::Instant;
 
+use gritty_core::agent_run::{
+    AgentRun, AgentRunEventLog, AgentRunProvider, AgentRunSpec, CancelRunRequest,
+    FakeDriverOptions, ListRunsRequest, RunEventsRequest, StartFakeRunRequest, fake_driver,
+};
 use gritty_core::agent_session::{
     AgentIntegration, AgentIntegrationChange, AgentIntegrationChangeRequest,
     AgentIntegrationRequest, AgentNotificationSettings, AgentPermissionGrants, AgentRoster,
@@ -158,14 +162,27 @@ pub async fn workspace_close(
     request: serde_json::Value,
 ) -> Result<Workspace, CoreError> {
     let workspaces = core.workspaces.clone();
+    let runs = core.runs.clone();
     guard("workspace.close", move |correlation| async move {
         let request: CloseWorkspaceRequest = parse_request(request)?;
-        workspaces.close(
+        let closed = workspaces.close(
             &request.workspace_id,
             UnsavedPolicy::from_force(request.force),
             Actor::User,
             correlation,
-        )
+        )?;
+        // `INTERRUPTED`, not `CANCELLED`: nobody asked these runs to stop, we
+        // simply stopped being able to watch them. Done after the close
+        // succeeded — an unsaved buffer can refuse it, and interrupting a run
+        // for a close that did not happen would be a lie.
+        for interrupted in runs.interrupt_for_workspace(&request.workspace_id) {
+            tracing::info!(
+                run = %interrupted.id,
+                workspace = %request.workspace_id,
+                "interrupted a run whose workspace closed"
+            );
+        }
+        Ok(closed)
     })
     .await
 }
@@ -834,9 +851,24 @@ pub async fn workstreams_remove(
     request: serde_json::Value,
 ) -> Result<(), CoreError> {
     let workstreams = core.workstreams.clone();
+    let runs = core.runs.clone();
     guard("workstreams.remove", move |correlation| async move {
         let request: RemoveWorkstreamRequest = parse_request(request)?;
-        workstreams.remove(request, Actor::User, correlation).await
+        let workstream_id = request.workstream_id.clone();
+        workstreams
+            .remove(request, Actor::User, correlation)
+            .await?;
+        // A run outlives the work it was doing otherwise: its workstream is
+        // gone and nothing would ever end it. Cancelled after the removal
+        // succeeded, so a refused removal leaves its runs alone.
+        for cancelled in runs.cancel_for_workstream(&workstream_id) {
+            tracing::info!(
+                run = %cancelled.id,
+                workstream = %workstream_id,
+                "cancelled a run whose workstream was removed"
+            );
+        }
+        Ok(())
     })
     .await
 }
@@ -1021,6 +1053,117 @@ pub async fn ownership_resolve(
         ownership
             .resolve_conflict(request, Actor::User, correlation)
             .await
+    })
+    .await
+}
+
+/// `runs.startFake`
+///
+/// Where the three Gate D halves meet (T300-WIRE). Each was correct alone and
+/// none could reach the others: `AgentRunManager::start` takes a *generic*
+/// driver closure, `gritty-agent-fake` cannot name a `AgentRunEvent` without a
+/// Cargo cycle, and this file had no `runs.*` in it at all.
+///
+/// Two checks happen **here**, before anything is created, because
+/// `AgentRunSpec` says they are the adapter's:
+///
+/// 1. the script name resolves, or `InvalidInput` on `script`;
+/// 2. the workstream exists in that workspace, or `NotFound`. The manager holds
+///    no database and cannot answer this; `workstreams.list` refuses a
+///    workspace that is not open, so one call settles both halves of the
+///    request rather than trusting either.
+///
+/// The two API shapes are reconciled here rather than by changing either side:
+/// T300-CMD recorded `start_fake(request, correlation)` and T300-CORE shipped
+/// `start(spec, drive)`, so this builds the spec and supplies the driver.
+#[tauri::command]
+pub async fn runs_start_fake(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentRun, CoreError> {
+    let runs = core.runs.clone();
+    let workstreams = core.workstreams.clone();
+    guard("runs.startFake", move |correlation| async move {
+        let request: StartFakeRunRequest = parse_request(request)?;
+        request.validate()?;
+        let script = fake_driver::resolve_script(request.script.as_deref())?;
+
+        let known = workstreams
+            .list(
+                ListWorkstreamsRequest {
+                    workspace_id: request.workspace_id.clone(),
+                },
+                correlation.clone(),
+            )
+            .await?;
+        if !known
+            .iter()
+            .any(|workstream| workstream.id == request.workstream_id)
+        {
+            return Err(CoreError::not_found(format!(
+                "no workstream {} in this workspace",
+                request.workstream_id
+            )));
+        }
+
+        let spec = AgentRunSpec {
+            workspace_id: request.workspace_id,
+            workstream_id: request.workstream_id,
+            provider: AgentRunProvider::Fake,
+            actor: Actor::User,
+            correlation_id: correlation,
+        };
+        // Paced for a human, not for a test: the fake is instantaneous, and a
+        // run that reaches FINISHED before the panel paints shows nothing.
+        runs.start(spec, fake_driver::drive(script, FakeDriverOptions::demo()))
+    })
+    .await
+}
+
+/// `runs.cancel`
+///
+/// Cooperative and idempotent, like `operations.cancel`: an unknown id is
+/// `NotFound`, an already-ended run comes back unchanged.
+#[tauri::command]
+pub async fn runs_cancel(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentRun, CoreError> {
+    let runs = core.runs.clone();
+    guard("runs.cancel", move |_| async move {
+        let request: CancelRunRequest = parse_request(request)?;
+        runs.cancel(&request.run_id, Actor::User)
+    })
+    .await
+}
+
+/// `runs.list`
+#[tauri::command]
+pub async fn runs_list(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Vec<AgentRun>, CoreError> {
+    let runs = core.runs.clone();
+    guard("runs.list", move |_| async move {
+        let request: ListRunsRequest = parse_request(request)?;
+        Ok(runs.list(&request.workspace_id))
+    })
+    .await
+}
+
+/// `runs.events`
+///
+/// The bounded ring, replayed. What a client that missed a batch — or attached
+/// late — reads to catch up.
+#[tauri::command]
+pub async fn runs_events(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentRunEventLog, CoreError> {
+    let runs = core.runs.clone();
+    guard("runs.events", move |_| async move {
+        let request: RunEventsRequest = parse_request(request)?;
+        runs.events(&request.run_id)
     })
     .await
 }

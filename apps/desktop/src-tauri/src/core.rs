@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use gritty_core::CORE_EVENT_CHANNEL;
 use gritty_core::CoreError;
+use gritty_core::agent_run::AgentRunManager;
 use gritty_core::agent_session::attention::AttentionNotifier;
 use gritty_core::agent_session::{AgentDiscoveryConfig, AgentSessionManager};
 use gritty_core::document::{DocumentLimits, DocumentManager};
@@ -57,6 +58,9 @@ pub struct Core {
     pub workstreams: Arc<WorkstreamManager>,
     pub ownership: Arc<OwnershipManager>,
     pub agents: Arc<AgentSessionManager>,
+    /// Agent runs Gritty **owns** (T300). Distinct from `agents`, which is the
+    /// read-only roster of sessions it did not start; the two never meet.
+    pub runs: Arc<AgentRunManager>,
 }
 
 /// Delivers every envelope on the single core event channel. Failures are
@@ -146,6 +150,12 @@ impl Core {
             workspaces.clone(),
             workstream_db,
         );
+        // Runs Gritty **starts** and is answerable for (T300, Gate D). The
+        // other half of the line `agent_run` exists to draw: `agents` below is
+        // the roster of sessions Gritty did not start and cannot stop, and no
+        // type crosses between them. Built before that one because
+        // `AgentSessionManager::start` consumes the handle and the bus.
+        let runs = AgentRunManager::new(handle.clone(), events.clone(), workspaces.clone());
         // Discovery of *other* agents on this machine (T220). Read-only, and
         // started here rather than lazily so the roster is warm by the time the
         // island first asks for it.
@@ -182,6 +192,7 @@ impl Core {
             workstreams,
             ownership,
             agents,
+            runs,
         }
     }
 
@@ -204,6 +215,11 @@ impl Core {
         // Stops the discovery poll so no scan outlives the window.
         self.agents.shutdown();
         tauri::async_runtime::block_on(async {
+            // Runs first, and before the session flush: every live run ends
+            // `INTERRUPTED` — nobody asked it to stop, we simply stopped being
+            // able to watch it — and those endings are events the writer still
+            // has to see. Flushing first would drop them.
+            self.runs.shutdown(SHUTDOWN_GRACE).await;
             if !self.session.flush(SHUTDOWN_GRACE).await {
                 tracing::warn!("session writer did not flush before exit");
             }
