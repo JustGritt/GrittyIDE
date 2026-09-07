@@ -81,7 +81,7 @@ the workflow below are hand-maintained.
 | PROTO-W3 | Wave 3 wire, in one PR: search | 2 | ADR-022 | todo |
 | SIDECAR-FRESH-CHECKOUT | A fresh clone or worktree cannot build gritty-desktop until T225's sidecar is staged by hand | 3 | T225 | todo |
 | T080-U | The search panel | 2 | PROTO-W3, T080 | todo |
-| T100-U | Git status and diff, in the shell | 2 | PROTO-W2, T100 | todo |
+| T100-U | Git status and diff, in the shell | 2 | PROTO-W2, T100 | blocked |
 | T222-CODEX | Codex, as one provider file | 3 | T222-SEAM | todo |
 | T222-SEAM | A provider registry, so providers stop being serial | 3 | T220 | unspec |
 | T233 | Agents in the left sidebar, or not (the 12a/12b divergence) | 3 | – | unspec |
