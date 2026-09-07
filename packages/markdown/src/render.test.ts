@@ -136,14 +136,58 @@ describe('createMarkdownRenderer', () => {
     expect(result.failed).toBe(false);
   });
 
+  // The budget is asserted against **CPU time, not wall-clock**, and that is the
+  // whole of MARKDOWN-BUDGET-FLAKE.
+  //
+  // `performance.now()` measures elapsed wall time, which on a loaded machine
+  // includes every millisecond this process spent descheduled waiting for a
+  // core. During a six-agent fan-out the same render measured 2.0-3.9 s against
+  // a 2000 ms bound while doing exactly the same work — the test was reporting
+  // the machine's contention, not the renderer's speed, and it failed on the
+  // days it was least convenient.
+  //
+  // `process.cpuUsage()` counts only time this process was actually on a core,
+  // so it is flat under contention and moves only when the renderer does. That
+  // is what the bound is for: catching an algorithmic regression (which would
+  // be multiples, not percentages), never scheduler noise. Vitest's default
+  // `forks` pool gives this file its own process, so the reading is this
+  // render's and not the suite's.
+  //
+  // Measured on this machine (8 cores), rendering the same fixture:
+  //
+  //   |       | idle          | 16 spinners on 8 cores | variation |
+  //   |-------|---------------|------------------------|-----------|
+  //   | wall  | 324 ms        | 858-1048 ms            | 3.2x      |
+  //   | CPU   | 623 ms        | 778-822 ms             | 1.3x      |
+  //
+  // CPU reads *higher* than wall when idle because it counts V8's background
+  // JIT and GC threads as well as the main one. That is fine — the bound cares
+  // about the ratio under load, not the absolute, and 1.3x against 3.2x is why
+  // the assertion moved.
+  //
+  // The bound is 4000 ms: ~5x the worst reading under a saturated machine, and
+  // still far below the multiples an algorithmic regression on a 100k-character
+  // document would cost. **It catches catastrophe, not regression** — reliably
+  // detecting a 2-3x slowdown needs a benchmark with a recorded baseline, which
+  // is a different tool and a follow-up (`MARKDOWN-BENCH`), not a unit test on
+  // a machine shared with other agents.
+  //
+  // The wall time is still measured and logged, because it is the number a
+  // human actually cares about — it is just not something a unit test on a
+  // shared machine can assert.
   it('renders a long document within budget', () => {
     const text = fixture('long.md');
+    const startedCpu = process.cpuUsage();
     const started = performance.now();
     const result = renderer.render(text, { path: 'long.md' });
     const elapsed = performance.now() - started;
-    console.info(`long.md (${text.length} chars) rendered in ${elapsed.toFixed(1)} ms`);
+    const spent = process.cpuUsage(startedCpu);
+    const cpuMs = (spent.user + spent.system) / 1000;
+    console.info(
+      `long.md (${text.length} chars) rendered in ${cpuMs.toFixed(1)} ms CPU, ` +
+        `${elapsed.toFixed(1)} ms wall`,
+    );
     expect(result.html.length).toBeGreaterThan(100_000);
-    // Generous bound for CI; the report records the measured value.
-    expect(elapsed).toBeLessThan(2000);
+    expect(cpuMs).toBeLessThan(4000);
   });
 });

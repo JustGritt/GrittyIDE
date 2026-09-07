@@ -73,18 +73,21 @@ the workflow below are hand-maintained.
 | CI-LINUX-DARK | Linux CI is dark until the minute allowance resets (1 Oct) or a spending limit is set |  | – | blocked |
 | [CI-RUNNER-GC](CI-RUNNER-GC-disk-retention.md) | Self-hosted runner never cleans up: target/ and stale bundles grow unbounded on the dev Mac |  | – | review |
 | [EVENT-LISTEN-GAP](EVENT-LISTEN-GAP-startup-events.md) | An event emitted before the WebView is listening reaches nobody | 1 | T010 | review |
-| MARKDOWN-BUDGET-FLAKE | render.test.ts 2000ms wall-clock budget fails under concurrent-build load | 3 | – | todo |
-| MONACO-JSDOM-FLAKE | model-eol.dom.test.ts times out its 10s beforeAll under load | 3 | JSDOM-VITEST | todo |
+| MARKDOWN-BENCH | A markdown benchmark with a recorded baseline, if a perf gate is wanted | 3 | MARKDOWN-BUDGET-FLAKE | unspec |
+| MARKDOWN-BUDGET-FLAKE | render.test.ts 2000ms wall-clock budget fails under concurrent-build load | 3 | – | review |
+| MONACO-JSDOM-FLAKE | model-eol.dom.test.ts times out its 10s beforeAll under load | 3 | JSDOM-VITEST | review |
+| MONACO-PREBUNDLE | Pre-bundle monaco-editor so the 9s transform is not paid every run | 3 | MONACO-JSDOM-FLAKE | unspec |
 | PLAN-FANOUT | Split the remaining work into fan-out-sized tickets, and the lanes to run them in |  | – | review |
 | PROTO-W2 | Wave 2 wire, in one PR: watcher, git, terminal blocks, diagnostics, violations | 2 | ADR-001, ADR-017, ADR-023 | todo |
 | PROTO-W2-GIT | The git wire: git.status and git.diff reach the shell | 2 | T100,ADR-023 | review |
 | PROTO-W3 | Wave 3 wire, in one PR: search | 2 | ADR-022 | todo |
-| SIDECAR-FRESH-CHECKOUT | A fresh clone or worktree cannot build gritty-desktop until T225's sidecar is staged by hand | 3 | T225 | todo |
+| SIDECAR-BUNDLE-CONFIG | Move externalBin to a bundle-time config so a compile never needs a staged binary | 3 | SIDECAR-FRESH-CHECKOUT | unspec |
+| SIDECAR-FRESH-CHECKOUT | A fresh clone or worktree cannot build gritty-desktop until T225's sidecar is staged by hand | 3 | T225 | review |
 | T080-U | The search panel | 2 | PROTO-W3, T080 | todo |
 | T100-U | Git status and diff, in the shell | 2 | PROTO-W2, T100 | blocked |
 | T222-CODEX | Codex, as one provider file | 3 | T222-SEAM | todo |
 | T222-SEAM | A provider registry, so providers stop being serial | 3 | T220 | unspec |
-| T233 | Agents in the left sidebar, or not (the 12a/12b divergence) | 3 | – | unspec |
+| [T233](T233-agents-sidebar.md) | Agents in the left sidebar (design artboard 12a) | 3 | – | unspec |
 | T300-ANSWER | Answer a permission or decision on a run Gritty owns | 4 | T300-WIRE | unspec |
 | T300-C | The run contract, alone (Gate D) | 4 | T200, T210 | review |
 | T300-CMD | runs.* adapters, and the minimal surface | 4 | T300-C | review |
@@ -95,7 +98,7 @@ the workflow below are hand-maintained.
 | T400-R | Worktree create and remove | 5 | T100 | unspec |
 | T233-M | The roster row model: owned runs and observed sessions in one list | 3 | T300-C | doing |
 | T233-S | The Agents section in the left sidebar, and the sidebar tab strip (12a) | 3 | T233-M | doing |
-| T233-C | The full-height agent console, and retiring the right rail (12a) | 3 | T233-S,T232 | unspec |
+| T233-C | The full-height agent console, and retiring the right rail (12a) | 3 | T233-S,T232 | doing |
 <!-- board:table end -->
 
 ## Dependency graph (architecture addendum §2)

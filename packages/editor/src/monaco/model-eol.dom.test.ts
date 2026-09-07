@@ -37,7 +37,23 @@ beforeAll(async () => {
     document.queryCommandSupported = () => false;
   }
   monaco = await import('monaco-editor/editor/editor.api');
-});
+  // 60 s, not Vitest's default 10 s, and the reason is MONACO-JSDOM-FLAKE.
+  //
+  // `monaco-editor` is inlined (see this package's vitest.config.ts: it ships
+  // ESM without `"type": "module"` and imports .css, so Node cannot load it
+  // externalized and Vite must transform it). That transform is ~9 s of real
+  // work on an idle machine and it happens on every run — measured at 8.8-9.0 s
+  // with `Duration ... (transform 8.80s)` while this file was failing.
+  //
+  // So the default left roughly one second of headroom, and any load at all
+  // spent it: at load average 80 this hook timed out three runs out of three,
+  // deterministically. Nothing was wrong with the import — the budget was
+  // simply smaller than the work.
+  //
+  // This is a timeout on the slowest *setup* in the repository, not a licence
+  // for slow tests: the assertions below still run under the default
+  // `testTimeout`, and they are microseconds each once the model exists.
+}, 60_000);
 
 describe('Monaco text model line endings', () => {
   it('round-trips a consistently CRLF file byte-exact', () => {

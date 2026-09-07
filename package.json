@@ -8,6 +8,7 @@
     "node": ">=24"
   },
   "scripts": {
+    "postinstall": "pnpm --filter @gritty/desktop sidecar:dev",
     "dev": "pnpm --filter @gritty/desktop tauri dev",
     "build": "pnpm --filter @gritty/desktop tauri build",
     "tauri": "pnpm --filter @gritty/desktop tauri",

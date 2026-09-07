@@ -10,6 +10,20 @@
 // `tauri build --no-bundle` on CI. Keep it cheap, platform-neutral, and loud
 // when it fails: a bundle that silently omits the hook reports
 // `hookAvailable: false` with nothing to say why.
+//
+// It also runs from the repository's `postinstall` (SIDECAR-FRESH-CHECKOUT),
+// because `bundle.externalBin` is checked by `tauri_build` at **compile** time:
+// without a staged file, a fresh clone cannot even `cargo check -p
+// gritty-desktop`, so `pnpm check`, `pnpm dev` and CI all fail on a clean
+// checkout. That call passes `--debug --optional`:
+//
+//   --debug     a debug build is enough to satisfy a path-existence check, and
+//               it is much cheaper than a release build on every install. A
+//               real bundle still re-stages release from `beforeBuildCommand`.
+//   --optional  a missing Rust toolchain warns and exits 0 instead of failing
+//               the install. Someone without cargo cannot build the desktop app
+//               either way, and breaking `pnpm install` for them would move the
+//               newcomer's failure earlier rather than fix it.
 
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync } from 'node:fs';
@@ -26,7 +40,18 @@ function run(command, args) {
   return execFileSync(command, args, { cwd: repoRoot, encoding: 'utf8' }).trim();
 }
 
+// `--optional` downgrades every failure to a warning: see the header.
+const optional = process.argv.includes('--optional');
+
 function fail(message) {
+  if (optional) {
+    console.warn(`${CRATE}: ${message}`);
+    console.warn(
+      `${CRATE}: skipping the sidecar. \`cargo check -p gritty-desktop\` will fail until ` +
+        '`pnpm --filter @gritty/desktop sidecar` succeeds.',
+    );
+    process.exit(0);
+  }
   console.error(`${CRATE}: ${message}`);
   process.exit(1);
 }
