@@ -77,6 +77,7 @@ the workflow below are hand-maintained.
 | MONACO-JSDOM-FLAKE | model-eol.dom.test.ts times out its 10s beforeAll under load | 3 | JSDOM-VITEST | todo |
 | PLAN-FANOUT | Split the remaining work into fan-out-sized tickets, and the lanes to run them in |  | – | review |
 | PROTO-W2 | Wave 2 wire, in one PR: watcher, git, terminal blocks, diagnostics, violations | 2 | ADR-001, ADR-017, ADR-023 | todo |
+| PROTO-W2-GIT | The git wire: git.status and git.diff reach the shell | 2 | T100,ADR-023 | review |
 | PROTO-W3 | Wave 3 wire, in one PR: search | 2 | ADR-022 | todo |
 | SIDECAR-FRESH-CHECKOUT | A fresh clone or worktree cannot build gritty-desktop until T225's sidecar is staged by hand | 3 | T225 | todo |
 | T080-U | The search panel | 2 | PROTO-W3, T080 | todo |
@@ -93,7 +94,7 @@ the workflow below are hand-maintained.
 | T300-WIRE | Connect the three Gate D halves: fake driver, manager, runs.* adapters | 4 | T300-CORE | review |
 | T400-R | Worktree create and remove | 5 | T100 | unspec |
 | T233-M | The roster row model: owned runs and observed sessions in one list | 3 | T300-C | doing |
-| T233-S | The Agents section in the left sidebar, and the sidebar tab strip (12a) | 3 | T233-M | unspec |
+| T233-S | The Agents section in the left sidebar, and the sidebar tab strip (12a) | 3 | T233-M | doing |
 | T233-C | The full-height agent console, and retiring the right rail (12a) | 3 | T233-S,T232 | unspec |
 <!-- board:table end -->
 
