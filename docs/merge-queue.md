@@ -96,7 +96,25 @@ file decides.
 
 | Thing | Value | Branch |
 |---|---|---|
-| `PROTOCOL_VERSION` | **2.16.0** | `T300-CMD` — the `runs.*` commands |
+| `PROTOCOL_VERSION` | ~~2.16.0~~ | `T300-CMD` — landed on `main` |
+| `PROTOCOL_VERSION` | **2.17.0** | `PROTO-W2-GIT` — the `git.*` commands |
+
+**`PROTO-W2-GIT` claims 2.17.0 and nothing else.** It spends no migration and
+no `SCHEMA_VERSION`: `git.status` and `git.diff` are reads, and nothing about a
+repository is persisted. It adds no `CoreEvent` variant either — a read that
+outlives its budget becomes an `Operation`, and the existing `Operation*` events
+carry it, which is what `GitStatusResponse::Pending` is for.
+
+Its seams, for whoever lands beside it: `crates/gritty-core/src/protocol/`
+(`mod.rs` for the version, `export.rs` for six new root types),
+`packages/protocol/src/{client,commands}.ts`, the generated directory, and
+`apps/desktop/src-tauri/src/{commands,core,lib}.rs`.
+
+**`PROTO-W2` shrank to almost nothing and should be re-scoped rather than
+taken as written.** It was "watcher, git, terminal blocks, diagnostics,
+violations, in one PR". T070 and T326 shipped their own wire, this ticket takes
+git, and what is left is terminal blocks (behind ADR-017, undecided) and
+diagnostics (T110, unbuilt) — two things that will not travel together.
 
 **Only T300-CMD claims anything in the Gate D wave.** T300-CORE is core domain
 behind the contract already on `main`, and T300-FAKE is a new crate; neither
@@ -112,7 +130,7 @@ rule below. `PROTOCOL_VERSION` **2.15.0** is on `main`; 2.13.0 and 2.14.0 were
 spent on the way and the resolved line took the highest. `SCHEMA_VERSION` is
 still **4** and migration **`0005` is free** — T326 needed neither.
 
-**The next free values are `PROTOCOL_VERSION` 2.16.0, `SCHEMA_VERSION` 5,
+**The next free values are `PROTOCOL_VERSION` 2.18.0, `SCHEMA_VERSION` 5,
 migration `0005`, and ADR-026.**
 
 What that wave proved, for the next one: claiming three protocol minors by name

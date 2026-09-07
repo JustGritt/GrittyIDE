@@ -25,6 +25,10 @@ use gritty_core::document::{
     CloseDocumentRequest, Document, DocumentContent, DocumentStatusRequest, OpenDocumentRequest,
     ReloadDocumentRequest, SaveDocumentRequest, UpdateDocumentRequest,
 };
+use gritty_core::git::DEFAULT_GIT_BUDGET;
+use gritty_core::git::wire::{
+    GitDiffRequest, GitDiffResponse, GitStatusRequest, GitStatusResponse,
+};
 use gritty_core::health::ShellInfo;
 use gritty_core::operation::demo::{StartDemoRequest, start_demo};
 use gritty_core::operation::{CancelOperationRequest, Operation};
@@ -1052,6 +1056,42 @@ pub async fn ownership_resolve(
         let request: ResolveConflictRequest = parse_request(request)?;
         ownership
             .resolve_conflict(request, Actor::User, correlation)
+            .await
+    })
+    .await
+}
+
+/// `git.status`
+///
+/// A read, with the budget hand-over `workspace.list` established: a repository
+/// that answers quickly answers inline, and one that does not becomes a
+/// cancellable `Operation` the caller already knows how to watch. A workspace
+/// that is not a repository is `NotARepository` — a value, not an error, because
+/// opening a folder that is not a repository is not a mistake.
+#[tauri::command]
+pub async fn git_status(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<GitStatusResponse, CoreError> {
+    let git = core.git.clone();
+    guard("git.status", move |correlation| async move {
+        let request: GitStatusRequest = parse_request(request)?;
+        git.status(request, Actor::User, correlation, DEFAULT_GIT_BUDGET)
+            .await
+    })
+    .await
+}
+
+/// `git.diff`
+#[tauri::command]
+pub async fn git_diff(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<GitDiffResponse, CoreError> {
+    let git = core.git.clone();
+    guard("git.diff", move |correlation| async move {
+        let request: GitDiffRequest = parse_request(request)?;
+        git.diff(request, Actor::User, correlation, DEFAULT_GIT_BUDGET)
             .await
     })
     .await

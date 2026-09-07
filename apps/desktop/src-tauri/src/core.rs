@@ -16,6 +16,7 @@ use gritty_core::agent_session::{AgentDiscoveryConfig, AgentSessionManager};
 use gritty_core::document::{DocumentLimits, DocumentManager};
 use gritty_core::event::{EventBus, EventEnvelope, EventSink, FanOutSink};
 use gritty_core::file_drop::FileDropService;
+use gritty_core::git::GitService;
 use gritty_core::operation::OperationRegistry;
 use gritty_core::ownership::OwnershipManager;
 use gritty_core::session::{SessionService, SessionStore, SessionTap, TAP_CAPACITY, WriterConfig};
@@ -53,6 +54,7 @@ pub struct Core {
     pub file_drop: Arc<FileDropService>,
     pub documents: Arc<DocumentManager>,
     pub shell: Arc<ShellService>,
+    pub git: Arc<GitService>,
     pub session: Arc<SessionService>,
     pub terminals: Arc<TerminalManager>,
     pub workstreams: Arc<WorkstreamManager>,
@@ -116,6 +118,10 @@ impl Core {
         let shell = ShellService::new(handle.clone(), options.opener);
         let terminals = TerminalManager::new(events.clone(), workspaces.clone(), options.pty_host);
         let file_drop = FileDropService::new(events.clone(), workspaces.clone());
+        // Reads a repository, and owns nothing else (T100). It holds the
+        // operation registry because a read that outlives its budget continues
+        // as a cancellable operation rather than blocking the command.
+        let git = GitService::new(workspaces.clone(), registry.clone(), handle.clone());
         // Synchronous: a small database opens in milliseconds and the window
         // geometry must be known before the window shows.
         let data_dir = options.data_dir;
@@ -187,6 +193,7 @@ impl Core {
             file_drop,
             documents,
             shell,
+            git,
             session,
             terminals,
             workstreams,

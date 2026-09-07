@@ -70,6 +70,8 @@ export const COMMANDS = {
   'runs.cancel': 'runs_cancel',
   'runs.list': 'runs_list',
   'runs.events': 'runs_events',
+  'git.status': 'git_status',
+  'git.diff': 'git_diff',
 } as const;
 
 export type CommandName = keyof typeof COMMANDS;

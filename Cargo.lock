@@ -2391,6 +2391,7 @@ name = "gritty-desktop"
 version = "0.1.0"
 dependencies = [
  "gritty-core",
+ "gritty-git",
  "gritty-persistence",
  "gritty-terminal",
  "open",

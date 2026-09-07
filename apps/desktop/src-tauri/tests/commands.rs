@@ -1961,3 +1961,121 @@ fn closing_a_workspace_interrupts_the_runs_inside_it() {
         "an interruption is not a failure: {ended}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Reading the repository (PROTO-W2-GIT)
+// ---------------------------------------------------------------------------
+
+/// The `ready` arm, over the real IPC. T100 built this and nothing could reach
+/// it — `commands.rs` had no `git.` in it at all — so what is proved here is
+/// the wire: the command name, the request shape, and that a `RepositoryStatus`
+/// survives serialization into the WebView's JSON.
+#[test]
+fn git_status_reports_a_clean_repository_through_the_adapters() {
+    let repo = gritty_git::fixtures::clean();
+    let harness = Harness::new();
+    let workspace = harness.open_workspace(repo.path());
+    let workspace_id = workspace["id"].clone();
+
+    let status = harness
+        .session("git_status", json!({ "workspaceId": workspace_id }))
+        .expect("read the repository");
+    assert_eq!(status["status"], "ready");
+    let repository = &status["repository"];
+    assert_eq!(repository["branch"], "main");
+    assert_eq!(repository["detached"], false);
+    assert_eq!(
+        repository["entries"].as_array().map(Vec::len),
+        Some(0),
+        "the fixture commits everything: {status}"
+    );
+}
+
+/// A change the user made shows up as an entry, and `git.diff` reports its
+/// hunks. Two commands over one repository, because the pair is what the shell
+/// will actually call.
+#[test]
+fn git_status_and_diff_report_an_uncommitted_change() {
+    let repo = gritty_git::fixtures::clean();
+    repo.write("src/main.rs", "fn main() {\n    println!(\"hi\");\n}\n");
+    let harness = Harness::new();
+    let workspace = harness.open_workspace(repo.path());
+    let workspace_id = workspace["id"].clone();
+
+    let status = harness
+        .session("git_status", json!({ "workspaceId": workspace_id }))
+        .expect("read the repository");
+    assert_eq!(status["status"], "ready");
+    let entries = status["repository"]["entries"].as_array().expect("entries");
+    assert!(
+        entries.iter().any(|entry| entry["path"] == "src/main.rs"),
+        "the edited file is not in {status}"
+    );
+
+    let diff = harness
+        .session(
+            "git_diff",
+            json!({ "workspaceId": workspace_id, "path": "src/main.rs" }),
+        )
+        .expect("diff the file");
+    assert_eq!(diff["status"], "ready");
+    let files = diff["diff"]["files"].as_array().expect("files");
+    assert_eq!(files.len(), 1, "one file was asked for: {diff}");
+    assert_eq!(files[0]["path"], "src/main.rs");
+    assert!(
+        !files[0]["hunks"].as_array().expect("hunks").is_empty(),
+        "a changed file has hunks: {diff}"
+    );
+}
+
+/// The arm the tagged union exists for. Opening a folder that is not a
+/// repository is not a mistake, so it is a value — and a caller that treated
+/// it as an error would show a red envelope on every plain folder.
+#[test]
+fn a_workspace_that_is_not_a_repository_is_a_value_and_not_an_error() {
+    let root = TempWorkspace::new("git-not-a-repo");
+    let harness = Harness::new();
+    let workspace = harness.open_workspace(&root.0);
+    let workspace_id = workspace["id"].clone();
+
+    let status = harness
+        .session("git_status", json!({ "workspaceId": workspace_id }))
+        .expect("not a repository is not a failure");
+    assert_eq!(status["status"], "notARepository");
+    assert!(status["repository"].is_null());
+
+    let diff = harness
+        .session("git_diff", json!({ "workspaceId": workspace_id }))
+        .expect("not a repository is not a failure");
+    assert_eq!(diff["status"], "notARepository");
+}
+
+/// The boundaries the adapters enforce before reading anything.
+#[test]
+fn git_commands_validate_before_they_read() {
+    let repo = gritty_git::fixtures::clean();
+    let harness = Harness::new();
+    let workspace = harness.open_workspace(repo.path());
+    let workspace_id = workspace["id"].clone();
+
+    let closed = harness
+        .session("git_status", json!({ "workspaceId": "w-gone" }))
+        .expect_err("a workspace that is not open is refused");
+    assert_eq!(closed["code"], "NotFound");
+
+    let traversal = harness
+        .session(
+            "git_diff",
+            json!({ "workspaceId": workspace_id, "path": "../../etc/passwd" }),
+        )
+        .expect_err("a path leaving the root is refused while parsing");
+    assert_eq!(traversal["code"], "InvalidInput");
+
+    let bad_page = harness
+        .session(
+            "git_status",
+            json!({ "workspaceId": workspace_id, "pageSize": 0 }),
+        )
+        .expect_err("a zero page is refused");
+    assert_eq!(bad_page["code"], "InvalidInput");
+}

@@ -29,6 +29,7 @@ use crate::document::{
     ReloadDocumentRequest, SaveDocumentRequest, UpdateDocumentRequest,
 };
 use crate::event::{CoreEvent, EventMeta};
+use crate::git::wire::{GitDiffRequest, GitDiffResponse, GitStatusRequest, GitStatusResponse};
 use crate::health::HealthReport;
 use crate::operation::Operation;
 use crate::operation::demo::StartDemoRequest;
@@ -108,6 +109,12 @@ fn export_bindings() {
     AgentRunEventLog::export_all(&cfg).expect("export AgentRunEventLog");
     AgentRunChangedPayload::export_all(&cfg).expect("export AgentRunChangedPayload");
     AgentRunEventAppendedPayload::export_all(&cfg).expect("export AgentRunEventAppendedPayload");
+    // Git (T100's core, reaching the shell in PROTO-W2-GIT). `RepositoryStatus`
+    // and `DiffSummary` live in `gritty-git` and come along transitively.
+    GitStatusRequest::export_all(&cfg).expect("export GitStatusRequest");
+    GitStatusResponse::export_all(&cfg).expect("export GitStatusResponse");
+    GitDiffRequest::export_all(&cfg).expect("export GitDiffRequest");
+    GitDiffResponse::export_all(&cfg).expect("export GitDiffResponse");
     StartFakeRunRequest::export_all(&cfg).expect("export StartFakeRunRequest");
     CancelRunRequest::export_all(&cfg).expect("export CancelRunRequest");
     ListRunsRequest::export_all(&cfg).expect("export ListRunsRequest");

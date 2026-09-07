@@ -34,6 +34,10 @@ import {
   type EventName,
   type EventOf,
   type ForgetWorkspaceRequest,
+  type GitDiffRequest,
+  type GitDiffResponse,
+  type GitStatusRequest,
+  type GitStatusResponse,
   type HealthReport,
   type KillTerminalRequest,
   type LastSession,
@@ -460,6 +464,44 @@ export interface CoreClient {
      */
     events(request: RunEventsRequest): Promise<AgentRunEventLog>;
   };
+  /**
+   * Reading the repository the open workspace sits in (T100).
+   *
+   * Both calls answer one of three ways, and the middle one is the reason they
+   * are a tagged union rather than a bare payload:
+   *
+   * - `ready` — read within the budget, payload attached;
+   * - `notARepository` — the workspace root is a directory and not a
+   *   repository. A **value, not an error**: opening a folder that is not a
+   *   repository is not a mistake, and an error here would put a red envelope
+   *   in front of every non-repository workspace;
+   * - `pending` — the read outlived its budget and continues as a cancellable
+   *   `Operation`, whose `OperationCompleted.result` carries the payload. No
+   *   new event family: the `Operation*` events already report it.
+   *
+   * Neither call writes. Nothing here stages, commits, checks out or fetches;
+   * a write surface is a later task and a deliberate decision, not an omission.
+   */
+  git: {
+    /**
+     * The state of the repository at the workspace root: the branch, what it is
+     * in the middle of, and a page of changed paths.
+     *
+     * Ignored files are excluded unless `includeIgnored` asks for them — an
+     * ignored `target/` is a million entries nobody asked for. Truncated
+     * listings carry a `cursor`.
+     */
+    status(request: GitStatusRequest): Promise<GitStatusResponse>;
+    /**
+     * What changed between a revision (`HEAD` when absent) and the working
+     * tree, with hunks.
+     *
+     * `path` restricts it to one file, which is the bounded way to ask for the
+     * hunks of the file the user selected instead of paging every changed
+     * file's hunks to reach one of them.
+     */
+    diff(request: GitDiffRequest): Promise<GitDiffResponse>;
+  };
   subscribe<N extends EventName>(name: N, handler: (event: EventOf<N>) => void): Unsubscribe;
   subscribeAll(handler: (event: EventEnvelope) => void): Unsubscribe;
   /** Stop listening for events. Commands still work. */
@@ -637,6 +679,10 @@ export function createCoreClient(
       cancel: (request) => command<AgentRun>('runs.cancel', { request }),
       list: (request) => command<AgentRun[]>('runs.list', { request }),
       events: (request) => command<AgentRunEventLog>('runs.events', { request }),
+    },
+    git: {
+      status: (request) => command<GitStatusResponse>('git.status', { request }),
+      diff: (request) => command<GitDiffResponse>('git.diff', { request }),
     },
     subscribe: (name, handler) => hub.subscribe(name, handler),
     subscribeAll: (handler) => hub.subscribeAll(handler),

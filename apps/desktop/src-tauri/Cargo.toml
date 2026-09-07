@@ -32,6 +32,11 @@ tracing-subscriber = { workspace = true }
 # `test` enables the mock runtime used by tests/commands.rs to invoke commands headlessly.
 tauri = { workspace = true, features = ["test"] }
 gritty-terminal = { workspace = true }
+# `fixtures` builds a real repository at test time, so the `git.*` adapters can
+# be exercised against one rather than only against a plain directory. Same
+# feature `gritty-core` already takes for its own T100 tests, and it stays out
+# of the production build.
+gritty-git = { workspace = true, features = ["fixtures"] }
 
 [lints]
 workspace = true
