@@ -131,7 +131,14 @@ spent on the way and the resolved line took the highest. `SCHEMA_VERSION` is
 still **4** and migration **`0005` is free** — T326 needed neither.
 
 **The next free values are `PROTOCOL_VERSION` 2.18.0, `SCHEMA_VERSION` 5,
-migration `0005`, and ADR-026.**
+migration `0005`, and ADR-027.**
+
+**ADR-026 is taken** by `T233-C` (`docs/decisions/ADR-026-agent-console-tab.md`,
+in the working tree at the time of writing). Recorded here after the fact rather
+than before, by a different session, which is exactly the hole rule 3b names: the
+file was written without the number being claimed, and nothing would have stopped
+a second branch writing its own ADR-026 under a different filename and merging
+cleanly. Claim the number here first.
 
 What that wave proved, for the next one: claiming three protocol minors by name
 before launching turned the only collision that mattered into a one-line
