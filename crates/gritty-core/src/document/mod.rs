@@ -195,6 +195,12 @@ pub enum DocumentChangeCause {
     ReadOnlyChanged,
     /// The buffer was replaced with a recovery snapshot (T060).
     Recovered,
+    /// The file was renamed or moved from inside Gritty and the document
+    /// followed it (T042, ADR-028). The buffer, versions and dirty state are
+    /// unchanged — only `path` differs. The watcher can never report this,
+    /// because its signal is directory-grained (ADR-025); it comes from the
+    /// `files.*` command that did it.
+    Moved,
 }
 
 /// Size bounds; tests lower them.
@@ -1254,6 +1260,140 @@ impl DocumentManager {
     fn write_fault(&self) -> AtomicWriteFault {
         AtomicWriteFault::None
     }
+}
+
+impl crate::workspace::files::DocumentTreeGuard for DocumentManager {
+    fn dirty_under(
+        &self,
+        workspace_id: &WorkspaceId,
+        paths: &[WorkspacePath],
+    ) -> Vec<serde_json::Value> {
+        let table = self.lock_table();
+        table
+            .by_id
+            .values()
+            .filter_map(|entry| {
+                let record = entry.lock();
+                let document = &record.document;
+                if document.workspace_id != *workspace_id || !document.dirty {
+                    return None;
+                }
+                paths
+                    .iter()
+                    .any(|path| is_at_or_below(path, &document.path))
+                    .then(|| {
+                        serde_json::json!({
+                            "documentId": document.id,
+                            "path": document.path,
+                        })
+                    })
+            })
+            .collect()
+    }
+
+    fn rehome(
+        &self,
+        workspace_id: &WorkspaceId,
+        from: &WorkspacePath,
+        to: &WorkspacePath,
+        actor: &Actor,
+        correlation: &CorrelationId,
+    ) {
+        // Collected first, then re-keyed: `by_path` is mutated while it is
+        // being read otherwise, and a directory rename touches every document
+        // under it.
+        let moved: Vec<(DocumentId, WorkspacePath)> = {
+            let table = self.lock_table();
+            table
+                .by_path
+                .iter()
+                .filter(|((id_workspace, path), _)| {
+                    id_workspace == workspace_id && is_at_or_below(from, path)
+                })
+                .map(|((_, path), document_id)| (document_id.clone(), path.clone()))
+                .collect()
+        };
+        if moved.is_empty() {
+            return;
+        }
+        let mut changed = Vec::new();
+        {
+            let mut table = self.lock_table();
+            for (document_id, old_path) in moved {
+                let Some(new_path) = relocate(from, to, &old_path) else {
+                    continue;
+                };
+                let Some(entry) = table.by_id.get(&document_id).cloned() else {
+                    continue;
+                };
+                {
+                    let mut record = entry.lock();
+                    record.document.path = new_path.clone();
+                    // The language is part of the name, so a rename can change
+                    // it (`notes.txt` → `notes.md`). Nothing else about the
+                    // buffer moves: not the text, not `currentVersion`, not
+                    // `savedHash`, not `dirty`.
+                    record.document.language_id =
+                        gritty_workspace::language_id(&new_path).to_string();
+                    changed.push(record.document.clone());
+                }
+                table.by_path.remove(&(workspace_id.clone(), old_path));
+                table
+                    .by_path
+                    .insert((workspace_id.clone(), new_path), document_id);
+            }
+        }
+        for document in changed {
+            tracing::info!(
+                document = %document.id,
+                path = %document.path,
+                "document followed its file to a new path"
+            );
+            let workspace_id = document.workspace_id.clone();
+            self.emit(
+                &workspace_id,
+                actor,
+                correlation,
+                CoreEvent::DocumentChanged(DocumentChangedPayload {
+                    document,
+                    cause: DocumentChangeCause::Moved,
+                }),
+            );
+        }
+    }
+}
+
+/// Whether `candidate` is `ancestor` itself or lies beneath it. Lexical, which
+/// is enough: both are normalized wire paths with no `.` or `..`.
+fn is_at_or_below(ancestor: &WorkspacePath, candidate: &WorkspacePath) -> bool {
+    if ancestor.is_root() {
+        return true;
+    }
+    candidate == ancestor
+        || candidate
+            .as_str()
+            .strip_prefix(ancestor.as_str())
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// `path`, with the `from` prefix replaced by `to`.
+fn relocate(
+    from: &WorkspacePath,
+    to: &WorkspacePath,
+    path: &WorkspacePath,
+) -> Option<WorkspacePath> {
+    if path == from {
+        return Some(to.clone());
+    }
+    let rest = path
+        .as_str()
+        .strip_prefix(from.as_str())?
+        .strip_prefix('/')?;
+    let mut moved = to.clone();
+    for segment in rest.split('/') {
+        moved = moved.join(segment).ok()?;
+    }
+    Some(moved)
 }
 
 impl WorkspaceCloseGuard for DocumentManager {

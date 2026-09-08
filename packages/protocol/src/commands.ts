@@ -73,6 +73,13 @@ export const COMMANDS = {
   'git.status': 'git_status',
   'git.diff': 'git_diff',
   'search.query': 'search_query',
+  'shell.revealPath': 'shell_reveal_path',
+  'files.create': 'files_create',
+  'files.rename': 'files_rename',
+  'files.move': 'files_move',
+  'files.delete': 'files_delete',
+  'files.undo': 'files_undo',
+  'files.redo': 'files_redo',
 } as const;
 
 export type CommandName = keyof typeof COMMANDS;

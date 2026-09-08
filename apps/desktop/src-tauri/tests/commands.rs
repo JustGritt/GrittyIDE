@@ -26,6 +26,7 @@ use tauri::{Listener, Manager, WebviewWindow, WebviewWindowBuilder};
 #[derive(Default)]
 struct RecordingOpener {
     opened: Mutex<Vec<String>>,
+    revealed: Mutex<Vec<PathBuf>>,
     fail: bool,
 }
 
@@ -35,6 +36,15 @@ impl ExternalOpener for RecordingOpener {
             return Err(std::io::Error::other("no handler registered").into());
         }
         self.opened.lock().unwrap().push(url.to_owned());
+        Ok(())
+    }
+
+    /// Records rather than spawning: no test opens a Finder window.
+    fn reveal(&self, path: &std::path::Path) -> Result<(), CoreError> {
+        if self.fail {
+            return Err(std::io::Error::other("no file manager").into());
+        }
+        self.revealed.lock().unwrap().push(path.to_path_buf());
         Ok(())
     }
 }
@@ -2330,4 +2340,133 @@ fn git_commands_validate_before_they_read() {
         )
         .expect_err("a zero page is refused");
     assert_eq!(bad_page["code"], "InvalidInput");
+}
+
+#[test]
+fn files_commands_reach_the_core_and_hold_the_path_policy() {
+    let h = Harness::new();
+    let root = TempWorkspace::new("files");
+    let workspace = h.open_workspace(&root.0);
+    let workspace_id = &workspace["id"];
+
+    // A nested create makes the directories on the way, and names every
+    // ancestor whose listing it invalidated.
+    let created = h
+        .invoke(
+            "files_create",
+            json!({ "request": {
+                "workspaceId": workspace_id, "path": "a/b/c.ts", "kind": "FILE"
+            }}),
+        )
+        .expect("create");
+    assert!(root.0.join("a/b/c.ts").is_file());
+    assert_eq!(created["changed"], json!(["", "a", "a/b"]));
+    assert_eq!(created["undo"], "Create a/b/c.ts");
+
+    // The same path twice is a conflict, never a truncate.
+    let again = h
+        .invoke(
+            "files_create",
+            json!({ "request": {
+                "workspaceId": workspace_id, "path": "a/b/c.ts", "kind": "FILE"
+            }}),
+        )
+        .expect_err("an existing target is refused");
+    assert_eq!(again["code"], "Conflict");
+
+    // The path policy is enforced while the request is deserialized, before any
+    // handler runs — the same table `workspace_list` is held to.
+    for path in ["..", "../etc", "src/../..", "/etc", r"src\main.rs"] {
+        let refused = h
+            .invoke(
+                "files_create",
+                json!({ "request": {
+                    "workspaceId": workspace_id, "path": path, "kind": "FILE"
+                }}),
+            )
+            .unwrap_err();
+        assert_eq!(refused["code"], "InvalidInput", "{path}: {refused}");
+    }
+
+    let unknown = h
+        .invoke(
+            "files_create",
+            json!({ "request": { "workspaceId": "w-gone", "path": "x.ts", "kind": "FILE" }}),
+        )
+        .expect_err("a workspace that is not open is refused");
+    assert_eq!(unknown["code"], "NotFound");
+
+    let missing = h
+        .invoke(
+            "files_rename",
+            json!({ "request": {
+                "workspaceId": workspace_id, "path": "nope.ts", "newName": "x.ts"
+            }}),
+        )
+        .expect_err("renaming something that is not there is refused");
+    assert_eq!(missing["code"], "NotFound");
+
+    // A "name" carrying a separator must not quietly become a move.
+    let sneaky = h
+        .invoke(
+            "files_rename",
+            json!({ "request": {
+                "workspaceId": workspace_id, "path": "README.md", "newName": "../escaped.md"
+            }}),
+        )
+        .expect_err("a name with a separator is refused");
+    assert_eq!(sneaky["code"], "InvalidInput");
+    assert!(root.0.join("README.md").is_file());
+
+    // A move answers with the `ready` arm inline when it fits in the budget.
+    let moved = h
+        .invoke(
+            "files_move",
+            json!({ "request": {
+                "workspaceId": workspace_id, "paths": ["README.md"],
+                "targetDir": "src", "mode": "MOVE"
+            }}),
+        )
+        .expect("move");
+    assert_eq!(moved["status"], "ready");
+    assert_eq!(moved["result"]["moved"][0]["to"], "src/README.md");
+    assert!(root.0.join("src/README.md").is_file());
+
+    // And undo puts it back.
+    let undone = h
+        .invoke(
+            "files_undo",
+            json!({ "request": { "workspaceId": workspace_id }}),
+        )
+        .expect("undo");
+    assert!(root.0.join("README.md").is_file());
+    assert!(!root.0.join("src/README.md").exists());
+    assert_eq!(undone["redo"], "Move README.md");
+
+    // The journal is a stack, so the next undo reaches past the move to the
+    // create that preceded it and removes what it made.
+    let earlier = h
+        .invoke(
+            "files_undo",
+            json!({ "request": { "workspaceId": workspace_id }}),
+        )
+        .expect("undo the create as well");
+    assert!(!root.0.join("a/b/c.ts").exists());
+    assert_eq!(earlier["undo"], Value::Null, "the journal is empty now");
+
+    let nothing = h
+        .invoke(
+            "files_undo",
+            json!({ "request": { "workspaceId": workspace_id }}),
+        )
+        .expect_err("an empty journal is a conflict, not a panic");
+    assert_eq!(nothing["code"], "Conflict");
+
+    // Redo climbs back up the same stack.
+    h.invoke(
+        "files_redo",
+        json!({ "request": { "workspaceId": workspace_id }}),
+    )
+    .expect("redo the create");
+    assert!(root.0.join("a/b/c.ts").is_file());
 }

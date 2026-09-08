@@ -33,17 +33,63 @@ pub struct OpenExternalRequest {
 /// Spawning the handler is platform work that the composition root owns.
 pub trait ExternalOpener: Send + Sync {
     fn open(&self, url: &str) -> Result<(), CoreError>;
+
+    /// Show `path` in the system file manager, selecting it (T042). The path
+    /// has already been resolved against the workspace root and proven to be
+    /// inside it, so an implementation may hand it to the platform as it is.
+    fn reveal(&self, path: &std::path::Path) -> Result<(), CoreError>;
+}
+
+/// `shell.revealPath`: show an entry in the system file manager.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RevealPathRequest {
+    pub workspace_id: crate::protocol::ids::WorkspaceId,
+    pub path: gritty_workspace::WorkspacePath,
 }
 
 /// The `shell.*` domain: validation in front of the injected opener.
 pub struct ShellService {
     handle: Handle,
     opener: Arc<dyn ExternalOpener>,
+    /// Resolves a `revealPath` request against the open workspace, so the
+    /// WebView cannot name a path outside it (T042).
+    workspaces: Arc<crate::workspace::WorkspaceManager>,
 }
 
 impl ShellService {
-    pub fn new(handle: Handle, opener: Arc<dyn ExternalOpener>) -> Arc<Self> {
-        Arc::new(Self { handle, opener })
+    pub fn new(
+        handle: Handle,
+        opener: Arc<dyn ExternalOpener>,
+        workspaces: Arc<crate::workspace::WorkspaceManager>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            handle,
+            opener,
+            workspaces,
+        })
+    }
+
+    /// Show an entry in the system file manager.
+    ///
+    /// The path is resolved through the workspace root like every other path
+    /// argument, so a symlink escaping the root is `PermissionDenied` and a
+    /// missing entry is `NotFound` — the WebView never names a native path.
+    pub async fn reveal_path(
+        &self,
+        request: RevealPathRequest,
+        correlation: CorrelationId,
+    ) -> Result<(), CoreError> {
+        let (_, root) = self
+            .workspaces
+            .require(&request.workspace_id, &correlation)?;
+        let resolved = root.resolve(&request.path)?;
+        let target = resolved.canonical().to_path_buf();
+        let opener = Arc::clone(&self.opener);
+        self.handle
+            .spawn_blocking(move || opener.reveal(&target))
+            .await
+            .map_err(|error| CoreError::internal(format!("reveal task failed: {error}")))?
     }
 
     /// Validate, then open on the blocking pool (the opener spawns a process).
@@ -111,7 +157,21 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
+    use crate::event::EventBus;
+    use crate::event::testing::RecordingSink;
+    use crate::operation::OperationRegistry;
     use crate::protocol::error::CoreErrorCode;
+    use crate::workspace::WorkspaceManager;
+
+    /// A manager with nothing open. `open_external` never touches it, and
+    /// `reveal_path` has its own tests in the command adapters, where a real
+    /// workspace exists to resolve against.
+    fn workspaces() -> Arc<WorkspaceManager> {
+        let (sink, _rx) = RecordingSink::with_channel();
+        let events = EventBus::new(sink);
+        let registry = OperationRegistry::new(Handle::current(), events.clone());
+        WorkspaceManager::new(Handle::current(), events, registry)
+    }
 
     #[derive(Default)]
     struct RecordingOpener {
@@ -125,6 +185,10 @@ mod tests {
                 return Err(std::io::Error::other("no handler").into());
             }
             self.opened.lock().unwrap().push(url.to_owned());
+            Ok(())
+        }
+
+        fn reveal(&self, _path: &std::path::Path) -> Result<(), CoreError> {
             Ok(())
         }
     }
@@ -180,7 +244,7 @@ mod tests {
     #[tokio::test]
     async fn opens_validated_urls_through_the_opener() {
         let opener = Arc::new(RecordingOpener::default());
-        let shell = ShellService::new(Handle::current(), opener.clone());
+        let shell = ShellService::new(Handle::current(), opener.clone(), workspaces());
         shell
             .open_external(
                 OpenExternalRequest {
@@ -200,7 +264,7 @@ mod tests {
     #[tokio::test]
     async fn a_rejected_url_never_reaches_the_opener() {
         let opener = Arc::new(RecordingOpener::default());
-        let shell = ShellService::new(Handle::current(), opener.clone());
+        let shell = ShellService::new(Handle::current(), opener.clone(), workspaces());
         let error = shell
             .open_external(
                 OpenExternalRequest {
@@ -221,7 +285,7 @@ mod tests {
             fail: true,
             ..Default::default()
         });
-        let shell = ShellService::new(Handle::current(), opener);
+        let shell = ShellService::new(Handle::current(), opener, workspaces());
         let error = shell
             .open_external(
                 OpenExternalRequest {

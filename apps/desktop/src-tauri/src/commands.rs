@@ -44,10 +44,15 @@ use gritty_core::session::{
     CandidatesRequest, DiscardSnapshotRequest, LastSession, RecoverSnapshotRequest,
     RecoveryCandidate, SessionRestoreResponse, UpdateSessionRequest,
 };
-use gritty_core::shell::OpenExternalRequest;
+use gritty_core::shell::{OpenExternalRequest, RevealPathRequest};
 use gritty_core::terminal::wire::{
     KillTerminalRequest, ListProfilesRequest, RecolorTerminalRequest, RenameTerminalRequest,
     ResizeTerminalRequest, SpawnTerminalRequest, Terminal, TerminalProfile, WriteTerminalRequest,
+};
+use gritty_core::workspace::files::{
+    CreateEntryRequest, DEFAULT_FILES_BUDGET, DeleteEntriesRequest, Direction,
+    FileOperationResponse, FileOperationResult, MoveEntriesRequest, RenameEntryRequest,
+    UndoRequest,
 };
 use gritty_core::workspace::{
     CloseWorkspaceRequest, DEFAULT_LIST_BUDGET, ForgetWorkspaceRequest, ListDirectoryRequest,
@@ -353,6 +358,24 @@ pub async fn shell_open_external(
     guard("shell.openExternal", move |correlation| async move {
         let request: OpenExternalRequest = parse_request(request)?;
         shell.open_external(request, Actor::User, correlation).await
+    })
+    .await
+}
+
+/// `shell.revealPath`
+///
+/// Show a workspace entry in the system file manager (T042). The path is
+/// workspace-relative and resolved through the root in the core: the WebView
+/// never names a native path, and never learns one.
+#[tauri::command]
+pub async fn shell_reveal_path(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<(), CoreError> {
+    let shell = core.shell.clone();
+    guard("shell.revealPath", move |correlation| async move {
+        let request: RevealPathRequest = parse_request(request)?;
+        shell.reveal_path(request, correlation).await
     })
     .await
 }
@@ -1119,6 +1142,105 @@ pub async fn search_query(
     guard("search.query", move |correlation| async move {
         let request: SearchQueryRequest = parse_request(request)?;
         searches.query(request, Actor::User, correlation)
+    })
+    .await
+}
+
+/// `files.create`
+///
+/// The write half of `workspace.*` (T042, ADR-028). Like every adapter here it
+/// parses, delegates and correlates; the path policy, the conflict rules and
+/// the undo journal are all core-side.
+#[tauri::command]
+pub async fn files_create(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<FileOperationResult, CoreError> {
+    let files = core.files.clone();
+    guard("files.create", move |correlation| async move {
+        let request: CreateEntryRequest = parse_request(request)?;
+        files.create(request, correlation)
+    })
+    .await
+}
+
+/// `files.rename`
+#[tauri::command]
+pub async fn files_rename(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<FileOperationResult, CoreError> {
+    let files = core.files.clone();
+    guard("files.rename", move |correlation| async move {
+        let request: RenameEntryRequest = parse_request(request)?;
+        files.rename(request, Actor::User, correlation)
+    })
+    .await
+}
+
+/// `files.move`
+///
+/// Answers `ready`, or the operation a transfer that outlived its budget
+/// continues as — the same hand-over `workspace.list` makes.
+#[tauri::command]
+pub async fn files_move(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<FileOperationResponse, CoreError> {
+    let files = core.files.clone();
+    guard("files.move", move |correlation| async move {
+        let request: MoveEntriesRequest = parse_request(request)?;
+        files
+            .transfer(request, Actor::User, correlation, DEFAULT_FILES_BUDGET)
+            .await
+    })
+    .await
+}
+
+/// `files.delete`
+#[tauri::command]
+pub async fn files_delete(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<FileOperationResponse, CoreError> {
+    let files = core.files.clone();
+    guard("files.delete", move |correlation| async move {
+        let request: DeleteEntriesRequest = parse_request(request)?;
+        files
+            .delete(request, Actor::User, correlation, DEFAULT_FILES_BUDGET)
+            .await
+    })
+    .await
+}
+
+/// `files.undo`
+#[tauri::command]
+pub async fn files_undo(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<FileOperationResult, CoreError> {
+    let files = core.files.clone();
+    guard("files.undo", move |correlation| async move {
+        let request: UndoRequest = parse_request(request)?;
+        files
+            .step(request, Direction::Undo, Actor::User, correlation)
+            .await
+    })
+    .await
+}
+
+/// `files.redo`
+#[tauri::command]
+pub async fn files_redo(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<FileOperationResult, CoreError> {
+    let files = core.files.clone();
+    guard("files.redo", move |correlation| async move {
+        let request: UndoRequest = parse_request(request)?;
+        files
+            .step(request, Direction::Redo, Actor::User, correlation)
+            .await
     })
     .await
 }

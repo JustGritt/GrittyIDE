@@ -46,11 +46,15 @@ use crate::session::wire::{
     CandidatesRequest, DiscardSnapshotRequest, LastSession, RecoverSnapshotRequest,
     RecoveryCandidate, SessionRestoreResponse, UpdateSessionRequest,
 };
-use crate::shell::OpenExternalRequest;
+use crate::shell::{OpenExternalRequest, RevealPathRequest};
 use crate::terminal::wire::{
     KillTerminalRequest, ListProfilesRequest, RecolorTerminalRequest, RenameTerminalRequest,
     ResizeTerminalRequest, SpawnTerminalRequest, Terminal, TerminalColor, TerminalProfile,
     WriteTerminalRequest,
+};
+use crate::workspace::files::{
+    CreateEntryRequest, DeleteEntriesRequest, FileOperationResponse, FileOperationResult,
+    MoveEntriesRequest, RenameEntryRequest, UndoRequest,
 };
 use crate::workspace::{
     CloseWorkspaceRequest, ForgetWorkspaceRequest, ListDirectoryRequest, ListDirectoryResponse,
@@ -140,6 +144,15 @@ fn export_bindings() {
     CloseWorkspaceRequest::export_all(&cfg).expect("export CloseWorkspaceRequest");
     ListDirectoryRequest::export_all(&cfg).expect("export ListDirectoryRequest");
     ListDirectoryResponse::export_all(&cfg).expect("export ListDirectoryResponse");
+    // T042 `files.*`. `NewEntryKind`, `TransferMode`, `DeleteMode` and
+    // `MovedEntry` come along transitively through these roots.
+    CreateEntryRequest::export_all(&cfg).expect("export CreateEntryRequest");
+    RenameEntryRequest::export_all(&cfg).expect("export RenameEntryRequest");
+    MoveEntriesRequest::export_all(&cfg).expect("export MoveEntriesRequest");
+    DeleteEntriesRequest::export_all(&cfg).expect("export DeleteEntriesRequest");
+    UndoRequest::export_all(&cfg).expect("export UndoRequest");
+    FileOperationResult::export_all(&cfg).expect("export FileOperationResult");
+    FileOperationResponse::export_all(&cfg).expect("export FileOperationResponse");
     RecentWorkspace::export_all(&cfg).expect("export RecentWorkspace");
     RecentWorkspacesRequest::export_all(&cfg).expect("export RecentWorkspacesRequest");
     ForgetWorkspaceRequest::export_all(&cfg).expect("export ForgetWorkspaceRequest");
@@ -151,6 +164,7 @@ fn export_bindings() {
     ReloadDocumentRequest::export_all(&cfg).expect("export ReloadDocumentRequest");
     DocumentStatusRequest::export_all(&cfg).expect("export DocumentStatusRequest");
     OpenExternalRequest::export_all(&cfg).expect("export OpenExternalRequest");
+    RevealPathRequest::export_all(&cfg).expect("export RevealPathRequest");
     SessionRestoreResponse::export_all(&cfg).expect("export SessionRestoreResponse");
     CandidatesRequest::export_all(&cfg).expect("export CandidatesRequest");
     RecoveryCandidate::export_all(&cfg).expect("export RecoveryCandidate");

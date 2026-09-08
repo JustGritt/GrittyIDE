@@ -23,6 +23,10 @@ pub enum WorkspaceError {
     /// A regular file was required (T030).
     #[error("{0}")]
     NotAFile(String),
+    /// The target of a create, rename or copy is already taken (T042). Never a
+    /// silent overwrite: the caller renames, forces or reports.
+    #[error("{0}")]
+    AlreadyExists(String),
     /// The file exceeds the document size bound (T030).
     #[error("{path} is {size} bytes, above the {limit}-byte limit")]
     TooLarge { path: String, size: u64, limit: u64 },

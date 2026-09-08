@@ -55,6 +55,45 @@ the page.
 descend into this": the watcher prunes its registrations with it, and T080's
 walker will call it per entry.
 
+## Mutating the tree (T042)
+
+`workspace.list` reads; `files.*` writes. The filesystem work is
+`crates/workspace/src/mutate.rs`, the commands and the undo journal are
+`gritty_core::workspace::{files,journal}`, and the decisions are
+[ADR-028](../decisions/ADR-028-explorer-file-operations.md).
+
+| Command | Notes |
+|---|---|
+| `files.create` | takes a whole `WorkspacePath`, so `a/b/c.ts` makes `a` and `a/b` too; an existing target is `Conflict`, never a truncate |
+| `files.rename` | in place; the new name is one segment, and open documents follow it |
+| `files.move` | move or copy N paths into a directory; `ready`, or a cancellable operation |
+| `files.delete` | `TRASH` (default) or `PERMANENT`; `Conflict` on a dirty document unless forced |
+| `files.undo` / `files.redo` | replay the recorded inverse |
+
+Two resolution rules differ from `resolve`/`resolve_for_write` and live in
+`mutate.rs`. **An existing entry is addressed as itself**: the parent is
+canonicalized and proven inside the root and the final component appended by
+name, so a broken link and a link pointing outside the root — both of which the
+tree shows and neither of which `resolve` returns — can still be renamed and
+removed, and a rename moves the link rather than its target. **A new entry needs
+only its deepest existing ancestor to resolve**, which is what lets one call
+create a nested path.
+
+Three properties worth knowing:
+
+- **The response carries the directories to re-list**, and the shell marks them
+  stale through the same path a watcher batch uses. The watch below is
+  best-effort (see Failure), so convergence cannot depend on it. No `CoreEvent`
+  is added.
+- **A rename re-keys open documents.** `WorkspaceEntriesChanged` cannot express
+  a rename by construction (ADR-025), so the command tells the document layer
+  itself, through the `DocumentTreeGuard` seam and
+  `DocumentChanged { cause: MOVED }`. `documents.md` has the detail.
+- **Nothing is atomic across entries.** A copy or delete that outlives its
+  budget continues as a cancellable operation; cancelling stops before the next
+  entry, and what was already written stays and is counted in
+  `cancelledAfter`. There is no rollback and none is implied.
+
 ## Watching (T070)
 
 The watch starts when a workspace opens and stops when it closes — a user

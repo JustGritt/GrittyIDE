@@ -23,8 +23,10 @@ import {
   type CloseDocumentRequest,
   type CloseWorkspaceRequest,
   CORE_EVENT_CHANNEL,
+  type CreateEntryRequest,
   type CreateWorkstreamRequest,
   type Decision,
+  type DeleteEntriesRequest,
   type DiscardSnapshotRequest,
   type DismissDecisionRequest,
   type Document,
@@ -33,6 +35,8 @@ import {
   type EventEnvelope,
   type EventName,
   type EventOf,
+  type FileOperationResponse,
+  type FileOperationResult,
   type ForgetWorkspaceRequest,
   type GitDiffRequest,
   type GitDiffResponse,
@@ -51,6 +55,7 @@ import {
   type ListProfilesRequest,
   type ListRunsRequest,
   type ListWorkstreamsRequest,
+  type MoveEntriesRequest,
   type OpenDocumentRequest,
   type OpenExternalRequest,
   type OpenWorkspaceRequest,
@@ -70,10 +75,12 @@ import {
   type ReleaseOwnershipRequest,
   type ReloadDocumentRequest,
   type RemoveWorkstreamRequest,
+  type RenameEntryRequest,
   type RenameTerminalRequest,
   type ResizeTerminalRequest,
   type ResolveConflictRequest,
   type ResolveDecisionRequest,
+  type RevealPathRequest,
   type RevokeGrantRequest,
   type RunEventsRequest,
   type SaveDocumentRequest,
@@ -86,6 +93,7 @@ import {
   type Terminal,
   type TerminalProfile,
   type TransitionWorkstreamRequest,
+  type UndoRequest,
   type UnlinkAgentRequest,
   type UpdateDocumentRequest,
   type UpdateSessionRequest,
@@ -187,6 +195,12 @@ export interface CoreClient {
    */
   shell: {
     openExternal(url: string): Promise<void>;
+    /**
+     * Show a workspace entry in the system file manager (T042). The path is
+     * workspace-relative and resolved in the core, so the WebView neither
+     * names nor learns a native path. Only macOS is verified (ADR-002).
+     */
+    revealPath(request: RevealPathRequest): Promise<void>;
   };
   /**
    * Session persistence (T060). `restore` reopens the last workspace once per
@@ -532,6 +546,55 @@ export interface CoreClient {
   search: {
     query(request: SearchQueryRequest): Promise<Operation>;
   };
+  /**
+   * Changing the tree (T042, ADR-028). The write half of `workspace.list`.
+   *
+   * Every command answers with a `FileOperationResult` whose `changed` names
+   * the directories to re-list. That is the signal, not an event: the T070
+   * watcher will report the same change a debounce later, but it is
+   * best-effort — a backend that refuses to start still opens the workspace —
+   * so convergence must not depend on it. `moved` says where entries ended up,
+   * which is how a caller holding one by path follows a rename.
+   *
+   * `move` and `delete` can run long, so they answer `ready` or `pending` the
+   * way `workspace.list` does; cancel with `operations.cancel`. Cancellation
+   * stops before the next entry and **leaves what it already wrote** —
+   * `cancelledAfter` counts it, and nothing is rolled back.
+   *
+   * `undo` and `redo` replay a bounded, in-memory journal that lives as long as
+   * the workspace. A delete is never in it: on macOS the Trash is the recovery
+   * and Gritty cannot restore from it (ADR-028).
+   */
+  files: {
+    /** `path` is the whole path, so `a/b/c.ts` creates `a` and `a/b` too. */
+    create(request: CreateEntryRequest): Promise<FileOperationResult>;
+    /**
+     * Rename in place. `newName` is one segment — a name containing `/` is
+     * `InvalidInput` rather than quietly becoming a move.
+     *
+     * Open documents at or under `path` follow, keeping their buffers and dirty
+     * state, and each emits `DocumentChanged { cause: MOVED }`.
+     */
+    rename(request: RenameEntryRequest): Promise<FileOperationResult>;
+    /**
+     * Move or copy entries into a directory. A **copy** onto a taken name
+     * becomes `name copy.ext`; a **move** onto one is `Conflict`, and a move
+     * into the directory an entry already lives in is `InvalidInput` — neither
+     * silently renames, and neither overwrites.
+     */
+    move(request: MoveEntriesRequest): Promise<FileOperationResponse>;
+    /**
+     * Trash (default) or delete permanently. Rejects with `Conflict` and
+     * `details.dirtyDocuments` while an open document under one of the paths
+     * has unsaved changes, unless `force` is set. A move is never refused this
+     * way, because the buffer goes with the file.
+     */
+    delete(request: DeleteEntriesRequest): Promise<FileOperationResponse>;
+    /** Rejects with `Conflict` when there is nothing to undo, or when the
+     *  world moved under the recorded inverse — never an overwrite. */
+    undo(workspaceId: WorkspaceId): Promise<FileOperationResult>;
+    redo(workspaceId: WorkspaceId): Promise<FileOperationResult>;
+  };
   subscribe<N extends EventName>(name: N, handler: (event: EventOf<N>) => void): Unsubscribe;
   subscribeAll(handler: (event: EventEnvelope) => void): Unsubscribe;
   /** Stop listening for events. Commands still work. */
@@ -640,6 +703,7 @@ export function createCoreClient(
         const request: OpenExternalRequest = { url };
         return command<void>('shell.openExternal', { request });
       },
+      revealPath: (request) => command<void>('shell.revealPath', { request }),
     },
     session: {
       restore: () => command<SessionRestoreResponse>('session.restore'),
@@ -713,6 +777,20 @@ export function createCoreClient(
     git: {
       status: (request) => command<GitStatusResponse>('git.status', { request }),
       diff: (request) => command<GitDiffResponse>('git.diff', { request }),
+    },
+    files: {
+      create: (request) => command<FileOperationResult>('files.create', { request }),
+      rename: (request) => command<FileOperationResult>('files.rename', { request }),
+      move: (request) => command<FileOperationResponse>('files.move', { request }),
+      delete: (request) => command<FileOperationResponse>('files.delete', { request }),
+      undo: (workspaceId) => {
+        const request: UndoRequest = { workspaceId };
+        return command<FileOperationResult>('files.undo', { request });
+      },
+      redo: (workspaceId) => {
+        const request: UndoRequest = { workspaceId };
+        return command<FileOperationResult>('files.redo', { request });
+      },
     },
     search: {
       query: (request) => command<Operation>('search.query', { request }),

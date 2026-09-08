@@ -84,6 +84,14 @@ gix = { version = "0.87.1", default-features = false, features = [
   "max-performance-safe",
   "sha1",
 ] }
+# T042 file operations: move an entry to the OS trash (Finder's Trash,
+# freedesktop's, the Windows Recycle Bin). Nothing in the tree can do this, and
+# hand-rolling it means `NSFileManager` through `objc2` on macOS and the
+# freedesktop trash spec on Linux — far more unreviewed platform code than a
+# dependency, against a workspace-wide `unsafe_code` deny. `default-features =
+# false` drops `chrono`, which only dates entries for the restore listing macOS
+# does not have anyway (ADR-028). Used only inside `gritty-workspace`.
+trash = { version = "5.2.8", default-features = false }
 # T070 watcher: cross-platform filesystem notification (FSEvents on macOS,
 # inotify on Linux). Nothing in the tree observes the filesystem, and
 # hand-rolling two platform backends would need far more unreviewed code than
