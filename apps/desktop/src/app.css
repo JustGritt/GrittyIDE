@@ -525,6 +525,13 @@ textarea:focus-visible {
     overflow: visible;
   }
 
+  /* Same rule for the other tab's two scrollers (T100-U): stacked, the sidebar
+     row scrolls as one, and a nested scroller would cut the diff off instead. */
+  .git__list,
+  .git__diff {
+    overflow: visible;
+  }
+
   .panel {
     max-height: none;
     overflow: visible;
@@ -625,13 +632,41 @@ textarea:focus-visible {
   padding: 0 var(--gap-md) 0 var(--gap-md);
 }
 
-.explorer__toolbar h2 {
+/* The header is a tablist since T100-U: what used to style one `<h2>` now
+   styles two `role="tab"` buttons, with 9a's section-tab treatment unchanged.
+   Specificity is deliberate — `.explorer__toolbar button` below sets a smaller
+   control padding that a tab must not inherit. */
+.explorer__tablist {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+.explorer__toolbar .explorer__tab {
   margin: 0;
+  padding: 4px var(--gap-sm);
+  border-radius: var(--radius-sm);
+  background: transparent;
   font-size: var(--text-label);
   letter-spacing: var(--tracking-label);
   text-transform: uppercase;
   font-weight: 600;
   color: var(--fg-muted);
+}
+
+.explorer__toolbar .explorer__tab:hover:not(:disabled) {
+  background: var(--ghost);
+  color: var(--fg-dim);
+}
+
+/* The selected panel fills what is left; every other child keeps its height,
+   which is the rule the sibling selector below already states for the tree. */
+.explorer > .explorer__panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .explorer__spacer {
@@ -4593,9 +4628,8 @@ textarea:focus-visible {
 /* Artboard 9a's section tab, in place of T048's EXPLORER label. Still a
    heading: there is no second tab to switch to until T100-U has git status to
    put in one, and a lone tab that cannot be left is not a tab. */
-.explorer__toolbar h2.explorer__tab {
-  padding: 4px var(--gap-sm);
-  border-radius: var(--radius-sm);
+.explorer__toolbar .explorer__tab--selected,
+.explorer__toolbar .explorer__tab--selected:hover:not(:disabled) {
   background: var(--surface-active);
   color: var(--fg);
 }
@@ -4658,4 +4692,333 @@ textarea:focus-visible {
 .statusbar__agent {
   font-family: var(--font-mono);
   color: var(--fg-dim);
+}
+
+/* ---------------------------------------------------------------------------
+   The Changes tab (T100-U): `git.status` as a list, and one file's `git.diff`
+   under it. No artboard exists for a git panel, so nothing here is invented —
+   the bar is the explorer's 32px section bar and the diff rows are
+   `permission-prompt.tsx`'s, which is the other place in the window that draws
+   an add and a remove. Every value is an ADR-016 token, so the light ramp
+   follows without a second palette.
+   --------------------------------------------------------------------------- */
+
+.git {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.git__bar {
+  height: var(--section-h);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 0 var(--gap-md);
+  border-bottom: 1px solid var(--border);
+}
+
+.git__head {
+  font-family: var(--font-mono);
+  font-size: var(--text-control);
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A repository mid-merge or mid-rebase says so in words. `CLEAN` says nothing,
+   because a badge that is always there stops being read. */
+.git__state {
+  background: var(--warn-wash);
+  color: var(--warn-text);
+}
+
+.git__upstream {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.git__bar button {
+  padding: 3px 8px;
+  font-size: var(--text-meta);
+}
+
+.git__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: var(--gap);
+}
+
+.git__group {
+  padding-top: var(--gap-sm);
+}
+
+.git__group-title {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  margin: 0;
+  padding: 2px var(--gap-md);
+  font-size: var(--text-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.git__files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.git__file-button {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  width: 100%;
+  text-align: left;
+  border-radius: 0;
+  background: transparent;
+  padding: 0 var(--gap-md);
+  line-height: var(--row-h);
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  min-width: 0;
+}
+
+.git__file-button--selected,
+.git__file-button--selected:hover:not(:disabled) {
+  background: var(--surface-active);
+}
+
+/* The two-column code, the same one `git status --short` prints. Colour is the
+   second channel: the tooltip says the whole thing in words. */
+.git__code {
+  flex: none;
+  width: 2ch;
+  color: var(--fg-faint);
+  white-space: pre;
+}
+
+.git__code--modified,
+.git__code--type_changed {
+  color: var(--warn-text);
+}
+
+.git__code--added,
+.git__code--untracked {
+  color: var(--ok-text);
+}
+
+.git__code--deleted {
+  color: var(--error-text);
+}
+
+.git__code--renamed {
+  color: var(--accent-text);
+}
+
+.git__code--conflicted {
+  color: var(--error);
+  font-weight: 700;
+}
+
+.git__name {
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+/* The directory is context, not identity, so it recedes and is the part that
+   gets cut when the row runs out of width. */
+.git__dir {
+  color: var(--fg-faint);
+  font-size: var(--text-meta);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.git__badge--conflict {
+  background: var(--error-wash);
+  color: var(--error-text);
+}
+
+.git__note {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  margin: 0;
+  padding: var(--gap-sm) var(--gap-md);
+  color: var(--fg-muted);
+  font-size: var(--text-control);
+}
+
+.git__note--warn {
+  color: var(--warn-text);
+}
+
+.git__note button {
+  padding: 2px 8px;
+  font-size: var(--text-meta);
+}
+
+.git__empty {
+  margin: 0;
+  padding: var(--gap-sm) var(--gap-md);
+  color: var(--fg-muted);
+  font-size: var(--text-control);
+}
+
+.git__empty p {
+  margin: 0 0 var(--gap-xs);
+}
+
+.git__aside {
+  color: var(--fg-faint);
+  font-size: var(--text-meta);
+  line-height: 1.5;
+}
+
+/* The diff shares the column with the list rather than replacing it: which file
+   you are reading is part of reading it. */
+.git__diff {
+  flex: 1 1 55%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  background: var(--surface-editor);
+  overflow: auto;
+}
+
+.git__diff-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: var(--section-h);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 0 var(--gap-md);
+  background: var(--surface-editor);
+  border-bottom: 1px solid var(--border);
+}
+
+.git__diff-path {
+  font-family: var(--font-mono);
+  font-size: var(--text-control);
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.git__diff-bar button {
+  padding: 3px 8px;
+  font-size: var(--text-meta);
+}
+
+.git__diff-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  margin: 0;
+  padding: var(--gap-sm) var(--gap-md);
+  font-size: var(--text-meta);
+  color: var(--fg-muted);
+}
+
+.git__badge-kind {
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  font-size: var(--text-label);
+  font-weight: 600;
+}
+
+.git__adds {
+  color: var(--ok-text);
+  font-family: var(--font-mono);
+}
+
+.git__dels {
+  color: var(--error-text);
+  font-family: var(--font-mono);
+}
+
+.git__hunks {
+  font-family: var(--font-mono);
+  font-size: var(--text-control);
+  line-height: 18px;
+  padding-bottom: var(--gap);
+}
+
+.git__hunk {
+  margin-top: var(--gap-sm);
+}
+
+.git__hunk-head {
+  padding: 2px var(--gap-md);
+  color: var(--accent-text);
+  background: var(--accent-wash);
+  white-space: pre;
+}
+
+.git__line {
+  display: flex;
+  gap: var(--gap-sm);
+  padding: 0 var(--gap-md);
+  white-space: pre;
+}
+
+.git__line--added {
+  background: var(--ok-wash);
+}
+
+.git__line--removed {
+  background: var(--error-wash);
+}
+
+/* Line numbers, from the two sides the core reported. Fixed width so the text
+   column starts in the same place on every row. */
+.git__gutter {
+  flex: none;
+  width: 4ch;
+  text-align: right;
+  color: var(--fg-gutter);
+  user-select: none;
+}
+
+.git__sign {
+  flex: none;
+  width: 1ch;
+  color: var(--fg-muted);
+}
+
+.git__text {
+  color: var(--fg-dim);
+}
+
+.git__line--added .git__sign,
+.git__line--added .git__text {
+  color: var(--ok);
+}
+
+.git__line--removed .git__sign,
+.git__line--removed .git__text {
+  color: var(--error-text);
 }

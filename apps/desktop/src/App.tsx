@@ -25,6 +25,8 @@ import { useCloseFlow } from './features/editor/use-close-flow';
 import { useEditorBinding } from './features/editor/use-editor-binding';
 import { ExplorerPanel } from './features/explorer/explorer-panel';
 import { useExplorer } from './features/explorer/use-explorer';
+import { ChangesPanel } from './features/git/changes-panel';
+import type { SidebarTab } from './features/git/sidebar-tabs';
 import { Launcher } from './features/launcher/launcher';
 import { useLastSession } from './features/launcher/use-last-session';
 import { viewModesReducer } from './features/markdown/view-modes';
@@ -78,6 +80,11 @@ export function App() {
   // Only the launcher has a path field, so ⌘⇧O is its shortcut and the shell
   // holds the disclosure it opens.
   const [pathOpen, setPathOpen] = useState(false);
+  // Which of the sidebar's two sections is showing (T100-U). Deliberately not
+  // persisted: `persisted-layout.ts` is another ticket's file this wave, and a
+  // session that reopens on Changes would re-read the repository before the
+  // user asked for it.
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files');
   // The gutters write their CSS variables straight onto this element while
   // dragging, so a drag never re-renders the shell (T046).
   const shell = useRef<HTMLElement | null>(null);
@@ -350,6 +357,12 @@ export function App() {
               onOpenFile={(workspaceId, path, preview) =>
                 void documents.openFile(workspaceId, path, { preview })
               }
+              tab={sidebarTab}
+              onTabChange={setSidebarTab}
+              // An element, not a rendered panel: the explorer mounts it only
+              // while its tab is selected, which is what keeps `git.status`
+              // from being polled behind the tree.
+              changes={<ChangesPanel workspaceId={explorer.state.workspace?.id ?? null} />}
             />
             {import.meta.env.DEV && <OperationsPanel />}
             {import.meta.env.DEV && (

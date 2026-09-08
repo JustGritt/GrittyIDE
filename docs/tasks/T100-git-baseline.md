@@ -498,4 +498,209 @@ responses are `#[serde(tag = "status")]` unions with arms
 
 ### T100-U (lane Gu — the panel)
 
-_(not this session)_
+_Reported below, under its own `## Completion report — T100-U` heading._
+
+## Completion report — T100-U
+
+### Summary
+
+The **Changes** tab exists, and the sidebar header is a real tablist.
+
+`git.status` becomes a grouped list of changed paths; selecting one calls
+`git.diff` for that file alone and draws its structured hunks. Both reads carry
+all three arms of their response as values — `ready`, `notARepository`, and
+`pending` with a cancellable `Operation` whose payload arrives later on
+`OperationCompleted`. Nothing is written: `git.status` and `git.diff` are the
+only two git commands on the wire, so read-only is a property of the surface
+rather than a promise this panel makes.
+
+The header change is T233-S's own follow-up 4, and its comment in
+`explorer-panel.tsx` was the spec for it: it renamed the label to **Files**,
+left it an `<h2>`, and wrote down why — artboard 9a draws a second tab,
+**Changes**, and there was nothing behind it, because no git command reached
+the renderer. `PROTO-W2-GIT` put `git.status`/`git.diff` on the client at
+`PROTOCOL_VERSION` 2.17.0, so the second tab now has somewhere to go and the
+heading became what 9a drew.
+
+**No wire change of any kind.** `packages/protocol/**`,
+`apps/desktop/src-tauri/**` and `crates/**` are not in the diff; this ticket
+claims no `PROTOCOL_VERSION` and no `LAYOUT_VERSION`.
+
+### Files changed
+
+| File | What |
+|---|---|
+| `features/git/git-model.ts` (+`git-model.test.ts`) | new — grouping, status codes, head/upstream lines, hunk line numbering; 22 tests |
+| `features/git/git-reducer.ts` (+`git-reducer.test.ts`) | new — both reads, the operation hand-over and the race around it; 22 tests |
+| `features/git/use-git.ts` | new — the controller: two commands, one subscription, cancel, refresh, paging |
+| `features/git/changes-view.tsx` (+`changes-view-render.test.ts`) | new — everything the tab draws; 20 render tests |
+| `features/git/changes-panel.tsx` | new — the container half, 30 lines, owns the controller and nothing else |
+| `features/git/sidebar-tabs.tsx` (+`sidebar-tabs.dom.test.tsx`) | new — the tablist, roving tabindex, Arrow/Home/End; 8 DOM tests |
+| `features/explorer/explorer-panel.tsx` | the header becomes `<SidebarTabs>`; the tree and the changes list become two `role="tabpanel"` panels |
+| `App.tsx` | `sidebarTab` state and the `changes` element (composition only, +13 lines) |
+| `app.css` | the `.git*` block, `.explorer__tablist` / `.explorer__tab`, `.explorer__panel`, and the two scrollers added to the narrow-viewport rule |
+| `features/session/shell-restore.dom.test.tsx` | two assertions follow the heading→tab change, plus one new one for the Changes tab |
+
+**No new dependency.** Nothing was added to `package.json` or the catalog.
+
+### Architectural decisions
+
+1. **The tablist lives in `features/git/`, not in a shared `components/`
+   module.** There are exactly two tabs and one caller; a generic tab component
+   with one consumer would be the speculative abstraction hard rule 2 warns
+   about. A third section is what would justify hoisting it, and moving it then
+   is a rename. `explorer-panel.tsx` imports it rather than owning it, which is
+   what kept the edit to that shared magnet to the header and the two panels.
+2. **Only the selected panel is in the document, and that is a behavioural
+   decision, not a rendering one.** T100 rules watcher integration out, so
+   `git.status` is polled on demand; "not mounted" is therefore the same thing
+   as "not polling", and nothing reads the repository while the tree is
+   showing. The alternative — both panels mounted with `hidden` — would have
+   put a git read behind the file tree on every startup.
+3. **`ChangesView` is split from `ChangesPanel`.** The container calls
+   `useGit`; the view takes the state it produced. This is `agent-console.tsx`'s
+   shape and it is what lets the render tests mount every arm — including the
+   two a repository will not produce on demand — without constructing the core
+   client's event channel at import. (Before the split the render test emitted a
+   `window is not defined` diagnostic from the transport, which is exactly the
+   unexplained warning the definition of done forbids.)
+4. **The diff is asked for one file at a time, through `git.diff`'s `path`.**
+   That is what the argument is for: the bounded way to reach the selected
+   file's hunks instead of paging every changed file's hunks to get at one.
+5. **The `pending` race is handled the way `explorer-reducer.ts` handles it.**
+   The command response and the completion event are separate IPC messages with
+   no ordering guarantee, so an outcome that arrives first is parked in a
+   **bounded** map (8 entries) and claimed when the response names it. Outcomes
+   are routed by `operation.kind`, so a `git.diff` completion can never land on
+   the status read and vice versa — asserted, not assumed.
+6. **Cancellation is cooperative and never optimistic.** The Cancel button asks
+   `operations.cancel`; the state changes when `OperationCancelled` says it did.
+   A refusal to cancel is rendered on the read it belongs to.
+7. **`notARepository` is drawn as a value, never as an error envelope**, and it
+   says *why* a folder inside a repository reads the same way (T100's decision 3
+   — the repository is opened at the workspace root and never discovered above
+   it). That turns follow-up 1 of the core half from a mystery into a sentence.
+8. **A partially staged file appears under both Staged and Changes**, because
+   that is what it is. Picking one band would be a claim the repository does not
+   make. A conflicted file is only ever under Conflicts.
+9. **Hunks are drawn as numbered columns, never as text.** The sign is its own
+   column and the content the core sent is untouched, which is what keeps a line
+   that legitimately starts with `-` from reading as a removal. The `@@` header
+   is *composed* from the hunk's four numbers rather than parsed out of a string
+   — hard rule 5, asserted against the rendered markup.
+10. **Colour is never the only channel.** The two-column code has a tooltip that
+    says the same thing in words; a conflict has a `conflict` badge as well as a
+    colour; a truncated hunk, a truncated file list and an unrepresentable path
+    each say what happened in a sentence, the way
+    `OutputBatch.truncated_bytes` established for terminal output.
+11. **No new colour value and no invented layout.** T100 §10 says no artboard
+    exists and to keep the panel plain. The bar is the explorer's 32px section
+    bar and the diff rows are `permission-prompt.tsx`'s, down to `--ok-wash` /
+    `--error-wash`, so the light ramp follows without a second palette.
+12. **The tab is not persisted.** `persisted-layout.ts` belongs to another
+    ticket this wave, and a session that reopened on Changes would read the
+    repository before the user asked it to.
+
+### Tests actually executed, with results
+
+- `npx vitest run --project desktop src/features/git` — **4 files, 72 tests,
+  all passed.** 22 model, 22 reducer, 20 render, 8 DOM.
+- `npx vitest run --project desktop` — **55 files, 616 tests, all passed.**
+  The baseline before this work was 51 files / 544 tests, so nothing existing
+  broke and 4 files / 72 tests were added.
+- `npx vitest run` (whole workspace) — **85 files, 795 tests, all passed.**
+  `packages/editor`'s `model-eol` DOM test (`MONACO-JSDOM-FLAKE`) did not fire
+  on any of these runs; it is not this ticket's and is not claimed either way.
+- `pnpm typecheck` — all four projects clean.
+- `npx biome check .` — **272 files, clean**, no fixes pending.
+- `pnpm check:ts` (lint + typecheck + the whole test suite) — **exit 0**.
+- `check:generated` — passed when run (20:05), with
+  `packages/protocol/src/generated` clean. It has since gone red in this shared
+  working tree because `W-t080` regenerated types for `PROTO-W3`; **none of
+  those files is this ticket's**, which touches no Rust and no protocol source.
+- `npx vite build` in `apps/desktop` — built in 3.12s. The >500 kB chunk
+  warning is Monaco's and pre-existing.
+- **`pnpm check` as a whole was not run, and this report does not claim it.**
+  Its `check:rust` stage compiles two other sessions' in-flight crates
+  (`W-t310a` in `crates/agent-claude/**`, `W-t080` in `crates/search/**` and
+  `crates/gritty-core/src/search/**`), so its result would not be this
+  ticket's. No Rust is touched here. Every stage that covers this ticket's
+  files is listed above, and that list is the decomposition rather than a
+  summary of one command.
+- **The manual pass was not run and is not claimed.** There is no screen access
+  on this machine and the chrome-devtools MCP server would not connect — the
+  same limit T233-C and `PROTO-W2-GIT` recorded. Nothing here has been seen on
+  a screen.
+
+Three tests exist specifically to stop this from rotting:
+
+- `changes-view-render.test.ts` renders **every** arm of both reads, including
+  `pending` with its Cancel, `notARepository`, a `CoreError` envelope, a
+  cancelled read, an empty repository (no commits) and a clean one — the arms a
+  happy-path test never reaches.
+- The same file asserts hard rule 5 on the *markup*: the content of a diff line
+  is never prefixed into a `+`/`-` string, and a hostile branch name, path and
+  diff line are escaped rather than rendered as markup (hard rule 13).
+- `shell-restore.dom.test.tsx` is the only test that mounts the real `App`, so
+  it now asserts the Changes tab is present after a startup restore, beside the
+  existing assertions that the Agents section is there and the rail is gone.
+
+### Known limitations
+
+- **Not seen on a screen.** No visual-regression tooling, no screen access, and
+  the chrome-devtools MCP server would not connect. The light/dark and 800×600
+  lines are unverified and are the first thing a manual pass should check.
+  Every value is an ADR-016 token, which is the argument that the light ramp
+  follows — not evidence that it does.
+- **The diff shares the sidebar column with the list**, so a wide hunk scrolls
+  horizontally in ~300px. That is the plain panel T100 §10 asks for rather than
+  a design decision; the editor area would be the right home for it (follow-up
+  1).
+- **Nothing refreshes itself.** The list is read on mount, on a workspace
+  change, and when Refresh is pressed. T100 rules watcher integration out
+  explicitly, so a change made outside Gritty is invisible until asked for.
+- **Switching to Files while a read is pending abandons the operation rather
+  than cancelling it.** The panel unmounts, the core finishes a read nobody
+  claims, and coming back re-reads. It is bounded and read-only, so it wastes
+  work rather than breaking anything (follow-up 4).
+- **A failed "Load more" drops the page already shown** and offers a retry that
+  re-reads from the first page. Simpler than a second error slot, and the
+  refusal is never swallowed — but it does cost the user their place.
+- **No shortcut reaches the tab.** ⌥G belongs to the Agents section and the
+  shortcut registry T335 asked for is still unbuilt; a seventh hand-gated
+  `keydown` listener is not what this ticket should add.
+- **`formatBytes` duplicates `explorer-panel.tsx`'s `formatSize`** — three
+  lines of presentation, duplicated across a ticket boundary the way T233-M
+  duplicated `titleCase`, rather than exported across one.
+- The states T100 tests in the core — mid-rebase, mid-merge, conflicted,
+  hostile filters — are rendered here from hand-built fixtures, not from a real
+  repository through the IPC. That gap is `PROTO-W2-GIT`'s recorded risk and
+  this ticket does not close it.
+
+### Follow-up tasks
+
+| Follow-up | Why |
+|---|---|
+| A diff opens in the editor area as a tab, the way T233-C moved the agent console there | ADR-026 already made the argument for a wide surface; a hunk in a 300px column is the same complaint |
+| Clicking a changed file opens it in the editor beside its diff | The obvious next gesture; it needs `documents.openFile` wired through, which is scope this ticket did not take |
+| A count on the Changes tab | Needs `git.status` polled while the Files tab is showing, which needs T070's invalidation first — otherwise it is a background poll with no trigger |
+| Cancel a pending read when the tab is left, or keep the operation and re-adopt it on return | See the limitation above |
+| The shortcut registry (T335), then a chord for each sidebar section | This is now the seventh listener that would want one |
+| Persist the selected sidebar section in `Layout` | Deliberately not done here; `persisted-layout.ts` is another ticket's file this wave |
+
+### Remaining risks
+
+- The `pending` arm is proven by the reducer and by the rendered markup, but
+  **never end to end**: provoking it needs a repository slow enough to outlive
+  `DEFAULT_GIT_BUDGET`, and `PROTO-W2-GIT` recorded that the test hook which
+  does that is `#[cfg(test)]` inside `gritty-core` and unreachable from outside.
+  If the core ever stopped emitting `OperationCompleted` for a git read, the
+  panel would sit on "Reading the repository (operation)…" and only a manual
+  pass would notice.
+- `groupEntries` decides the bands from `FileState` values. A newer core adding
+  a state would put entries in `unstaged` by default rather than in a band named
+  for it — the letter and the tooltip would show the new value, but the grouping
+  would be a guess. The lookups degrade loudly; the grouping degrades quietly.
+- The panel reads `RepositoryStatus.entries` to decide whether a file with no
+  diff is untracked. If a status page is truncated past the selected file, that
+  explanation is not shown and the pane says only "No difference against HEAD".

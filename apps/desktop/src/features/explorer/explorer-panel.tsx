@@ -1,7 +1,8 @@
 import { isInstructionFile } from '@gritty/markdown';
 import type { DirEntry, WorkspaceClosedReason, WorkspaceId } from '@gritty/protocol';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, type ReactNode, useState } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
+import { type SidebarTab, SidebarTabs, sidebarPanelId, sidebarTabId } from '../git/sidebar-tabs';
 import {
   countHidden,
   type ExplorerNode,
@@ -22,10 +23,19 @@ const CLOSED_REASONS: Record<WorkspaceClosedReason, string> = {
  * entries behind a toggle, truncated directories continued on demand, and
  * listings that became operations shown with a cancel button. Clicking a file
  * hands it to `onOpenFile` (T030 documents).
+ *
+ * Since T100-U it is also the frame the sidebar's two sections share: the
+ * header is a tablist, and the tree is one of the two panels it switches
+ * between. The other one is passed in as `changes` rather than imported here,
+ * so the git feature keeps its own directory and this file keeps owning only
+ * the frame and the tree.
  */
 export function ExplorerPanel({
   explorer,
   onOpenFile,
+  tab,
+  onTabChange,
+  changes,
 }: {
   /**
    * Owned by the shell (T049), not created here: the launcher opens folders
@@ -35,6 +45,14 @@ export function ExplorerPanel({
   explorer: ExplorerController;
   /** `preview` is a single click — open it for a look, not to keep. */
   onOpenFile?: (workspaceId: WorkspaceId, path: string, preview: boolean) => void;
+  /** Which section is showing; owned by the shell, like every other layout choice. */
+  tab: SidebarTab;
+  onTabChange: (tab: SidebarTab) => void;
+  /**
+   * The Changes panel, rendered only while its tab is selected — so nothing
+   * reads the repository while the tree is showing.
+   */
+  changes?: ReactNode;
 }) {
   const { state } = explorer;
   const [pathInput, setPathInput] = useState('');
@@ -54,23 +72,22 @@ export function ExplorerPanel({
       : undefined;
 
   return (
-    <section className="explorer" aria-labelledby="explorer-title">
-      {/* A 32px header (T048): the label, the one action you reach for, and the
-          rest behind the same disclosure the editor and terminal settings use.
+    <section className="explorer" aria-label="Files and changes">
+      {/* A 32px header (T048): the section tabs, the one action you reach for,
+          and the rest behind the same disclosure the editor and terminal
+          settings use.
 
-          T233-S restyles the label as artboard 9a's section tab and renames it
-          Files, because the sidebar now has something above it and "Explorer"
-          named the whole column. It is still an `<h2>`, not a `role="tab"` in a
-          tablist: 9a draws a second tab, Changes, and there is nothing behind
-          it — no git command reaches the renderer yet. A lone tab that cannot
-          be switched away from is an affordance that does not work, so the
-          heading stays a heading until T100-U has a tab to put beside it. */}
+          T233-S restyled the label as artboard 9a's section tab, renamed it
+          Files, and left it an `<h2>` on purpose: 9a draws a second tab,
+          Changes, and nothing was behind it, because no git command reached
+          the renderer. T100-U is that second tab, so the heading is now what
+          9a drew — a real tablist, keyboard-navigable, with the tree and the
+          changes list as its two panels. `sidebar-tabs.tsx` holds the tab
+          semantics; the panels are below. */}
       <div className="explorer__toolbar">
-        <h2 id="explorer-title" className="explorer__tab">
-          Files
-        </h2>
+        <SidebarTabs tab={tab} onTabChange={onTabChange} />
         <span className="explorer__spacer" />
-        {hiddenCount > 0 && !state.showHidden && (
+        {tab === 'files' && hiddenCount > 0 && !state.showHidden && (
           <span className="badge">{hiddenCount} hidden</span>
         )}
         <button type="button" onClick={() => void explorer.openFolder()}>
@@ -128,25 +145,47 @@ export function ExplorerPanel({
         </>
       )}
 
-      {state.workspace ? (
-        <>
-          <ul className="tree" aria-label="Workspace files">
-            {rows.map((row) => (
-              <TreeRow
-                key={rowKey(row)}
-                row={row}
-                onToggle={explorer.toggle}
-                onReload={explorer.reload}
-                onLoadMore={explorer.loadMore}
-                onCancel={explorer.cancelListing}
-                onOpenFile={openFile}
-              />
-            ))}
-          </ul>
-          {rows.length === 0 && <p className="explorer__empty">This directory is empty.</p>}
-        </>
+      {/* Only the selected panel exists in the document. That is what keeps the
+          Changes tab from reading the repository while the tree is showing —
+          `git.status` is polled on demand (T100 rules watcher integration out),
+          so "not mounted" is the same thing as "not polling". */}
+      {tab === 'files' ? (
+        <div
+          className="explorer__panel"
+          role="tabpanel"
+          id={sidebarPanelId('files')}
+          aria-labelledby={sidebarTabId('files')}
+        >
+          {state.workspace ? (
+            <>
+              <ul className="tree" aria-label="Workspace files">
+                {rows.map((row) => (
+                  <TreeRow
+                    key={rowKey(row)}
+                    row={row}
+                    onToggle={explorer.toggle}
+                    onReload={explorer.reload}
+                    onLoadMore={explorer.loadMore}
+                    onCancel={explorer.cancelListing}
+                    onOpenFile={openFile}
+                  />
+                ))}
+              </ul>
+              {rows.length === 0 && <p className="explorer__empty">This directory is empty.</p>}
+            </>
+          ) : (
+            <p className="explorer__empty">No workspace open.</p>
+          )}
+        </div>
       ) : (
-        <p className="explorer__empty">No workspace open.</p>
+        <div
+          className="explorer__panel"
+          role="tabpanel"
+          id={sidebarPanelId('changes')}
+          aria-labelledby={sidebarTabId('changes')}
+        >
+          {changes}
+        </div>
       )}
     </section>
   );

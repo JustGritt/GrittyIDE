@@ -231,8 +231,11 @@ describe('the shell after a startup restore', () => {
     stubCore(WORKSPACE);
     const { container, ui } = renderShell();
 
-    // The workspace UI is up...
-    expect(await ui.findByRole('heading', { name: 'Files' })).toBeTruthy();
+    // The workspace UI is up... (T100-U: the sidebar header became a real
+    // tablist once the Changes tab had somewhere to go, so the Files section
+    // is a `role="tab"` rather than a heading. The assertion follows the
+    // change the way T233-S's followed the rename before it.)
+    expect(await ui.findByRole('tab', { name: 'Files' })).toBeTruthy();
     expect(ui.getByText(WORKSPACE.name)).toBeTruthy();
     expect(ui.getByTitle(WORKSPACE.root)).toBeTruthy();
     // ...including the Agents section above the tree (T233-S). Asserted here
@@ -240,6 +243,11 @@ describe('the shell after a startup restore', () => {
     // `App`, so it is the only place that shows the section survives being
     // composed into the shell rather than only rendering in isolation.
     expect(container.querySelector('.agents-section')).not.toBeNull();
+    // ...and the Changes tab beside Files (T100-U), for the same reason: the
+    // render tests next door cannot show that the tab survives composition
+    // into the shell, and a correct component with no caller is the defect
+    // this repository keeps catching late.
+    expect(ui.getByRole('tab', { name: 'Changes' })).toBeTruthy();
     // ...and the rail it replaced is gone (T233-C, ADR-026). Asserted rather
     // than assumed: this is the only test that mounts the real `App`, so it is
     // the only place that would notice the two surfaces coexisting again.
@@ -267,6 +275,6 @@ describe('the shell after a startup restore', () => {
       expect(container.querySelector('#launcher-title')).not.toBeNull();
     });
     expect(ui.getByText('No workspace open')).toBeTruthy();
-    expect(ui.queryByRole('heading', { name: 'Files' })).toBeNull();
+    expect(ui.queryByRole('tab', { name: 'Files' })).toBeNull();
   });
 });
