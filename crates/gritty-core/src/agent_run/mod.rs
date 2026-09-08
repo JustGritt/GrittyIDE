@@ -56,6 +56,7 @@
 //! the untrusted side, and never in the renderer, which would be trusting it.
 //! Tracing carries a run's id, state, provider and duration; never event text.
 
+pub mod claude_driver;
 pub mod fake_driver;
 pub mod manager;
 pub mod request;
@@ -66,9 +67,11 @@ pub mod wire;
 #[cfg(test)]
 mod tests;
 
+pub use claude_driver::{ClaudeDriverOptions, PermissionPolicy};
 pub use fake_driver::{DEMO_STEP_DELAY, FakeDriverOptions};
 pub use manager::{
     AgentRunContext, AgentRunManager, AgentRunSpec, FINISHED_RETENTION, MAX_CONCURRENT_RUNS,
+    MAX_QUEUED_PROMPTS, OwnedProviderSession, RunInbox, RunInboxReceiver, RunInput,
 };
 pub use request::{CancelRunRequest, ListRunsRequest, RunEventsRequest, StartFakeRunRequest};
 pub use state::AgentRunState;

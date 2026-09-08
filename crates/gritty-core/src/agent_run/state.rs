@@ -195,6 +195,23 @@ impl AgentRunState {
         )
     }
 
+    /// Whether a run in this state may be handed more input (`runs.prompt`).
+    ///
+    /// Read the way [`Self::allowed_transitions`] is read: the manager refuses
+    /// against this table and the console disables its prompt box against it,
+    /// so neither keeps its own copy of the answer.
+    ///
+    /// `RUNNING` and `WAITING` only, and each exclusion is a decision:
+    /// `STARTING` has no child to speak to yet — the prompt `runs.start` was
+    /// given is seeded into the inbox before the run exists, so nothing is lost
+    /// by refusing here, and a queued prompt would be invisible if the child
+    /// then never came up. `BLOCKED` and `NEEDS_DECISION` are stopped on
+    /// something a *prompt* does not answer: one stop at a time, and the answer
+    /// to a block is a verdict. `REVIEW` is the user's turn, not the agent's.
+    pub const fn accepts_input(self) -> bool {
+        matches!(self, Self::Running | Self::Waiting)
+    }
+
     /// The run is executing, so there is something for cancellation to reach
     /// and something for a supervisor to be holding.
     pub const fn is_active(self) -> bool {

@@ -2440,6 +2440,7 @@ dependencies = [
 name = "gritty-core"
 version = "0.1.0"
 dependencies = [
+ "gritty-agent-claude",
  "gritty-agent-fake",
  "gritty-agents",
  "gritty-git",

@@ -66,7 +66,18 @@ who finds one of them false should stop rather than work around it.
 - `crates/agent-claude/**` (new)
 - `crates/gritty-core/src/agent_run/**`
 - `crates/gritty-core/Cargo.toml`, root `Cargo.toml`
-- `crates/agents/src/probe.rs` — **only** to accept an exclusion set (§8)
+- `crates/agents/src/probe.rs` and `crates/agents/src/lib.rs` — **only** to
+  accept an exclusion set (§8). Widened from `probe.rs` alone on 2026-09-08,
+  with the user's agreement, because a process-only filter does not satisfy §8:
+  the child writes an ordinary transcript, `transcript::scan` picks up any
+  `.jsonl` inside its 24-hour window keyed on the uuid Gritty minted, and
+  `rosterRows` concatenates the two sources with no dedupe
+  (`roster-model.ts:109`). Filtering only `discover_processes` therefore leaves
+  the same agent drawn twice as a `TRANSCRIPT_ONLY` session, for a day after the
+  run ends — the acceptance criterion passing its unit test while being false in
+  the app. `transcript.rs` itself stays untouched: the filter is one parameter
+  on `discover` and one `.filter` on its transcript results, which is the
+  smallest widening that makes §8 true.
 - `apps/desktop/src-tauri/src/**`
 - `apps/desktop/src/features/runs/**`, and the console's prompt box
 - `packages/protocol/src/**` (generated types are regenerated, never hand-edited)

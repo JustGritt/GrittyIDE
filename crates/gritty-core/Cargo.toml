@@ -9,6 +9,11 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+# T310-B: the Claude Code adapter the run manager drives. The dependency runs
+# this way round for the same reason `gritty-agent-fake`'s does — the adapter
+# cannot name an `AgentRunEvent` without a Cargo cycle — which is why the
+# translation lives in `agent_run/claude_driver.rs` and not in the adapter.
+gritty-agent-claude = { workspace = true }
 gritty-agent-fake = { workspace = true }
 gritty-agents = { workspace = true }
 gritty-git = { workspace = true }

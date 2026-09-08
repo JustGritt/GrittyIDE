@@ -61,6 +61,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use tokio::runtime::Handle;
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tokio_util::sync::{CancellationToken, WaitForCancellationFuture};
@@ -93,6 +94,21 @@ use crate::workspace::WorkspaceManager;
 /// expensive. **T310 must justify it against real process cost** (memory, token
 /// spend, and how many worktrees T400 can hold) rather than inherit it.
 pub const MAX_CONCURRENT_RUNS: usize = 4;
+
+/// How many prompts may be waiting for one run before a caller is refused.
+///
+/// The shape of [`MAX_CONCURRENT_RUNS`] above: a small named bound, enforced in
+/// the core, **refusing rather than queueing**. It lives here and not in
+/// `wire.rs` because it is a supervision policy rather than a promise the
+/// protocol makes — nothing on the wire reports how many prompts are pending,
+/// which is exactly the difference that puts `MAX_RUN_EVENTS` on the other side
+/// of that line.
+///
+/// Four, because a person types one prompt and waits for it. The queue exists
+/// so a second thought typed mid-turn is not lost, not so a caller can fire a
+/// hundred paid turns at a model nobody is watching. Worst case this bounds one
+/// run's inbox at four times [`super::request::MAX_PROMPT_TEXT`].
+pub const MAX_QUEUED_PROMPTS: usize = 4;
 
 /// How many ended runs stay listable for rehydration, oldest pruned first.
 ///
@@ -158,6 +174,103 @@ struct Entry {
     /// the supervising task knows whether it is reporting a cancellation or an
     /// interruption without having to be told twice.
     ending: Option<AgentRunState>,
+    /// Where [`AgentRunManager::prompt`] puts text for a driver that is already
+    /// running, or `None` for a run whose driver takes no input.
+    ///
+    /// `None` is the shape that lets a refusal say *why* rather than say
+    /// nothing: every `FAKE` run has one, because `runs.startFake` is a
+    /// scripted fiction with nothing to say anything to.
+    inbox: Option<mpsc::Sender<RunInput>>,
+    /// The provider session this run owns, once it has one.
+    ///
+    /// Deliberately **not** on [`AgentRun`]: that is the frozen wire shape, and
+    /// a provider's own session id is the *observed* lane's identity concept
+    /// (`docs/architecture/agent-runs.md`, "The line, first"). Putting it there
+    /// would invite exactly the join across the two lanes that the split
+    /// exists to forbid. It is internal supervision state, and
+    /// [`AgentRunManager::owned_provider_sessions`] is the only way out.
+    provider_session: Option<OwnedProviderSession>,
+}
+
+/// One provider session a run owns: what Gritty told the provider to call
+/// itself, and the process answering to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedProviderSession {
+    /// The id Gritty minted and passed to the child.
+    pub session_id: String,
+    /// The child's pid, once the driver has reported one. `None` before the
+    /// process exists.
+    pub pid: Option<u32>,
+}
+
+/// What may be handed to a driver that is already running.
+///
+/// An enum rather than a bare `String` because the next thing to travel this
+/// channel is already named: `T310-ANSWER`'s permission verdict goes to the
+/// same driver over the same pipe, and a second channel for it would be a
+/// second lifetime to get wrong.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunInput {
+    /// `runs.prompt`: what the user typed, in full.
+    ///
+    /// **Not** the clipped preview `PROMPT_STARTED` records. `MAX_TEXT` bounds
+    /// untrusted adapter output for display; silently truncating a person's
+    /// prompt before paying a model to answer it would be worse than refusing
+    /// it, which is why `PromptRunRequest` refuses against its own larger bound
+    /// instead.
+    Prompt { text: String },
+}
+
+/// The manager's end of a run's inbox.
+///
+/// Made by the caller, before the run exists, because
+/// [`AgentRunManager::start`] takes an already-built `FnOnce` closure — so a
+/// receiver produced *inside* `start` could never reach a driver constructed
+/// *outside* it. The driver owns the other half by capturing it, exactly as
+/// `fake_driver::drive` captures its script.
+pub struct RunInbox {
+    sender: mpsc::Sender<RunInput>,
+}
+
+/// The driver's end of a run's inbox.
+///
+/// Appears nowhere on [`AgentRunContext`] on purpose: a context is `Clone` and
+/// a receiver is not, and keeping the context purely outbound is what makes
+/// "who moves a run" answerable by reading one type.
+pub struct RunInboxReceiver {
+    receiver: mpsc::Receiver<RunInput>,
+}
+
+impl RunInbox {
+    /// A fresh inbox, bounded at [`MAX_QUEUED_PROMPTS`].
+    pub fn pair() -> (Self, RunInboxReceiver) {
+        let (sender, receiver) = mpsc::channel(MAX_QUEUED_PROMPTS);
+        (Self { sender }, RunInboxReceiver { receiver })
+    }
+
+    /// The prompt `runs.start` was given, queued before the run exists.
+    ///
+    /// Infallible by construction: the channel is empty and its bound is at
+    /// least one. So the initial prompt and every later one travel exactly the
+    /// same path, and the driver has one place prompts come from rather than a
+    /// special case for the first.
+    pub fn seed(&self, text: String) {
+        debug_assert!(MAX_QUEUED_PROMPTS >= 1);
+        let _ = self.sender.try_send(RunInput::Prompt { text });
+    }
+}
+
+impl RunInboxReceiver {
+    /// The next thing to hand the agent, or `None` once the run is gone.
+    ///
+    /// Cancellation-safe, so a driver may select on it: if another branch wins,
+    /// nothing was taken from the channel. That is what keeps
+    /// [`MAX_QUEUED_PROMPTS`] the only bound — a driver that took a message it
+    /// could not act on and held it in a local would have made a second,
+    /// unbounded queue.
+    pub async fn recv(&mut self) -> Option<RunInput> {
+        self.receiver.recv().await
+    }
 }
 
 impl Entry {
@@ -260,6 +373,47 @@ impl AgentRunManager {
         F: FnOnce(AgentRunContext) -> Fut + Send + 'static,
         Fut: Future<Output = Result<(), CoreError>> + Send + 'static,
     {
+        self.start_inner(spec, None, None, drive)
+    }
+
+    /// [`Self::start`], for a driver that can be spoken to (T310-B).
+    ///
+    /// Everything `start` does, plus the manager's end of the run's inbox and
+    /// the provider session the run owns. The driver's end of that inbox was
+    /// moved into `drive` before this was called — the only arrangement
+    /// `FnOnce` allows, and the reason the inbox is not on
+    /// [`AgentRunContext`].
+    ///
+    /// `start` is left exactly as it was rather than widened to take an
+    /// `Option`: `runs.startFake`, `fake_driver` and every existing test are
+    /// written against that signature, and "the fake keeps working with no
+    /// edit to `agent-fake`" is honoured more strongly by not editing
+    /// `fake_driver.rs` either.
+    pub fn start_with_inbox<F, Fut>(
+        self: &Arc<Self>,
+        spec: AgentRunSpec,
+        inbox: RunInbox,
+        session: OwnedProviderSession,
+        drive: F,
+    ) -> Result<AgentRun, CoreError>
+    where
+        F: FnOnce(AgentRunContext) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<(), CoreError>> + Send + 'static,
+    {
+        self.start_inner(spec, Some(inbox), Some(session), drive)
+    }
+
+    fn start_inner<F, Fut>(
+        self: &Arc<Self>,
+        spec: AgentRunSpec,
+        inbox: Option<RunInbox>,
+        session: Option<OwnedProviderSession>,
+        drive: F,
+    ) -> Result<AgentRun, CoreError>
+    where
+        F: FnOnce(AgentRunContext) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<(), CoreError>> + Send + 'static,
+    {
         // A run against a workspace that is not open has nowhere to happen, and
         // this is also where a root that vanished is noticed.
         self.workspaces
@@ -305,6 +459,8 @@ impl AgentRunManager {
                 token: token.clone(),
                 runner: None,
                 ending: None,
+                inbox: inbox.map(|inbox| inbox.sender),
+                provider_session: session,
             };
             entry.ring.record(&id, now, AgentRunEvent::RunStarted);
             // The run has to exist for a consumer before its events mean
@@ -788,6 +944,101 @@ impl AgentRunManager {
             .map(|entry| entry.snapshot.clone())
     }
 
+    /// `runs.prompt`: hand text to a driver that is already running.
+    ///
+    /// **Refuses rather than queues at every edge, and every refusal names what
+    /// is in the way** — the state, the provider, or the bound. Nothing here is
+    /// optimistic: accepting a prompt records no event and changes no state, so
+    /// a caller that got `Ok` has learned the text was *queued*, not that the
+    /// agent has seen it. `PROMPT_STARTED` is the run's own confirmation and it
+    /// comes from the driver, when the CLI replays the message back.
+    ///
+    /// The state check and the send are one critical section: without that a
+    /// run could end between the two and text would be queued for a corpse.
+    /// `try_send` calls no user code and at most schedules a wake, so holding
+    /// the lock across it cannot re-enter this manager — and there is nothing
+    /// to emit, so the emit-after-unlock discipline is not in play.
+    pub fn prompt(
+        &self,
+        id: &AgentRunId,
+        text: String,
+        actor: Actor,
+    ) -> Result<AgentRun, CoreError> {
+        let mut inner = self.lock();
+        let Some(entry) = inner.entries.get_mut(id) else {
+            return Err(CoreError::not_found(format!("agent run {id} does not exist")));
+        };
+        let state = entry.snapshot.state;
+        if state.is_terminal() {
+            return Err(CoreError::conflict(format!(
+                "run already ended {}; it cannot be prompted",
+                state.as_str()
+            )));
+        }
+        if entry.snapshot.cancellation_requested {
+            return Err(CoreError::conflict(format!(
+                "run {id} is stopping; it cannot be prompted"
+            )));
+        }
+        if !state.accepts_input() {
+            return Err(CoreError::conflict(format!(
+                "run is {}; it is not accepting a prompt",
+                state.as_str()
+            )));
+        }
+        let Some(inbox) = entry.inbox.as_ref() else {
+            return Err(CoreError::conflict(format!(
+                "a {} run has no prompt channel",
+                entry.snapshot.provider.as_str()
+            )));
+        };
+        match inbox.try_send(RunInput::Prompt { text }) {
+            Ok(()) => {
+                // The id, the actor and a length — never the text (see the
+                // module's tracing rule).
+                tracing::info!(run = %id, ?actor, "a prompt was queued for a run");
+                Ok(entry.snapshot.clone())
+            }
+            Err(mpsc::error::TrySendError::Full(_)) => Err(CoreError::conflict(format!(
+                "this run already has {MAX_QUEUED_PROMPTS} prompts waiting; wait for it to answer"
+            ))),
+            // The receiver is gone: the driver's future returned or panicked
+            // and `settle` has not taken this lock yet. Refuse and let it
+            // decide the ending — racing it from here would be two paths
+            // ending one run.
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                tracing::warn!(run = %id, "a prompt arrived for a run whose driver has stopped");
+                Err(CoreError::conflict(format!(
+                    "run {id} is no longer accepting input: its driver has stopped"
+                )))
+            }
+        }
+    }
+
+    /// Every provider session this manager minted and is still answerable for.
+    ///
+    /// The composition root turns this into the exclusion set agent discovery
+    /// is given, so Gritty's own child is not also reported as a session
+    /// somebody else owns (T310-B §8). It returns plain data and names nothing
+    /// from `agent_session` or `gritty_agents`, which is what keeps the two
+    /// lanes from importing each other.
+    ///
+    /// **Ended-but-unpruned runs are included on purpose.** Their child may
+    /// still be dying and its transcript certainly still exists, and both are
+    /// things Gritty owned rather than things it observed. Over-excluding for a
+    /// while is the safe direction; under-excluding is what draws the same
+    /// agent twice. Bounded by `FINISHED_RETENTION` + [`MAX_CONCURRENT_RUNS`]
+    /// by construction, and forgotten only by `prune` — never persisted, since
+    /// a set that outlived the process would be a permanent blacklist
+    /// (ADR-021 §5).
+    pub fn owned_provider_sessions(&self) -> Vec<OwnedProviderSession> {
+        self.lock()
+            .entries
+            .values()
+            .filter_map(|entry| entry.provider_session.clone())
+            .collect()
+    }
+
     /// `runs.list`: every known run of one workspace, oldest first.
     pub fn list(&self, workspace_id: &WorkspaceId) -> Vec<AgentRun> {
         let mut runs: Vec<AgentRun> = self
@@ -995,6 +1246,24 @@ impl AgentRunContext {
     /// The run as it stands, or `None` once it has been pruned.
     pub fn snapshot(&self) -> Option<AgentRun> {
         self.manager.get(&self.run_id)
+    }
+
+    /// Report the child's pid, once the driver has spawned one (T310-B §8).
+    ///
+    /// Outbound like everything else here, and it exists for one reason: the
+    /// exclusion set keyed on a provider session id has a hole, because
+    /// `discover_processes` has to *recover* that id from a command line `ps`
+    /// may have truncated. A pid is exact and needs no parsing, so the two keys
+    /// together close what either alone leaves open.
+    ///
+    /// A run with no provider session — every `FAKE` run — ignores this.
+    pub fn set_child_pid(&self, pid: u32) {
+        let mut inner = self.manager.lock();
+        if let Some(entry) = inner.entries.get_mut(&self.run_id)
+            && let Some(session) = entry.provider_session.as_mut()
+        {
+            session.pid = Some(pid);
+        }
     }
 
     /// Cooperative cancellation: a driver checks this between units of work.
