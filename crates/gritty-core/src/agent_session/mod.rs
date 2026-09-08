@@ -134,6 +134,17 @@ struct TimelineSource {
     cwd: Option<PathBuf>,
 }
 
+/// Reads the set of sessions Gritty already owns, once per scan.
+///
+/// See [`AgentDiscoveryConfig::owned`] for why this is a function rather than a
+/// handle on the run manager.
+pub type OwnedSessionsFn = Arc<dyn Fn() -> OwnedSessions + Send + Sync>;
+
+/// Re-exported so the composition root can build one without taking its own
+/// dependency on `gritty-agents`. The wiring names as little of an adapter as
+/// it can get away with.
+pub use gritty_agents::OwnedSessions;
+
 /// What the composition root injects. Tests replace the runner and the root so
 /// no test spawns a process or reads a real transcript.
 pub struct AgentDiscoveryConfig {
@@ -166,6 +177,20 @@ pub struct AgentDiscoveryConfig {
     /// `None` alongside `hooks: None`: a build that cannot read an ask has
     /// nothing to answer.
     pub permissions: Option<PermissionPaths>,
+    /// Sessions another part of Gritty started and already reports itself, or
+    /// `None` to exclude nothing (T310-B §8).
+    ///
+    /// **A closure, not a handle**, and the distinction is the point.
+    /// `agent_session` and `agent_run` never import each other
+    /// (`docs/architecture/agent-runs.md`, "The line, first"), so the thing
+    /// that knows both is the composition root; what it injects here is an
+    /// *answer*, not an object to ask. `ownership` below is a handle because a
+    /// registry is shared ground both lanes legitimately use — a run manager is
+    /// the other lane itself.
+    ///
+    /// Called on **every** scan and never captured: a run started since the
+    /// last tick has to be excluded from this one.
+    pub owned: Option<OwnedSessionsFn>,
     /// The registry the files an agent touched are cross-checked against
     /// (T326), or `None` for a build with no session database — and then no
     /// violation is found rather than a half-checked one being reported.
@@ -219,6 +244,7 @@ impl AgentDiscoveryConfig {
             notifier: None,
             permissions: None,
             ownership: None,
+            owned: None,
         }
     }
 
@@ -255,6 +281,12 @@ impl AgentDiscoveryConfig {
     /// Which registry a touched file is checked against (T326). Left unset, the
     /// rail behaves exactly as it did before: the check is the only thing that
     /// does not happen.
+    /// Exclude the sessions another part of Gritty already reports (T310-B §8).
+    pub fn with_owned(mut self, owned: Option<OwnedSessionsFn>) -> Self {
+        self.owned = owned;
+        self
+    }
+
     pub fn with_ownership(
         mut self,
         ownership: Option<Arc<crate::ownership::OwnershipManager>>,
@@ -1116,10 +1148,20 @@ impl AgentSessionManager {
     async fn scan(&self) -> Discovery {
         let options = self.config.scan.clone();
         let runner = Arc::clone(&self.config.runner);
+        let owned = self.config.owned.clone();
         // Blocking work: two subprocesses and a pile of file reads. It never
         // runs on the async worker that a command handler is waiting on.
         tokio::task::spawn_blocking(move || {
-            gritty_agents::discover(options.as_ref(), runner.as_ref(), gritty_agents::now_ms())
+            // Read *inside* the blocking task rather than when it was
+            // scheduled: a run started while this tick was queued must still be
+            // excluded by it.
+            let owned = owned.map(|read| read()).unwrap_or_default();
+            gritty_agents::discover(
+                options.as_ref(),
+                runner.as_ref(),
+                gritty_agents::now_ms(),
+                &owned,
+            )
         })
         .await
         .unwrap_or_else(|error| {

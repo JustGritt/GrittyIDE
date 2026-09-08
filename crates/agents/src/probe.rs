@@ -155,7 +155,10 @@ struct ProcessRow {
 /// `None` means the process table itself could not be read — which is *not*
 /// the same as "nothing is running", and the difference has to survive all the
 /// way to the UI so it can say "cannot see processes" instead of "all quiet".
-pub fn discover_processes(runner: &dyn CommandRunner) -> Option<Vec<ProcessEvidence>> {
+pub fn discover_processes(
+    runner: &dyn CommandRunner,
+    owned: &crate::OwnedSessions,
+) -> Option<Vec<ProcessEvidence>> {
     let table = runner.run("/bin/ps", &["-Ao", "pid=,ppid=,tty=,command="], PS_TIMEOUT);
     let Some(table) = table else {
         tracing::debug!("process table unavailable; falling back to transcript evidence");
@@ -167,6 +170,17 @@ pub fn discover_processes(runner: &dyn CommandRunner) -> Option<Vec<ProcessEvide
         let Some(provider) = provider_of_command(&row.command) else {
             continue;
         };
+
+        // Before `lsof`, not after: we already know from the command line
+        // whether this is our own child, and skipping the probe for it is both
+        // honest and free — `lsof` costs a subprocess and a timeout each.
+        if owned.owns_process(row.pid, session_id_of_command(&row.command).as_deref()) {
+            tracing::trace!(
+                pid = row.pid,
+                "skipping a process the caller already reports"
+            );
+            continue;
+        }
 
         let lsof = runner.run(
             "/usr/sbin/lsof",
@@ -330,6 +344,8 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Mutex;
 
+    use crate::OwnedSessions;
+
     use super::*;
 
     /// Replays captured command output; nothing here spawns a process.
@@ -480,7 +496,7 @@ mod tests {
             ),
         ]);
 
-        let found = discover_processes(&runner).expect("process table");
+        let found = discover_processes(&runner, &OwnedSessions::default()).expect("process table");
 
         assert_eq!(found.len(), 2, "only the two claude rows are agents");
         assert_eq!(found[0].pid, 5815);
@@ -499,7 +515,7 @@ mod tests {
     #[test]
     fn a_process_survives_lsof_failing() {
         let runner = FakeRunner::with(&[(PS_KEY, " 5815 1 ttys000  claude\n")]);
-        let found = discover_processes(&runner).expect("process table");
+        let found = discover_processes(&runner, &OwnedSessions::default()).expect("process table");
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].working_directory, None);
         assert_eq!(found[0].transcript_path, None);
@@ -508,7 +524,11 @@ mod tests {
     #[test]
     fn no_process_table_yields_no_evidence_and_no_panic() {
         let runner = FakeRunner::default();
-        assert_eq!(discover_processes(&runner), None, "unreadable, not empty");
+        assert_eq!(
+            discover_processes(&runner, &OwnedSessions::default()),
+            None,
+            "unreadable, not empty"
+        );
     }
 
     #[test]
@@ -521,7 +541,7 @@ mod tests {
             ),
         ]);
         assert!(
-            discover_processes(&runner)
+            discover_processes(&runner, &OwnedSessions::default())
                 .expect("process table")
                 .is_empty()
         );

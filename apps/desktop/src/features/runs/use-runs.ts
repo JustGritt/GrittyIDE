@@ -21,6 +21,16 @@ export interface RunsController {
   /** True while a command is in flight; the panel disables its buttons. */
   readonly busy: boolean;
   startFake(workstreamId: WorkstreamId, script?: string): Promise<void>;
+  /** Start a real Claude Code run (T310-B). */
+  startClaude(workstreamId: WorkstreamId, prompt?: string): Promise<void>;
+  /**
+   * Say something to a run that is already running.
+   *
+   * Nothing optimistic: resolving means the text was queued, not that the
+   * agent has seen it. The user's own words reach the feed when
+   * `PROMPT_STARTED` arrives, which is the run confirming them.
+   */
+  prompt(runId: AgentRunId, text: string): Promise<void>;
   cancel(runId: AgentRunId): Promise<void>;
   /** Fetch one run's events once, so an expanded row starts from the ring. */
   openEvents(runId: AgentRunId): Promise<void>;
@@ -103,6 +113,34 @@ export function useRuns(workspace: Workspace | null): RunsController {
     [run],
   );
 
+  const startClaude = useCallback(
+    async (workstreamId: WorkstreamId, prompt?: string) => {
+      const id = workspaceRef.current;
+      if (!id) return;
+      const started = await run(() =>
+        core.runs.start({
+          workspaceId: id,
+          workstreamId,
+          provider: 'CLAUDE_CODE',
+          ...(prompt ? { prompt } : {}),
+        }),
+      );
+      if (started) dispatch({ type: 'run', run: started });
+    },
+    [run],
+  );
+
+  const prompt = useCallback(
+    async (runId: AgentRunId, text: string) => {
+      // The snapshot comes back unchanged — accepting a prompt records no
+      // event and changes no state — so this dispatches for the refusal path,
+      // where the error is what the panel needs to show.
+      const answered = await run(() => core.runs.prompt({ runId, text }));
+      if (answered) dispatch({ type: 'run', run: answered });
+    },
+    [run],
+  );
+
   const cancel = useCallback(
     async (runId: AgentRunId) => {
       // The answer may still be non-terminal with `cancellationRequested` set:
@@ -132,6 +170,8 @@ export function useRuns(workspace: Workspace | null): RunsController {
     clearError: useCallback(() => setError(null), []),
     busy: inFlight > 0,
     startFake,
+    startClaude,
+    prompt,
     cancel,
     openEvents,
     logFor,

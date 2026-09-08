@@ -333,9 +333,83 @@ fn manager_with(
             hook_binary: None,
             notifier,
             ownership: None,
+            owned: None,
         },
     );
     (manager, sink)
+}
+
+/// The same, with the owned-session seam wired (T310-B §8).
+fn manager_with_owned(
+    runner: Arc<dyn CommandRunner>,
+    owned: OwnedSessionsFn,
+) -> (Arc<AgentSessionManager>, Arc<RecordingSink>) {
+    let sink = Arc::new(RecordingSink::default());
+    let events = EventBus::new(FanOutSink::new(vec![sink.clone()]));
+    let handle = Handle::current();
+    let registry = OperationRegistry::new(handle.clone(), events.clone());
+    let workspaces = WorkspaceManager::new(handle.clone(), events.clone(), registry);
+    let manager = AgentSessionManager::start(
+        handle,
+        events,
+        workspaces,
+        AgentDiscoveryConfig {
+            scan: None,
+            runner,
+            poll_interval: Duration::from_secs(3_600),
+            timeline_interval: Duration::from_secs(3_600),
+            idle_after: DEFAULT_IDLE_AFTER,
+            home: Some(PathBuf::from("/Users/someone")),
+            permissions: None,
+            hooks: None,
+            hook_binary: None,
+            notifier: None,
+            ownership: None,
+            owned: Some(owned),
+        },
+    );
+    (manager, sink)
+}
+
+/// The exclusion set is read on **every** scan, not captured when the manager
+/// was built (T310-B §8).
+///
+/// This is the assertion a captured-once implementation would fail and every
+/// other test in this file would pass: a run started after the manager exists
+/// has to be excluded by the *next* tick, not the one after a restart. The seam
+/// is a closure precisely so this is possible, and it stands in for
+/// `AgentRunManager` without importing one — which is also the proof that
+/// `agent_session` learns nothing about runs.
+#[tokio::test]
+async fn the_owned_set_is_read_on_every_scan() {
+    const OURS: &str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    let runner = Arc::new(FakeRunner(Some(format!(
+        " 4242 900 ??       claude -p --session-id {OURS}\n 5815 900 ttys000  claude\n"
+    ))));
+    let live: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = Arc::clone(&live);
+    let (manager, _sink) = manager_with_owned(
+        runner,
+        Arc::new(move || OwnedSessions::new(seen.lock().expect("not poisoned").clone(), [])),
+    );
+
+    // Nothing owned yet: both agents are reported.
+    let before = manager.list().await;
+    assert_eq!(before.sessions.len(), 2, "{:?}", before.sessions);
+
+    // A run starts. The very next scan must already exclude it.
+    live.lock().expect("not poisoned").push(OURS.to_owned());
+    let after = manager.refresh().await;
+    assert_eq!(
+        after.sessions.len(),
+        1,
+        "the set was captured instead of read: {:?}",
+        after.sessions
+    );
+    assert!(
+        after.sessions.iter().all(|session| session.id != OURS),
+        "the agent Gritty owns is not also an observed session"
+    );
 }
 
 #[tokio::test]
@@ -724,6 +798,7 @@ fn manager_over_with(
             hook_binary: None,
             notifier: None,
             ownership: None,
+            owned: None,
         },
     );
     (manager, sink)
@@ -1310,6 +1385,7 @@ impl TempHome {
                 hook_binary,
                 notifier: None,
                 ownership: None,
+                owned: None,
             },
         )
     }
@@ -2015,6 +2091,7 @@ impl ViolationRig {
                 hook_binary: None,
                 notifier: None,
                 ownership: Some(ownership.clone()),
+                owned: None,
             },
         );
 

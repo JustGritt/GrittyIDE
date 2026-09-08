@@ -255,7 +255,10 @@ impl RunInbox {
     /// same path, and the driver has one place prompts come from rather than a
     /// special case for the first.
     pub fn seed(&self, text: String) {
-        debug_assert!(MAX_QUEUED_PROMPTS >= 1);
+        // Checked at compile time, not merely in debug: `seed` is documented
+        // infallible *because* the bound is at least one, and a zero here would
+        // silently drop the first prompt of every run.
+        const { assert!(MAX_QUEUED_PROMPTS >= 1) };
         let _ = self.sender.try_send(RunInput::Prompt { text });
     }
 }

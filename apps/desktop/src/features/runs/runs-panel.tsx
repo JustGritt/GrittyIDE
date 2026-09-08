@@ -36,6 +36,7 @@ export function RunsPanel({
       <summary>Agent runs (development)</summary>
       <div className="panel__body">
         <StartFakeForm workstreams={workstreams} runs={runs} />
+        <StartClaudeForm workstreams={workstreams} runs={runs} />
         {runs.error && <ErrorEnvelope error={runs.error} onDismiss={runs.clearError} />}
         {!runs.loaded ? (
           <p className="panel__empty">Loading runs…</p>
@@ -103,6 +104,103 @@ function StartFakeForm({
   );
 }
 
+/**
+ * Start a **real** run, so T310-B's manual check can actually be executed
+ * rather than described.
+ *
+ * Deliberately beside the fake's form rather than folded into it: they are two
+ * commands because a fiction and a real process behind one control is exactly
+ * the confusion `runs.startFake` exists to avoid. This spends money and the
+ * button says so.
+ */
+function StartClaudeForm({
+  workstreams,
+  runs,
+}: {
+  workstreams: readonly Workstream[];
+  runs: RunsController;
+}) {
+  const [workstreamId, setWorkstreamId] = useState('');
+  const [prompt, setPrompt] = useState('');
+  const target = workstreamId || workstreams[0]?.id;
+
+  function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!target) return;
+    // Nothing optimistic: the row appears when the core says the run exists.
+    void runs.startClaude(target as Workstream['id'], prompt.trim() || undefined);
+  }
+
+  if (workstreams.length === 0) return null;
+
+  return (
+    <form className="panel__form" onSubmit={onSubmit}>
+      <label>
+        workstream
+        <select value={target ?? ''} onChange={(e) => setWorkstreamId(e.target.value)}>
+          {workstreams.map((workstream) => (
+            <option key={workstream.id} value={workstream.id}>
+              {workstream.title}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        prompt
+        <input
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="what should it do?"
+          spellCheck={false}
+        />
+      </label>
+      <button type="submit" disabled={runs.busy || !target}>
+        Start Claude run
+      </button>
+    </form>
+  );
+}
+
+/**
+ * Say something to a run that is already running.
+ *
+ * The textarea clears on submit and **nothing appears in the feed** until
+ * `PROMPT_STARTED` arrives — the run confirming the text, which is what
+ * `--replay-user-messages` is passed for. A refusal surfaces as the panel's
+ * error envelope, naming the state that is in the way.
+ *
+ * This is the throwaway version. The prompt box the product deserves is in the
+ * agent console, below the feed, and it is T310-U's.
+ */
+function PromptForm({ run, controller }: { run: AgentRun; controller: RunsController }) {
+  const [text, setText] = useState('');
+
+  function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setText('');
+    void controller.prompt(run.id, trimmed);
+  }
+
+  return (
+    <form className="panel__form" onSubmit={onSubmit}>
+      <label>
+        say
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="another turn…"
+          spellCheck={false}
+        />
+      </label>
+      <button type="submit" disabled={controller.busy || !text.trim()}>
+        Send
+      </button>
+    </form>
+  );
+}
+
 function RunRow({ run, controller }: { run: AgentRun; controller: RunsController }) {
   const terminal = isTerminalRun(run.state);
   const log = controller.logFor(run.id);
@@ -130,6 +228,9 @@ function RunRow({ run, controller }: { run: AgentRun; controller: RunsController
           {run.error.code}: {run.error.message}
         </p>
       )}
+      {/* Only a run with a process behind it can be spoken to. A greyed-out
+          box on a fake would imply a channel that does not exist. */}
+      {!terminal && run.provider !== 'FAKE' && <PromptForm run={run} controller={controller} />}
       <RunEvents runId={run.id} log={log} onOpen={controller.openEvents} />
       <p className="ops__meta">
         started {formatTime(run.startedAt)}

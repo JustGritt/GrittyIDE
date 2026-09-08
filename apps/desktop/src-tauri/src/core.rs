@@ -12,7 +12,7 @@ use gritty_core::CORE_EVENT_CHANNEL;
 use gritty_core::CoreError;
 use gritty_core::agent_run::AgentRunManager;
 use gritty_core::agent_session::attention::AttentionNotifier;
-use gritty_core::agent_session::{AgentDiscoveryConfig, AgentSessionManager};
+use gritty_core::agent_session::{AgentDiscoveryConfig, AgentSessionManager, OwnedSessions};
 use gritty_core::document::{DocumentLimits, DocumentManager};
 use gritty_core::event::{EventBus, EventEnvelope, EventSink, FanOutSink};
 use gritty_core::file_drop::FileDropService;
@@ -210,7 +210,25 @@ impl Core {
                 // The registry a touched file is checked against (T326). It
                 // notices a write after it happened; it does not stop one, and
                 // a build without a session database simply finds nothing.
-                .with_ownership(Some(ownership.clone())),
+                .with_ownership(Some(ownership.clone()))
+                // The one place that knows both lanes (T310-B §8). Gritty's
+                // own `claude` child is `claude -p …` in `ps` and writes an
+                // ordinary transcript, so without this the same agent draws
+                // twice: once as a run Gritty owns, once as a session it
+                // merely observed. `agents` never learns what a run is and
+                // `runs` never learns what a session is — this closure is the
+                // whole of the coupling, and it is read fresh on every scan so
+                // a run started since the last tick is excluded from this one.
+                .with_owned(Some({
+                    let runs = Arc::clone(&runs);
+                    Arc::new(move || {
+                        let owned = runs.owned_provider_sessions();
+                        OwnedSessions::new(
+                            owned.iter().map(|session| session.session_id.clone()),
+                            owned.iter().filter_map(|session| session.pid),
+                        )
+                    })
+                })),
         );
         Self {
             registry,

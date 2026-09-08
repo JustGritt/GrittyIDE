@@ -141,18 +141,87 @@ pub struct Discovery {
     pub process_evidence: bool,
 }
 
+/// Sessions the caller already accounts for somewhere else, and wants excluded.
+///
+/// # Why this crate takes it rather than working it out
+///
+/// Gritty can *start* an agent as well as watch one, and a run it started is
+/// already reported as a run. Reporting it here too would draw the same agent
+/// twice — once as something Gritty owns, once as something it merely observed
+/// — which is the roster confusion the two lanes exist to prevent.
+///
+/// This crate is told which to drop and learns nothing about why: it does not
+/// know what a run is, and it must not. The composition root is what knows both
+/// halves, and it passes an answer rather than an object to ask.
+///
+/// # Two keys, because either alone has a hole
+///
+/// The **session id** is the durable key: the caller minted it, it names the
+/// transcript file, and it outlives the child. But
+/// [`probe::discover_processes`] has to *recover* it from a command line that
+/// `ps` may have truncated, so it can be missing exactly when it is needed.
+/// The **pid** is exact and needs no parsing, but means nothing to a transcript
+/// that outlives the process. Either key matching is enough.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OwnedSessions {
+    ids: std::collections::HashSet<String>,
+    pids: std::collections::HashSet<u32>,
+}
+
+impl OwnedSessions {
+    pub fn new(ids: impl IntoIterator<Item = String>, pids: impl IntoIterator<Item = u32>) -> Self {
+        Self {
+            ids: ids.into_iter().map(|id| id.to_ascii_lowercase()).collect(),
+            pids: pids.into_iter().collect(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty() && self.pids.is_empty()
+    }
+
+    /// A process row: either key answers.
+    pub fn owns_process(&self, pid: u32, session_id: Option<&str>) -> bool {
+        self.pids.contains(&pid) || session_id.is_some_and(|id| self.owns_session(id))
+    }
+
+    /// A transcript row: the session id is the only key there is.
+    pub fn owns_session(&self, session_id: &str) -> bool {
+        self.ids.contains(&session_id.to_ascii_lowercase())
+    }
+}
+
 /// Scan both sources and merge them.
 ///
 /// `scan` is `None` when there is no transcript root to read (no home
 /// directory, or a platform where the agent stores nothing locally); process
 /// evidence still stands on its own.
-pub fn discover(scan: Option<&ScanOptions>, runner: &dyn CommandRunner, now_ms: i64) -> Discovery {
+///
+/// `owned` is filtered out of **both** sources, and that is the whole reason it
+/// is applied here rather than inside the probe. A process-only filter leaves
+/// the child's own transcript behind, and `transcript::scan` keeps returning it
+/// for as long as its window allows — so the same agent reappears as a
+/// transcript-only session, for a day, having been correctly suppressed as a
+/// process. Filtering one source is not filtering.
+pub fn discover(
+    scan: Option<&ScanOptions>,
+    runner: &dyn CommandRunner,
+    now_ms: i64,
+    owned: &OwnedSessions,
+) -> Discovery {
     let transcripts = scan.map(|options| transcript::scan(options, now_ms));
-    let processes = probe::discover_processes(runner);
+    let processes = probe::discover_processes(runner, owned);
     Discovery {
+        // Computed before any filtering: "I cannot see processes" and
+        // "everything I saw was mine" are different answers, and only the first
+        // should ever reach the UI as a warning.
         process_evidence: processes.is_some(),
         sessions: merge(
-            transcripts.unwrap_or_default(),
+            transcripts
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|found| !owned.owns_session(&found.session_id))
+                .collect(),
             processes.unwrap_or_default(),
         ),
     }
@@ -397,7 +466,7 @@ mod tests {
             }
         }
 
-        let found = discover(None, &OnlyPs, 100);
+        let found = discover(None, &OnlyPs, 100, &OwnedSessions::default());
         assert!(found.process_evidence);
         assert_eq!(found.sessions.len(), 1);
         assert_eq!(found.sessions[0].session_id, "pid-42");
@@ -413,11 +482,97 @@ mod tests {
         }
 
         let options = ScanOptions::rooted_at(Path::new("/nonexistent/gritty").to_path_buf());
-        let found = discover(Some(&options), &Silent, 100);
+        let found = discover(Some(&options), &Silent, 100, &OwnedSessions::default());
         assert!(found.sessions.is_empty());
         assert!(
             !found.process_evidence,
             "a silent runner means blind, not quiet"
         );
+    }
+
+    /// §8, and the half a process-only filter misses.
+    ///
+    /// Gritty's own child writes an ordinary transcript under the minted
+    /// session id, and `transcript::scan` keeps returning it for as long as its
+    /// window allows. **This test fails if the exclusion is applied only inside
+    /// `discover_processes`**: the process row is suppressed and the transcript
+    /// row survives, so the same agent still appears — as a transcript-only
+    /// session that also reads as not running, which is a second lie on top of
+    /// the first.
+    #[test]
+    fn a_session_gritty_owns_is_excluded_from_both_sources() {
+        const OURS: &str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        const THEIRS: &str = "11111111-2222-3333-4444-555555555555";
+
+        let dir = std::env::temp_dir().join(format!("gritty-owned-{}", std::process::id()));
+        let project = dir.join("project");
+        std::fs::create_dir_all(&project).expect("fixture root");
+        for id in [OURS, THEIRS] {
+            std::fs::write(
+                project.join(format!("{id}.jsonl")),
+                "{\"type\":\"user\",\"cwd\":\"/tmp/work\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n",
+            )
+            .expect("a transcript");
+        }
+
+        struct Ps(String);
+        impl CommandRunner for Ps {
+            fn run(&self, program: &str, _: &[&str], _: std::time::Duration) -> Option<String> {
+                (program == "/bin/ps").then(|| self.0.clone())
+            }
+        }
+        let table = Ps(format!(
+            " 4242 900 ??       claude -p --session-id {OURS}\n 5815 900 ttys000  claude -p --session-id {THEIRS}\n"
+        ));
+
+        let options = ScanOptions::rooted_at(dir.clone());
+        let now = now_ms();
+
+        // Nothing excluded: both agents are reported.
+        let all = discover(Some(&options), &table, now, &OwnedSessions::default());
+        assert_eq!(
+            all.sessions.len(),
+            2,
+            "both are visible: {:?}",
+            all.sessions
+        );
+
+        // Ours excluded: exactly one left, and it is theirs.
+        let owned = OwnedSessions::new([OURS.to_owned()], []);
+        let rest = discover(Some(&options), &table, now, &owned);
+        assert_eq!(
+            rest.sessions.len(),
+            1,
+            "the agent Gritty owns is reported once, not twice: {:?}",
+            rest.sessions
+        );
+        assert_eq!(rest.sessions[0].session_id, THEIRS);
+        assert!(
+            rest.process_evidence,
+            "seeing only our own child is not the same as being blind"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The pid is the second key, and it is the one that answers when `ps`
+    /// truncated the command line before `--session-id`.
+    #[test]
+    fn a_truncated_command_line_is_still_excluded_by_pid() {
+        struct Ps;
+        impl CommandRunner for Ps {
+            fn run(&self, program: &str, _: &[&str], _: std::time::Duration) -> Option<String> {
+                (program == "/bin/ps")
+                    .then(|| " 4242 900 ??  claude -p --input-format\n".to_owned())
+            }
+        }
+        let owned = OwnedSessions::new([], [4242]);
+        let found = discover(None, &Ps, 100, &owned);
+        assert!(
+            found.sessions.is_empty(),
+            "the pid answers when the session id cannot: {:?}",
+            found.sessions
+        );
+        assert!(found.process_evidence, "the table was readable");
     }
 }
