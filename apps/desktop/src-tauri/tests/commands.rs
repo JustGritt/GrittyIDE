@@ -26,6 +26,7 @@ use tauri::{Listener, Manager, WebviewWindow, WebviewWindowBuilder};
 #[derive(Default)]
 struct RecordingOpener {
     opened: Mutex<Vec<String>>,
+    revealed: Mutex<Vec<PathBuf>>,
     fail: bool,
 }
 
@@ -35,6 +36,15 @@ impl ExternalOpener for RecordingOpener {
             return Err(std::io::Error::other("no handler registered").into());
         }
         self.opened.lock().unwrap().push(url.to_owned());
+        Ok(())
+    }
+
+    /// Records rather than spawning: no test opens a Finder window.
+    fn reveal(&self, path: &std::path::Path) -> Result<(), CoreError> {
+        if self.fail {
+            return Err(std::io::Error::other("no file manager").into());
+        }
+        self.revealed.lock().unwrap().push(path.to_path_buf());
         Ok(())
     }
 }

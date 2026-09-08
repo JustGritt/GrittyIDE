@@ -201,6 +201,7 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::documents_status,
             commands::documents_list,
             commands::shell_open_external,
+            commands::shell_reveal_path,
             commands::session_restore,
             commands::session_candidates,
             commands::session_recover,

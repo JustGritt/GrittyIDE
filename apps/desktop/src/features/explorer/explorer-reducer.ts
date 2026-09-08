@@ -88,6 +88,8 @@ export const initialExplorerState: ExplorerState = {
 
 /** Operation kind the core uses for a listing that outlived its budget. */
 export const LIST_OPERATION_KIND = 'workspace.list';
+/** Operation kind of a `files.move`/`files.delete` that outlived its budget. */
+export const FILES_OPERATION_KIND = 'files.transfer';
 const UNMATCHED_LIMIT = 20;
 
 export type ExplorerAction =
@@ -106,6 +108,12 @@ export type ExplorerAction =
    * caller has, and a second opinion here would be a second source of truth.
    */
   | { type: 'selection'; selection: Selection }
+  /**
+   * Re-list these directories: a `files.*` command said its `changed` (T042).
+   * The watcher would say the same thing a debounce later, but it is
+   * best-effort, so the response is what the tree converges on.
+   */
+  | { type: 'invalidate'; paths: readonly string[] }
   | { type: 'event'; event: EventEnvelope };
 
 export function childPath(parent: string, name: string): string {
@@ -305,6 +313,13 @@ function onEvent(state: ExplorerState, event: EventEnvelope): ExplorerState {
         reason: event.payload.reason,
       });
     case 'OperationCompleted': {
+      // A transfer or delete that outlived its budget (T042). Its result names
+      // the directories to re-list, the same way the inline arm does.
+      if (event.payload.operation.kind === FILES_OPERATION_KIND) {
+        const result = event.payload.result as { changed?: readonly string[] } | undefined;
+        const stale = staleNodes(state, result?.changed ?? [], false);
+        return stale === state.stale ? state : { ...state, stale };
+      }
       if (event.payload.operation.kind !== LIST_OPERATION_KIND) return state;
       const page = event.payload.result as DirectoryPage | undefined;
       const outcome: ListingOutcome = page
@@ -361,6 +376,10 @@ export function explorerReducer(state: ExplorerState, action: ExplorerAction): E
       return state.selection === action.selection
         ? state
         : { ...state, selection: action.selection };
+    case 'invalidate': {
+      const stale = staleNodes(state, action.paths, false);
+      return stale === state.stale ? state : { ...state, stale };
+    }
     case 'listFailed':
       return withNode(state, action.path, (node) => ({
         ...node,

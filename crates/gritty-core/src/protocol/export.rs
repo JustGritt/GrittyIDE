@@ -46,7 +46,7 @@ use crate::session::wire::{
     CandidatesRequest, DiscardSnapshotRequest, LastSession, RecoverSnapshotRequest,
     RecoveryCandidate, SessionRestoreResponse, UpdateSessionRequest,
 };
-use crate::shell::OpenExternalRequest;
+use crate::shell::{OpenExternalRequest, RevealPathRequest};
 use crate::terminal::wire::{
     KillTerminalRequest, ListProfilesRequest, RecolorTerminalRequest, RenameTerminalRequest,
     ResizeTerminalRequest, SpawnTerminalRequest, Terminal, TerminalColor, TerminalProfile,
@@ -164,6 +164,7 @@ fn export_bindings() {
     ReloadDocumentRequest::export_all(&cfg).expect("export ReloadDocumentRequest");
     DocumentStatusRequest::export_all(&cfg).expect("export DocumentStatusRequest");
     OpenExternalRequest::export_all(&cfg).expect("export OpenExternalRequest");
+    RevealPathRequest::export_all(&cfg).expect("export RevealPathRequest");
     SessionRestoreResponse::export_all(&cfg).expect("export SessionRestoreResponse");
     CandidatesRequest::export_all(&cfg).expect("export CandidatesRequest");
     RecoveryCandidate::export_all(&cfg).expect("export RecoveryCandidate");

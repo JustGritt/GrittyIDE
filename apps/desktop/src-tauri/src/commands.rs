@@ -44,7 +44,7 @@ use gritty_core::session::{
     CandidatesRequest, DiscardSnapshotRequest, LastSession, RecoverSnapshotRequest,
     RecoveryCandidate, SessionRestoreResponse, UpdateSessionRequest,
 };
-use gritty_core::shell::OpenExternalRequest;
+use gritty_core::shell::{OpenExternalRequest, RevealPathRequest};
 use gritty_core::terminal::wire::{
     KillTerminalRequest, ListProfilesRequest, RecolorTerminalRequest, RenameTerminalRequest,
     ResizeTerminalRequest, SpawnTerminalRequest, Terminal, TerminalProfile, WriteTerminalRequest,
@@ -358,6 +358,24 @@ pub async fn shell_open_external(
     guard("shell.openExternal", move |correlation| async move {
         let request: OpenExternalRequest = parse_request(request)?;
         shell.open_external(request, Actor::User, correlation).await
+    })
+    .await
+}
+
+/// `shell.revealPath`
+///
+/// Show a workspace entry in the system file manager (T042). The path is
+/// workspace-relative and resolved through the root in the core: the WebView
+/// never names a native path, and never learns one.
+#[tauri::command]
+pub async fn shell_reveal_path(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<(), CoreError> {
+    let shell = core.shell.clone();
+    guard("shell.revealPath", move |correlation| async move {
+        let request: RevealPathRequest = parse_request(request)?;
+        shell.reveal_path(request, correlation).await
     })
     .await
 }

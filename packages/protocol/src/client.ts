@@ -80,6 +80,7 @@ import {
   type ResizeTerminalRequest,
   type ResolveConflictRequest,
   type ResolveDecisionRequest,
+  type RevealPathRequest,
   type RevokeGrantRequest,
   type RunEventsRequest,
   type SaveDocumentRequest,
@@ -194,6 +195,12 @@ export interface CoreClient {
    */
   shell: {
     openExternal(url: string): Promise<void>;
+    /**
+     * Show a workspace entry in the system file manager (T042). The path is
+     * workspace-relative and resolved in the core, so the WebView neither
+     * names nor learns a native path. Only macOS is verified (ADR-002).
+     */
+    revealPath(request: RevealPathRequest): Promise<void>;
   };
   /**
    * Session persistence (T060). `restore` reopens the last workspace once per
@@ -696,6 +703,7 @@ export function createCoreClient(
         const request: OpenExternalRequest = { url };
         return command<void>('shell.openExternal', { request });
       },
+      revealPath: (request) => command<void>('shell.revealPath', { request }),
     },
     session: {
       restore: () => command<SessionRestoreResponse>('session.restore'),

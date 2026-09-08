@@ -73,6 +73,7 @@ export const COMMANDS = {
   'git.status': 'git_status',
   'git.diff': 'git_diff',
   'search.query': 'search_query',
+  'shell.revealPath': 'shell_reveal_path',
   'files.create': 'files_create',
   'files.rename': 'files_rename',
   'files.move': 'files_move',

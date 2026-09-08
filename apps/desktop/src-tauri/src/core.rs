@@ -126,7 +126,10 @@ impl Core {
             workspaces.clone(),
             DocumentLimits::default(),
         );
-        let shell = ShellService::new(handle.clone(), options.opener);
+        // Takes the workspace manager since T042: `shell.revealPath` resolves a
+        // workspace-relative path through the root, so the WebView never names
+        // a native one.
+        let shell = ShellService::new(handle.clone(), options.opener, workspaces.clone());
         let terminals = TerminalManager::new(events.clone(), workspaces.clone(), options.pty_host);
         let file_drop = FileDropService::new(events.clone(), workspaces.clone());
         // Reads a repository, and owns nothing else (T100). It holds the

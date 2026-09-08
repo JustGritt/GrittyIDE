@@ -168,6 +168,7 @@ export type { RepositoryStatus } from './generated/RepositoryStatus';
 export type { ResizeTerminalRequest } from './generated/ResizeTerminalRequest';
 export type { ResolveConflictRequest } from './generated/ResolveConflictRequest';
 export type { ResolveDecisionRequest } from './generated/ResolveDecisionRequest';
+export type { RevealPathRequest } from './generated/RevealPathRequest';
 export type { RevokeGrantRequest } from './generated/RevokeGrantRequest';
 export type { RunEventsRequest } from './generated/RunEventsRequest';
 export type { SaveDocumentRequest } from './generated/SaveDocumentRequest';
