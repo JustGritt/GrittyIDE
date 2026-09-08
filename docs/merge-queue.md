@@ -134,11 +134,31 @@ rule below. `PROTOCOL_VERSION` **2.15.0** is on `main`; 2.13.0 and 2.14.0 were
 spent on the way and the resolved line took the highest. `SCHEMA_VERSION` is
 still **4** and migration **`0005` is free** — T326 needed neither.
 
-**The next free values are `PROTOCOL_VERSION` 2.21.0, `SCHEMA_VERSION` 5,
-migration `0005`, and ADR-029.** ADR-027 is not free: `HANDOFF.md:102` reserves
-it for T310's "the feed comes from the run event ring, not the transcript"
-decision. That reservation was never written here, which is rule 2's failure
-mode again — it is written here now.
+**The next free values are `PROTOCOL_VERSION` 2.23.0, `SCHEMA_VERSION` 5 and
+migration `0005`; the next free ADR number is 030.** ADR-027 is not free:
+`HANDOFF.md:102` reserves it for T310's "the feed comes from the run event ring,
+not the transcript" decision. That reservation was never written here, which is
+rule 2's failure mode again — it is written here now.
+
+**Claimed by the source-control wave (2026-09-08), before any of it is spent.**
+Turning the read-only git floor into a working SCM is two halves, and they claim
+two minors so that the second cannot inherit the first's number:
+
+| Claim | Ticket | For |
+|---|---|---|
+| `PROTOCOL_VERSION` **2.21.0** | `T101-C` | `git.log` and `git.show` — the read half. Additive: two commands, their request/response types, no `CoreEvent` variant, no `SCHEMA_VERSION`, no migration, because a read persists nothing. |
+| `PROTOCOL_VERSION` **2.22.0** | `T102-C` | `git.stage`, `git.unstage`, `git.discard`, `git.commit` — the write half. Reserved now rather than when that ticket starts, which is the failure mode rule 2 exists for and that `PROTO-W3`/`T310-B` hit twice. |
+| ADR **029** | — | Git *writes* run through the `git` binary while reads stay `gix`. Amends ADR-023 decision 4, which anticipated it by name in its own "Revisit when". |
+
+2.22.0 is a **reservation, not a spend**: `T102-C` is blocked until Alexis
+accepts or rejects ADR-029, and an agent may not decide an ADR. If that ADR is
+rejected the number is released here rather than silently reused — a gap costs
+nothing, and `assertCompatible` compares majors only.
+
+Both halves take the same four contended seams every recent collision has been
+about — `protocol/mod.rs`, `protocol/export.rs`, `packages/protocol/src/commands.ts`
+and the generated directory — so they are built one at a time and never in
+flight together.
 
 **Claimed by the 2026-09-08 wave.** `PROTO-W3` takes **2.18.0** for `search.query`
 and the one `CoreEvent` variant T080 adds; it spends no `SCHEMA_VERSION` and no
