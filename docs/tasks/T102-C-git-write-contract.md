@@ -1,7 +1,7 @@
 # Task T102-C — The write contract: `git.stage`, `git.unstage`, `git.discard`, `git.commit`
 
 - **Phase:** 2
-- **Status:** blocked (ADR-029 is `Proposed`; an agent may not decide an ADR)
+- **Status:** todo (ADR-029 accepted 2026-09-09)
 - **Depends on:** ADR-029, T100, T101-C
 
 ## Objective
@@ -19,10 +19,10 @@ repository reports; it simply cannot move a file between them.
 
 ## Dependencies
 
-**ADR-029 must be accepted first.** It decides that writes shell out to `git`
-while reads stay on `gix`, and the whole shape of `T102-R` follows from it. If
-it is rejected, this ticket is rewritten rather than adjusted, and the reserved
-`PROTOCOL_VERSION` 2.22.0 is released in `docs/merge-queue.md`.
+**ADR-029 was accepted on 2026-09-09**, so this is unblocked. It decides that
+writes shell out to `git` while reads stay on `gix`; the whole shape of `T102-R`
+follows from it, and `PROTOCOL_VERSION` 2.22.0 is a live claim rather than a
+reservation.
 
 ## Required reading
 

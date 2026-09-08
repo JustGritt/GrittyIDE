@@ -1,7 +1,7 @@
 # Task T102-U — Staging, discard and the commit box in the git panel
 
 - **Phase:** 2
-- **Status:** blocked (behind ADR-029 and T102-R)
+- **Status:** blocked (behind T102-R; ADR-029 is decided)
 - **Depends on:** T102-R, T101-U
 
 ## Objective

@@ -759,3 +759,214 @@ path is inside by definition. Asserted explicitly now so it reads as decided.
   one.
 - **`RUNS-CONCURRENCY-COST`** — re-take the `MAX_CONCURRENT_RUNS` judgement now
   that a run is a real process with real token spend.
+
+## Completion report — T310-U
+
+_The console's prompt box, and an owned run in the console. The adapter
+(T310-A), the wire and the inbox (T310-B) are already on `main`; nothing here
+touches Rust, and **no protocol change is claimed** — this cut is entirely in
+`apps/desktop/src`._
+
+### Summary
+
+Clicking a run in the sidebar's Agents section now opens its console as an
+editor tab, beside the consoles for the sessions Gritty merely watches. The feed
+is the event ring the core recorded (§6) and below it is the prompt box (§9):
+⌘↵ sends, nothing is optimistic, and it is disabled with a reason whenever the
+run is not accepting input.
+
+Before this, `App.tsx:341` read `if (row.sessionId === null) return` — an owned
+run's row was the one thing in the sidebar that could not be clicked, and
+`agents-section.tsx` said so in a comment naming T310 as what would fix it.
+
+### The scope widening, agreed before anything was written
+
+The board recorded T310-U's scope as `features/runs/**`, `agent-console.tsx` and
+`use-agent-console.ts`. **That scope cannot reach the ticket's own title.** The
+console tab machinery was keyed on a session id end to end, and §8 deliberately
+keeps an owned run *out* of the observed roster — so a run can never arrive as a
+session, and no edit inside those three paths can put one on screen. The
+widening (the tab reducer, the tab strip, the editor pane, the sidebar row,
+`App.tsx`, `app.css`) was put to the user with the alternative — build the
+component and render it only from the DEV panel, delivering no console — and the
+answer was to widen and deliver the ticket. Recorded here the way T310-B
+recorded its §8 widening rather than absorbed silently.
+
+### The one thing that crosses the lane boundary
+
+A **console key**: `run:<id>` or `session:<id>`. It is not new — `roster-model.ts`
+has minted exactly these strings as `RosterRow.key` since T233-M — and this
+ticket makes the tab reducer read them back rather than inventing a second
+identity. It is a display identity and nothing else crosses on it:
+
+- `agent_run` and `agent_session` still never import each other in the core.
+- Two components, not one with a flag: `AgentConsole` reads a timeline the core
+  follows, `RunConsole` reads the ring `useRuns` holds. Neither knows the other.
+- `agentTabItems` takes `RosterRow[]` — the projection that already draws both
+  side by side — so a tab's label and status come from the same row the sidebar
+  drew, and one agent cannot end up with two names.
+
+`agent-console-render.test.ts` asserts the agreement rather than describing it:
+it runs the real `rosterRows` and requires every key it mints to parse. Breaking
+`parseConsoleKey`'s `run` prefix fails that test and nothing else, which is the
+drift it exists to catch.
+
+### Three asymmetries, and why they are not abstracted away
+
+1. **A session has a follower; a run has none.** `openTimeline`/`closeTimeline`
+   open and close a per-session tail; a run's events arrive on the machine-wide
+   `AgentRunEventAppended` `useRuns` already subscribes to. So opening a run
+   console fetches `runs.events` once and closes nothing, and `followedSession`
+   returns `null` for a run rather than a run id — asserted, because a function
+   that returned one would have `closeTimeline` called with a run id.
+2. **`loadedId` is a new field, and it earns itself.** "Is this console's feed
+   already here" cannot be read off `timeline` for both kinds: a run's events
+   live in `useRuns`, so without it a run tab re-fetched its ring on every click
+   of an already-open tab. It is also what makes a *retry* work — a refused
+   `runs.events` leaves it null, so clicking again asks again, which is the same
+   allowance the session path gets from `timeline === null`.
+3. **Only a run gets a prompt box.** §9's rule is applied to both lanes it
+   names: an observed session's console has none *and no disabled one either*,
+   and a scripted run gets none for the same reason — `runs.prompt` refuses a
+   `FAKE` run and no waiting opens a channel that does not exist. So
+   `promptGate` has three answers (`ready` / `refused` / `absent`), not two.
+
+### The prompt gate is a mirror, and says so
+
+`AgentRunState::accepts_input`'s doc comment already named this box as the
+surface that disables against it — *"the manager refuses against this table and
+the console disables its prompt box against it, so neither keeps its own copy of
+the answer."* The wire carries no `acceptsInput` flag, so the renderer mirrors
+the table, exactly as `runs-reducer.ts` already mirrors `MAX_RUN_EVENTS`,
+`is_terminal` and `needs_attention`. The test is the total one — every one of
+the ten states named, `RUNNING` and `WAITING` open and the other eight refused
+with a reason — so a state added to either side fails it rather than falling
+through a default nobody chose. An unrecognised state from a newer core is
+**refused**: letting someone type into a run this build cannot vouch for is the
+worse failure.
+
+Two edges beyond the state table, both from `prompt()`'s own order: an
+outstanding cancel shuts the box even from `RUNNING` (the more recent intent
+wins), and a run that has actually ended says "it ended" rather than "it is
+stopping".
+
+### Two smaller decisions worth arguing with
+
+1. **A command and its result are two feed rows, not one paired row.** The
+   timeline pairs a tool call with its result because both carry a `toolUseId`;
+   `COMMAND_STARTED`/`COMMAND_FINISHED` carry only the command text, and pairing
+   on that attaches the wrong result the first time an agent runs `cargo test`
+   twice. Two honest rows beat one that is sometimes a lie.
+2. **The DEV panel's prompt form is deleted, not kept beside the console.** Two
+   prompt surfaces with different rules about what may be sent is exactly the
+   confusion a debug affordance should not add. The panel keeps its start
+   buttons and its raw event list.
+
+### Files changed
+
+| File | What |
+|---|---|
+| `features/runs/run-console.tsx` | **new** — the run's console: header, feed, prompt box |
+| `features/runs/run-console-model.ts` | **new** — pure: `runFeedRows`, `promptGate` |
+| `features/runs/run-console-model.test.ts` | **new** — 15 tests |
+| `features/runs/run-console-render.test.ts` | **new** — 15 tests, static markup |
+| `features/runs/run-console.dom.test.tsx` | **new** — 9 tests, jsdom: ⌘↵, drafts, disabling |
+| `features/runs/use-runs.ts` | `openEvents` reports whether the log landed |
+| `features/runs/runs-panel.tsx` | the throwaway prompt form removed |
+| `features/agents/agent-tabs-reducer.ts` | console keys; `loadedId`; `openedRun` |
+| `features/agents/use-agent-console.ts` | opens either lane; `ConsoleRuns`; `activeTarget` |
+| `features/agents/agent-console.tsx` | `agentTabItems` takes rows; §9 noted on the session console |
+| `features/agents/agents-section.tsx` | every row is a button now |
+| `features/editor/editor-pane.tsx` | resolves the key and draws whichever console it names |
+| `features/editor/tab-strip.tsx` | `AgentTabItem.sessionId` → `.id`, an opaque key |
+| `App.tsx` | `runs` into the console hook; `row.key` on select; `consoleFacts` off the rows |
+| `app.css` | `.agent-prompt*`; the now-dead `.agents-section__pick--static` removed |
+| `docs/architecture/agent-runs.md` | the console section: what crosses, and what does not |
+
+### Tests actually executed
+
+All on macOS (darwin 25.6), 2026-09-08, in this working tree.
+
+| Command | Result |
+|---|---|
+| `npx vitest run --project desktop` | **ok** — 62 files, **728 passed, 0 failed** (39 new) |
+| `pnpm check` | **green, exit 0 captured from `$?`** — Biome, tsc, vitest, `cargo fmt --check`, `clippy -D warnings`, `cargo test --workspace`, `check:generated` |
+| `pnpm --filter @gritty/desktop build` | **ok** — the renderer bundles; `dist/` is git-ignored |
+
+**Four tests were verified to have teeth by making them fail on purpose**, then
+restored:
+
+- Widening `ACCEPTS_INPUT` to include `BLOCKED` fails three tests across the
+  model, the static render and the jsdom pass — the gate, the reason line and
+  the "the draft survives" case all notice.
+- `runConsoleKey` minting a `session:` key fails *mints a key the two lanes
+  cannot collide in* **and** *follows no session while a run console is
+  opening*, which is the one that would have had `closeTimeline` called with a
+  run id.
+- `parseConsoleKey` renaming its `run` prefix fails *mints keys the console can
+  read back* and nothing else — the drift between two modules that is otherwise
+  invisible.
+- Dropping the `metaKey || ctrlKey` guard fails *leaves a bare ↵ to make a
+  newline*.
+
+### Known limitations
+
+- **The manual pass in `pnpm dev` was not run.** It needs the running app driven
+  by a person and this session has no way to do that. The renderer bundles and
+  every rule above is asserted, but no one has yet seen a run's console on
+  screen, typed into the box, or watched `PROMPT_STARTED` arrive behind it. This
+  is the same gap T310-B recorded, and it is now the whole of what stands
+  between this feature and "exercised in the running app".
+- **"The console shows … why it was denied" is only half true.** The feed draws
+  the ask (`PERMISSION_REQUESTED`) and the block (`RUN_BLOCKED`, carrying
+  `Bash needs permission: …`), then `RUN_RESUMED`. The *verdict* — that the
+  default policy denied it, and with what reason — never reaches the ring:
+  `ClaudeVerdict::deny_by_default`'s message goes to the model as a `tool_result`
+  and nowhere else. A reader therefore cannot tell a denied ask from an allowed
+  one. That is missing information on the wire, not a rendering choice, so it is
+  filed rather than invented here — a renderer that printed "denied" would be
+  asserting something the core did not send.
+- **No files-touched list.** `AgentConsole` puts the files a session wrote above
+  its feed, and a run's `FILE_WRITTEN` events carry an `AgentRunPath` with an
+  openable `path`, so the same list is available. It is not built: §9 asks for
+  the prompt box and §6 for the feed, and building it here would be taking
+  scope. Filed.
+- **No Cancel in the console.** The sidebar row has it, so the capability is not
+  lost, but the surface you are looking at while a run misbehaves is not the one
+  with the stop button. Filed.
+- **`RunsPanel` still runs its own `useRuns`.** Two controllers, two
+  subscriptions, one core — they converge through `AgentRunChanged`, which is
+  how a run started in the DEV panel reaches the sidebar at all. Pre-existing,
+  and it goes when the panel does (`T300-PANEL`).
+- **A run tab is labelled by its short id**, because that is what the sidebar
+  row calls it. The workstream title is in the console header, not on the tab.
+
+### Follow-ups this task files rather than builds
+
+- **`T310-VERDICT-EVENT`** — record the permission verdict in the run's ring, so
+  the console can say a tool was denied and why. Needed for T310's own
+  acceptance criterion, and T310-ANSWER will want it anyway.
+- **`T310-U-FILES`** — the files-touched list on a run's console, from
+  `FILE_WRITTEN` paths, clickable through the same `openTouchedFile` path T232
+  built.
+- **`T310-U-CANCEL`** — a stop control in the run console, and the confirmation
+  question it needs.
+- **T310-U's manual pass** — folded into the standing `MANUAL-PASS-COVERAGE`
+  ticket rather than filed twice.
+
+### Remaining risks
+
+- **Nothing has driven this console against a live `claude`.** Every test drives
+  it against hand-built rings and a stubbed controller. The mapping it renders
+  is `claude_driver.rs`'s, which T310-B asserted against the adapter, so a
+  mismatch would have to be in what the *ring* holds rather than in what this
+  draws — but the two halves have still never met a real agent on screen.
+- **The prompt gate is a mirror and mirrors drift.** It is total over the ten
+  states and fails closed on an eleventh, so a *new* state cannot slip through.
+  What it cannot catch is `accepts_input` changing which of the ten it admits:
+  nothing fails, and the box would refuse a run the core would accept. A wire
+  flag would close that, and is the obvious thing to add if it ever bites.
+- **`loadedId` is a third id beside `activeId` and `pendingId`.** Three fields
+  describing one tab is one more than is comfortable, and the invariant that
+  keeps them consistent (a pending id is always the tab that was last opened)
+  lives in the reducer rather than in the type.

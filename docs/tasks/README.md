@@ -101,7 +101,7 @@ the workflow below are hand-maintained.
 | T101-D | The diff as an editor tab (Monaco diff editor) on git.show | 2 | T101-R | blocked |
 | T101-R | gix: a paged commit walk, and a blob at a revision | 2 | T101-C | review |
 | T101-U | History in the git panel, on git.log | 2 | T101-R | review |
-| T102-C | The write contract: stage, unstage, discard, commit | 2 | ADR-029 | blocked |
+| T102-C | The write contract: stage, unstage, discard, commit | 2 | ADR-029 | todo |
 | T102-R | gritty-git-write: the subprocess adapter and the git probe | 2 | T102-C | blocked |
 | T102-U | Staging, discard and the commit box in the Changes panel | 2 | T102-R | blocked |
 | T222-CODEX | Codex, as one provider file | 3 | T222-SEAM | todo |

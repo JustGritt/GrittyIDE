@@ -1,7 +1,9 @@
 # ADR-029: Git writes run through the `git` binary, while reads stay in-process on `gix`
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-08
+- **Accepted:** 2026-09-09 by Alexis. `T102-C/R/U` are unblocked and
+  `PROTOCOL_VERSION` 2.22.0 stops being a reservation and becomes a claim.
 - **Amends:** ADR-023 decision 4 ("Read-only"), which named this decision in its
   own *Revisit when* and deliberately did not cover it
 

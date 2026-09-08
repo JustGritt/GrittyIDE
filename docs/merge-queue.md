@@ -102,6 +102,9 @@ file decides.
 | `PROTOCOL_VERSION` | ~~2.19.0~~ | `T310-B` — `runs.start` / `runs.prompt`, the `CLAUDE_CODE` variant. **Spent 2026-09-08**; it takes no `SCHEMA_VERSION` and no migration, because a run is still not persisted (ADR-021 decides whether it should be, and is only `Proposed`). |
 | `PROTOCOL_VERSION` | ~~2.20.0~~ | `T042` — the `files.*` command domain. **Spent 2026-09-08**, landed via PR #40. |
 | ADR | ~~ADR-028~~ | `T042` — editing the file tree. Written. |
+| `PROTOCOL_VERSION` | ~~2.21.0~~ | `T101-C` — `git.log` and `git.show`. **Spent 2026-09-09.** No `SCHEMA_VERSION`, no migration, no `CoreEvent` variant: both are reads, and a read that outlives its budget is carried by the existing `Operation*` events. |
+| `PROTOCOL_VERSION` | **2.22.0** | `T102-C` — `git.stage` / `git.unstage` / `git.discard` / `git.commit`. Claimed, not yet spent. |
+| ADR | ~~ADR-029~~ | Git writes run through the `git` binary. Written, and **accepted 2026-09-09**. |
 
 **`PROTO-W2-GIT` claims 2.17.0 and nothing else.** It spends no migration and
 no `SCHEMA_VERSION`: `git.status` and `git.diff` are reads, and nothing about a
@@ -150,10 +153,9 @@ two minors so that the second cannot inherit the first's number:
 | `PROTOCOL_VERSION` **2.22.0** | `T102-C` | `git.stage`, `git.unstage`, `git.discard`, `git.commit` — the write half. Reserved now rather than when that ticket starts, which is the failure mode rule 2 exists for and that `PROTO-W3`/`T310-B` hit twice. |
 | ADR **029** | — | Git *writes* run through the `git` binary while reads stay `gix`. Amends ADR-023 decision 4, which anticipated it by name in its own "Revisit when". |
 
-2.22.0 is a **reservation, not a spend**: `T102-C` is blocked until Alexis
-accepts or rejects ADR-029, and an agent may not decide an ADR. If that ADR is
-rejected the number is released here rather than silently reused — a gap costs
-nothing, and `assertCompatible` compares majors only.
+**ADR-029 was accepted on 2026-09-09**, so 2.22.0 is a live claim rather than a
+reservation and `T102-C` is unblocked. It is still unspent: whoever builds the
+write contract spends it, and until then it is a number nobody else may take.
 
 Both halves take the same four contended seams every recent collision has been
 about — `protocol/mod.rs`, `protocol/export.rs`, `packages/protocol/src/commands.ts`
