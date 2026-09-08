@@ -163,6 +163,11 @@ implementation, in one commit, and the two tickets are reviewed together.
 - `cargo test --workspace` — **exit 0**, 977 passed, 0 failed
 - `cargo clippy --workspace --all-targets -- -D warnings` — clean
 - `cargo fmt --all --check` — clean; `biome check .` — clean, 289 files
+- `pnpm exec vitest run` (all projects) — 945 passed across 95 files
+- **`pnpm check` — exit 0**, the whole gate including `check:generated`. Worth
+  noting because it is the stage that usually cannot pass in this tree: another
+  session's uncommitted work is present, and this time it neither breaks the
+  typecheck nor leaves the generated directory dirty.
 
 ### Architectural decisions
 
