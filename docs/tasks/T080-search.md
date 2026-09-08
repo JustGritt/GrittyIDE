@@ -396,7 +396,7 @@ Every command below was run in this session on macOS (`darwin 25.6.0`,
 
 | Command | Result |
 |---|---|
-| `cargo test -p gritty-search` | **ok** — 13 unit + 21 integration, 0 failed |
+| `cargo test -p gritty-search` | **ok** — 13 unit + 22 integration, 0 failed |
 | `cargo test -p gritty-core` | **ok** — 463 unit + 3 `crash_recovery`, 0 failed (18 of those are new: 6 batcher, 3 wire, 9 manager) |
 | `cargo test -p gritty-desktop --test commands` | **ok** — 48 passed, 0 failed (4 new) |
 | `cargo test --workspace` | **ok** — exit 0, 20 test binaries, 0 failed |
