@@ -282,3 +282,65 @@ describe('a permission request is drawn, and drawn as text', () => {
     expect(secret).toContain('contents are not shown');
   });
 });
+
+describe('the feed can be read at a glance', () => {
+  // The report was that the feed had no colour and that thoughts, prompts and
+  // tool calls ran together. The model already carried a tone per kind; what
+  // was missing was any of it reaching the screen, and a tool row that put its
+  // *name* in the prominent slot and its command in a well underneath.
+
+  function call(name: string, detail: string | null, ok?: boolean) {
+    const entries = [entry({ type: 'TOOL_CALL', toolUseId: 't1', name, detail })];
+    if (ok !== undefined) {
+      entries.push(entry({ type: 'TOOL_RESULT', toolUseId: 't1', ok, detail: 'output here' }));
+    }
+    return render(entries);
+  }
+
+  it('makes the command the row, and the tool name a qualifier on the label', () => {
+    const markup = call('Bash', 'cargo test -p gritty-core');
+    // The name is in the head beside TOOL, not in the body.
+    expect(markup).toContain('agent-feed__tool');
+    // The command is the row's subject and is not drawn as an aside.
+    expect(markup).toContain('agent-feed__detail--input');
+    expect(markup).toContain('cargo test -p gritty-core');
+  });
+
+  it('distinguishes what was run from what came back', () => {
+    // Both were `.agent-feed__detail` with the same fill, which is why a
+    // command and its output were indistinguishable in a long feed.
+    const markup = call('Bash', 'ls', true);
+    expect(markup).toContain('agent-feed__detail--input');
+    expect(markup).toContain('agent-feed__detail--result');
+  });
+
+  it('puts the outcome on the row, not only in a badge', () => {
+    // Artboard 12a's pattern: the edge carries it, so a failed call is
+    // findable without reading every badge.
+    expect(call('Bash', 'ls', false)).toContain('agent-feed__row--fail');
+    expect(call('Bash', 'ls', true)).toContain('agent-feed__row--ok');
+    // A call with no result yet is running, which is not the same as ok.
+    const running = call('Bash', 'ls');
+    expect(running).toContain('agent-feed__row--running');
+    expect(running).not.toContain('agent-feed__row--ok');
+  });
+
+  it('gives every kind its own tone class, so the CSS has something to colour', () => {
+    const markup = render([
+      entry({ type: 'USER_PROMPT', text: 'do the thing' }),
+      entry({ type: 'THINKING', text: 'weighing it up' }),
+      entry({ type: 'ASSISTANT_TEXT', text: 'here is what I found' }),
+      entry({ type: 'FILE_TOUCHED', path: null, display: 'src/a.ts' }),
+    ]);
+    for (const tone of ['prompt', 'thinking', 'assistant', 'file']) {
+      expect(markup).toContain(`agent-feed__row--${tone}`);
+    }
+  });
+
+  it('still says the outcome in a word, because colour is never the only channel', () => {
+    // T231 §10. The edge and the fill are additions to the badge, not
+    // replacements for it.
+    expect(call('Bash', 'ls', false)).toContain('failed');
+    expect(call('Bash', 'ls', true)).toContain('>ok<');
+  });
+});

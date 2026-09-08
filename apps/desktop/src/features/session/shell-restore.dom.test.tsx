@@ -3,6 +3,7 @@ import type {
   AgentNotificationSettings,
   AgentPermissionGrants,
   AgentRoster,
+  AgentRun,
   Decision,
   Document,
   HealthReport,
@@ -190,6 +191,9 @@ function stubCore(restored: Workspace | null): void {
   );
   h.set('agents_permission_grants', (): AgentPermissionGrants => ({ grants: [] }));
   h.set('decisions_list', (): Decision[] => []);
+  // `useRuns` is called from `App` for the sidebar's Agents section (T233-S),
+  // so the shell asks for this on every startup now.
+  h.set('runs_list', (): AgentRun[] => []);
   h.set('ownership_list', (): OwnershipMap => ({ leases: [], conflicts: [] }));
 }
 
@@ -228,9 +232,18 @@ describe('the shell after a startup restore', () => {
     const { container, ui } = renderShell();
 
     // The workspace UI is up...
-    expect(await ui.findByRole('heading', { name: 'Explorer' })).toBeTruthy();
+    expect(await ui.findByRole('heading', { name: 'Files' })).toBeTruthy();
     expect(ui.getByText(WORKSPACE.name)).toBeTruthy();
     expect(ui.getByTitle(WORKSPACE.root)).toBeTruthy();
+    // ...including the Agents section above the tree (T233-S). Asserted here
+    // rather than left implicit: this is the only test that mounts the real
+    // `App`, so it is the only place that shows the section survives being
+    // composed into the shell rather than only rendering in isolation.
+    expect(container.querySelector('.agents-section')).not.toBeNull();
+    // ...and the rail it replaced is gone (T233-C, ADR-026). Asserted rather
+    // than assumed: this is the only test that mounts the real `App`, so it is
+    // the only place that would notice the two surfaces coexisting again.
+    expect(container.querySelector('.agent-rail')).toBeNull();
     // ...and the launcher is not, even though `WorkspaceOpened` never arrived.
     expect(container.querySelector('#launcher-title')).toBeNull();
     expect(container.querySelector('.launcher')).toBeNull();
@@ -254,6 +267,6 @@ describe('the shell after a startup restore', () => {
       expect(container.querySelector('#launcher-title')).not.toBeNull();
     });
     expect(ui.getByText('No workspace open')).toBeTruthy();
-    expect(ui.queryByRole('heading', { name: 'Explorer' })).toBeNull();
+    expect(ui.queryByRole('heading', { name: 'Files' })).toBeNull();
   });
 });

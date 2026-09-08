@@ -8,32 +8,38 @@ import { VIEW_MODES, type ViewMode, type ViewModes } from '../markdown/view-mode
  * blob the core stores opaquely. Every field falls back to its default so a
  * blob from another version never breaks startup.
  */
-export const LAYOUT_VERSION = 5;
+export const LAYOUT_VERSION = 6;
 
 export interface Layout {
   readonly explorer: {
     readonly showHidden: boolean;
   };
   readonly terminal: TerminalLayout;
-  /** The agent rail's own state (T231); its width lives in `panes`. */
-  readonly agentRail: AgentRailLayout;
+  /** The sidebar's Agents section (T233-S). */
+  readonly agents: AgentsSectionLayout;
   /** Pane sizes in CSS pixels, set by dragging the gutters (T046). */
   readonly panes: {
     readonly sidebarWidth: number;
     readonly terminalHeight: number;
-    readonly agentRailWidth: number;
   };
 }
 
-export interface AgentRailLayout {
+export interface AgentsSectionLayout {
   /**
-   * Whether the rail is expanded. Persisted, unlike the dock's disclosure,
-   * because the rail takes width from the editor: reopening into a layout the
-   * user did not choose is a worse surprise horizontally than vertically.
+   * Whether the section above the file tree is unfolded.
    *
-   * Which session was selected is deliberately *not* persisted. A session id
-   * is ephemeral and rediscovered each launch, so restoring a selection that
-   * no longer exists is worse than restoring nothing.
+   * Open by default: this is the surface artboard 12a makes primary, and a
+   * section that starts folded would put the first agent that needs an answer
+   * one click further away than the design puts it. Folding it still leaves
+   * the marks and the waiting count, so the default costs nothing a user
+   * cannot take back.
+   *
+   * **This flag is the only thing about agents that is persisted**, and that is
+   * load-bearing rather than incidental (ADR-026). Which console was open, and
+   * which was showing, are deliberately not: a session id is rediscovered each
+   * launch, so restoring one that no longer exists is worse than restoring
+   * nothing — and keeping consoles out of the persisted set is exactly what
+   * lets them be tabs without a `SessionTab` wire change and a migration.
    */
   readonly open: boolean;
 }
@@ -43,11 +49,10 @@ export interface AgentRailLayout {
  * stored size and a dragged one obey the same rules.
  */
 export const PANE_LIMITS = {
-  sidebar: { min: 180, max: 640, default: 244 },
+  // 300px is artboard 12a's sidebar, and the Agents section is why it grew
+  // from T048's 244: a row carries an id, a task and a status line at once.
+  sidebar: { min: 180, max: 640, default: 300 },
   terminal: { min: 120, max: 900, default: 280 },
-  // Narrower than this and a session row cannot hold a task line, a directory
-  // and a status at once, which is the whole content of the rail.
-  agentRail: { min: 240, max: 640, default: 320 },
 } as const;
 
 export interface TerminalLayout {
@@ -77,17 +82,16 @@ export const DEFAULT_TERMINAL_LAYOUT: TerminalLayout = {
   fontSize: null,
 };
 
-/** Collapsed until asked for: the rail takes its width from the editor. */
-export const DEFAULT_AGENT_RAIL_LAYOUT: AgentRailLayout = { open: false };
+/** Open: it is the sidebar's primary surface, not an aside (artboard 12a). */
+export const DEFAULT_AGENTS_SECTION_LAYOUT: AgentsSectionLayout = { open: true };
 
 export const DEFAULT_LAYOUT: Layout = {
   explorer: { showHidden: false },
   terminal: DEFAULT_TERMINAL_LAYOUT,
-  agentRail: DEFAULT_AGENT_RAIL_LAYOUT,
+  agents: DEFAULT_AGENTS_SECTION_LAYOUT,
   panes: {
     sidebarWidth: PANE_LIMITS.sidebar.default,
     terminalHeight: PANE_LIMITS.terminal.default,
-    agentRailWidth: PANE_LIMITS.agentRail.default,
   },
 };
 
@@ -111,9 +115,9 @@ export function parseLayout(value: unknown): Layout {
     typeof raw.panes === 'object' && raw.panes !== null
       ? (raw.panes as Record<string, unknown>)
       : {};
-  const agentRail =
-    typeof raw.agentRail === 'object' && raw.agentRail !== null
-      ? (raw.agentRail as Record<string, unknown>)
+  const agents =
+    typeof raw.agents === 'object' && raw.agents !== null
+      ? (raw.agents as Record<string, unknown>)
       : {};
   return {
     explorer: {
@@ -130,17 +134,16 @@ export function parseLayout(value: unknown): Layout {
       fontFamily: nonEmptyString(terminal.fontFamily),
       fontSize: parseFontSize(terminal.fontSize),
     },
-    // A blob written before T231 has no rail section, which is the same as a
-    // rail nobody has opened yet.
-    agentRail: {
-      open: typeof agentRail.open === 'boolean' ? agentRail.open : DEFAULT_AGENT_RAIL_LAYOUT.open,
+    // A blob written before T233-S has no agents section, which is the same as
+    // a section nobody has folded — and the default is open.
+    agents: {
+      open: typeof agents.open === 'boolean' ? agents.open : DEFAULT_AGENTS_SECTION_LAYOUT.open,
     },
     panes: {
       // A stored size is clamped, not discarded: a blob from a larger monitor
       // should still open a usable sidebar rather than silently reset it.
       sidebarWidth: parsePane(panes.sidebarWidth, PANE_LIMITS.sidebar),
       terminalHeight: parsePane(panes.terminalHeight, PANE_LIMITS.terminal),
-      agentRailWidth: parsePane(panes.agentRailWidth, PANE_LIMITS.agentRail),
     },
   };
 }
@@ -193,11 +196,10 @@ export type SerializedLayout = {
     readonly fontFamily: string | null;
     readonly fontSize: number | null;
   };
-  readonly agentRail: { readonly open: boolean };
+  readonly agents: { readonly open: boolean };
   readonly panes: {
     readonly sidebarWidth: number;
     readonly terminalHeight: number;
-    readonly agentRailWidth: number;
   };
 };
 
@@ -211,11 +213,10 @@ export function serializeLayout(layout: Layout): SerializedLayout {
       fontFamily: layout.terminal.fontFamily,
       fontSize: layout.terminal.fontSize,
     },
-    agentRail: { open: layout.agentRail.open },
+    agents: { open: layout.agents.open },
     panes: {
       sidebarWidth: layout.panes.sidebarWidth,
       terminalHeight: layout.panes.terminalHeight,
-      agentRailWidth: layout.panes.agentRailWidth,
     },
   };
 }

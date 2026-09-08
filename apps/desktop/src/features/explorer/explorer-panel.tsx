@@ -56,9 +56,19 @@ export function ExplorerPanel({
   return (
     <section className="explorer" aria-labelledby="explorer-title">
       {/* A 32px header (T048): the label, the one action you reach for, and the
-          rest behind the same disclosure the editor and terminal settings use. */}
+          rest behind the same disclosure the editor and terminal settings use.
+
+          T233-S restyles the label as artboard 9a's section tab and renames it
+          Files, because the sidebar now has something above it and "Explorer"
+          named the whole column. It is still an `<h2>`, not a `role="tab"` in a
+          tablist: 9a draws a second tab, Changes, and there is nothing behind
+          it — no git command reaches the renderer yet. A lone tab that cannot
+          be switched away from is an affordance that does not work, so the
+          heading stays a heading until T100-U has a tab to put beside it. */}
       <div className="explorer__toolbar">
-        <h2 id="explorer-title">Explorer</h2>
+        <h2 id="explorer-title" className="explorer__tab">
+          Files
+        </h2>
         <span className="explorer__spacer" />
         {hiddenCount > 0 && !state.showHidden && (
           <span className="badge">{hiddenCount} hidden</span>

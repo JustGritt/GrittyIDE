@@ -37,7 +37,7 @@ export interface TouchedFileDocuments {
  * the core for a second one. Duplicating that here would be a second answer to
  * a question the document store already owns.
  *
- * `quiet` because the refusal belongs in the rail's error envelope: nothing was
+ * `quiet` because the refusal belongs in the console's error envelope: nothing was
  * opened, so there is no editor pane for the pane's banner to sit above.
  */
 export async function openTouchedFile(

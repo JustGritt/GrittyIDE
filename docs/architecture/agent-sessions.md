@@ -225,22 +225,22 @@ no I/O at all.
 T221 puts the hook state directory on this same loop, for the same reason: a
 permission prompt reported six seconds late is not worth reporting.
 
-## The rail (T231, T232)
+## The console (T231, T232, T233-C)
 
-The roster and the timeline surface in a third region of the shell, to the right
-of the editor, with its own splitter: a list of sessions coloured by status, and
-beneath it the selected session's feed and the files it touched. Clicking a
-touched file opens it in the editor — the thing a terminal multiplexer
-structurally cannot do.
+The roster surfaces in the left sidebar, pinned above the file tree, and the
+selected session's timeline surfaces as **a tab in the editor** — the feed and
+the files it touched, filling the pane. Clicking a touched file opens it in the
+editor beside it, the thing a terminal multiplexer structurally cannot do.
 
-T231 shipped the region and the list: the third child of `shell__body`, a
-right-anchored splitter driving `--agent-rail-width`, `agentRailWidth` and the
-collapsed flag in the layout blob, one row per session in the core's ranking,
-the five status labels below, and selection that opens exactly one timeline
-follower (`⌥G` toggles the rail; collapsing it closes the follower, because an
-invisible one is waste).
+T231 originally shipped this as a third region of the shell, a right-anchored
+rail with its own splitter. **ADR-026 retired it.** Artboard 12a's body has two
+columns and no rail; the agents moved to the sidebar over design turns 10 and
+11, and keeping both meant the same roster listed twice with two different
+counts. The rail's 320px also came out of the editor, which is what made a
+split-view markdown file unreadable beside it.
 
-T232 filled the body. Four things about it are load-bearing:
+T232 filled the body, and all of it carries over unchanged. Four things about it
+are load-bearing:
 
 - **The feed accumulates a delta, never a snapshot.** `AgentTimelineAppended`
   carries only what was appended, so the renderer keys on `seq` and appends;
@@ -270,18 +270,22 @@ resolves, no path built by concatenation, no command anything runs. The core
 bounded each field before it crossed the protocol and the renderer's whole job
 is not to undo that (rule 13).
 
-It is deliberately **not** a tab in the document strip. Agent sessions and open
-files are different kinds of thing, and `SessionTab.path` is a required
-`WorkspacePath` in a non-nullable column, so a non-document tab would cost a
-wire change, a ts-rs regeneration and a migration. The rail's width lives in the
-UI-owned layout blob and costs none of that.
+It **is** a tab in the document strip, and the cost T231 priced that at does not
+apply, because a console is never persisted: `buildSessionTabs` walks
+`documents.state.order`, a console never enters it, and so nothing can reach
+`SessionTab.path`'s non-nullable column. No wire change, no ts-rs regeneration,
+no migration. Exactly one `openTimeline` follower is live at a time, and it is
+closed when the tab is closed, when a document takes the pane, and on unmount.
 
-The rail and the island read **one** `useAgents` controller, following T210's
-rule that two surfaces over one controller cannot disagree; the island's agents
-section reduces to a count and its most urgent row. The rail's five labels map
-onto the wire as Working=`WORKING`, Pending validation=`BLOCKED`, Done=`WAITING`,
-Idle=`IDLE`, Ended=`ENDED` — `WAITING` keeps its name because it means *the
-user's move*, and renaming the wire for a word is not worth the ripple.
+The sidebar section, the island and the console read **one** `useAgents`
+controller, following T210's rule that two surfaces over one controller cannot
+disagree. The island stays *machine-wide* and keeps a count and its most urgent
+row; the sidebar is scoped to the open workspace and flags — rather than filters
+— the sessions running elsewhere and the ones that have ended, keeping both
+behind a single reveal. The five labels map onto the wire as Working=`WORKING`,
+Pending validation=`BLOCKED`, Done=`WAITING`, Idle=`IDLE`, Ended=`ENDED` —
+`WAITING` keeps its name because it means *the user's move*, and renaming the
+wire for a word is not worth the ripple.
 
 ## The third source (T221)
 

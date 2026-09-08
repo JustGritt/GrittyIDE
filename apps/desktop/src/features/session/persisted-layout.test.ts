@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { DocumentTab } from '../documents/documents-reducer';
 import {
   buildSessionTabs,
-  DEFAULT_AGENT_RAIL_LAYOUT,
+  DEFAULT_AGENTS_SECTION_LAYOUT,
   DEFAULT_LAYOUT,
   DEFAULT_TERMINAL_LAYOUT,
   isViewMode,
@@ -43,11 +43,11 @@ describe('layout blob', () => {
         fontFamily: 'MesloLGS NF',
         fontSize: 15,
       },
-      agentRail: { open: true },
-      panes: { sidebarWidth: 260, terminalHeight: 340, agentRailWidth: 300 },
+      agents: { open: false },
+      panes: { sidebarWidth: 260, terminalHeight: 340 },
     };
     const blob = serializeLayout(layout);
-    expect(blob.version).toBe(5);
+    expect(blob.version).toBe(6);
     expect(parseLayout(blob)).toEqual(layout);
     expect(parseLayout(undefined)).toEqual(DEFAULT_LAYOUT);
     expect(parseLayout({ version: 9, explorer: { showHidden: 'yes' } })).toEqual(DEFAULT_LAYOUT);
@@ -60,33 +60,52 @@ describe('layout blob', () => {
     expect(parseLayout({ version: 1, explorer: { showHidden: true } })).toEqual({
       explorer: { showHidden: true },
       terminal: DEFAULT_TERMINAL_LAYOUT,
-      agentRail: DEFAULT_AGENT_RAIL_LAYOUT,
+      agents: DEFAULT_AGENTS_SECTION_LAYOUT,
       panes: DEFAULT_LAYOUT.panes,
     });
   });
 
-  it('reads a blob written before the agent rail existed', () => {
-    // Same case one version later: a version-4 blob has no rail section and no
-    // rail width, which is a rail nobody has opened rather than a broken blob.
+  it('ignores the agent rail a version-5 blob still carries', () => {
+    // T233-C deleted the rail (ADR-026). Its two fields are not migrated away,
+    // they are simply not read — every field falls back independently, so a
+    // blob written by the previous build opens without complaint.
     const before = {
-      version: 4,
+      version: 5,
       explorer: { showHidden: true },
       terminal: { profilePath: '/bin/zsh', customShells: [], fontFamily: null, fontSize: null },
+      agentRail: { open: true },
       panes: { sidebarWidth: 260, terminalHeight: 340 },
     };
     const layout = parseLayout(before);
-    expect(layout.agentRail).toEqual(DEFAULT_AGENT_RAIL_LAYOUT);
-    expect(layout.panes.agentRailWidth).toBe(PANE_LIMITS.agentRail.default);
+    expect(layout).not.toHaveProperty('agentRail');
+    expect(layout.panes).not.toHaveProperty('agentRailWidth');
     // Everything written beside it survives.
     expect(layout.panes.sidebarWidth).toBe(260);
     expect(layout.terminal.profilePath).toBe('/bin/zsh');
   });
 
-  it('ignores a rail section that is not a usable value', () => {
-    for (const agentRail of [null, {}, { open: 'yes' }, { open: 1 }, 'open']) {
-      expect(parseLayout({ agentRail }).agentRail).toEqual(DEFAULT_AGENT_RAIL_LAYOUT);
+  it('reads a blob written before the agents section existed', () => {
+    // A version-5 blob has no agents section. That is a section nobody has
+    // folded, and the default is open — so an existing user gets the new
+    // surface rather than an empty strip they have to discover.
+    const before = {
+      version: 5,
+      explorer: { showHidden: true },
+      terminal: { profilePath: '/bin/zsh', customShells: [], fontFamily: null, fontSize: null },
+      panes: { sidebarWidth: 260, terminalHeight: 340 },
+    };
+    const layout = parseLayout(before);
+    expect(layout.agents).toEqual(DEFAULT_AGENTS_SECTION_LAYOUT);
+    expect(layout.agents.open).toBe(true);
+    // Everything written beside it survives.
+    expect(layout.panes.sidebarWidth).toBe(260);
+  });
+
+  it('ignores an agents section that is not a usable value', () => {
+    for (const agents of [null, {}, { open: 'yes' }, { open: 1 }, 'open']) {
+      expect(parseLayout({ agents }).agents).toEqual(DEFAULT_AGENTS_SECTION_LAYOUT);
     }
-    expect(parseLayout({ agentRail: { open: true } }).agentRail.open).toBe(true);
+    expect(parseLayout({ agents: { open: false } }).agents.open).toBe(false);
   });
 
   it('ignores terminal settings that are not usable values', () => {
@@ -116,32 +135,25 @@ describe('layout blob', () => {
   it('clamps a stored pane size instead of discarding it', () => {
     // A blob from a larger monitor should still open a usable sidebar.
     const huge = parseLayout({
-      panes: { sidebarWidth: 5000, terminalHeight: 5000, agentRailWidth: 5000 },
+      panes: { sidebarWidth: 5000, terminalHeight: 5000 },
     }).panes;
     expect(huge).toEqual({
       sidebarWidth: PANE_LIMITS.sidebar.max,
       terminalHeight: PANE_LIMITS.terminal.max,
-      agentRailWidth: PANE_LIMITS.agentRail.max,
     });
 
     const tiny = parseLayout({
-      panes: { sidebarWidth: 1, terminalHeight: -10, agentRailWidth: 12 },
+      panes: { sidebarWidth: 1, terminalHeight: -10 },
     }).panes;
     expect(tiny).toEqual({
       sidebarWidth: PANE_LIMITS.sidebar.min,
       terminalHeight: PANE_LIMITS.terminal.min,
-      agentRailWidth: PANE_LIMITS.agentRail.min,
     });
   });
 
   it('falls back to the default pane sizes for anything that is not a number', () => {
     for (const panes of [null, {}, { sidebarWidth: '320' }, { sidebarWidth: Number.NaN }]) {
       expect(parseLayout({ panes }).panes.sidebarWidth).toBe(PANE_LIMITS.sidebar.default);
-    }
-    for (const agentRailWidth of ['320', Number.NaN, null, undefined]) {
-      expect(parseLayout({ panes: { agentRailWidth } }).panes.agentRailWidth).toBe(
-        PANE_LIMITS.agentRail.default,
-      );
     }
   });
 
@@ -196,5 +208,59 @@ describe('buildSessionTabs', () => {
       anchor: { line: 5, column: 1 },
       scrollLine: 5,
     });
+  });
+});
+
+describe('an agent console is never persisted (ADR-026)', () => {
+  // The claim this whole feature rests on. T231 refused agent entries in the
+  // tab strip partly because `SessionTab.path` is a required `WorkspacePath`
+  // in a non-nullable column, so a non-document tab would cost a wire change,
+  // a ts-rs regeneration and a migration. That cost is avoided by never
+  // letting a console into `documents.state` — and this is the guard that
+  // fails loudly if it ever gets in.
+
+  it('produces a tab only for a document, because it walks the document order', () => {
+    const tabs = { a: tab('a', 'README.md'), b: tab('b', 'src/main.rs') };
+    const result = buildSessionTabs({
+      workspaceId: ws,
+      // A console id parked here — which is what a future refactor might do by
+      // accident — resolves to no `DocumentTab` and is dropped, so it can
+      // never reach a `TabRow` whose `path` column cannot be null.
+      order: ['a', 'session-1', 'b'] as DocumentId[],
+      tabs,
+      activeId: 'a' as DocumentId,
+      viewModes: {},
+      readViewState: () => null,
+    });
+    expect(result.map((entry) => entry.path)).toEqual(['README.md', 'src/main.rs']);
+    expect(result.every((entry) => typeof entry.path === 'string' && entry.path !== '')).toBe(true);
+  });
+
+  it('keeps the last active document flagged while a console is showing', () => {
+    // `documents.state.activeId` is deliberately left pointing at the document
+    // even while the console has the pane, so quitting with a console on
+    // screen reopens the file you were on. Clearing it would leave every tab
+    // `active: false`, and restore would silently fall back to the leftmost.
+    const tabs = { a: tab('a', 'README.md'), b: tab('b', 'src/main.rs') };
+    const result = buildSessionTabs({
+      workspaceId: ws,
+      order: ['a', 'b'] as DocumentId[],
+      activeId: 'b' as DocumentId,
+      tabs,
+      viewModes: {},
+      readViewState: () => null,
+    });
+    expect(result.filter((entry) => entry.active).map((entry) => entry.path)).toEqual([
+      'src/main.rs',
+    ]);
+  });
+
+  it('writes nothing about a session into the layout blob', () => {
+    // The section's fold is the only agent state that persists, and it is a
+    // boolean. A session id in here would be the thing that stops being true.
+    const blob = serializeLayout(DEFAULT_LAYOUT);
+    expect(Object.keys(blob.agents)).toEqual(['open']);
+    expect(typeof blob.agents.open).toBe('boolean');
+    expect(JSON.stringify(blob)).not.toContain('session');
   });
 });

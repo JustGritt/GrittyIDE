@@ -2,6 +2,7 @@ import { isInstructionFile } from '@gritty/markdown';
 import type { DocumentId } from '@gritty/protocol';
 import { type DragEvent, type MouseEvent, useCallback, useState } from 'react';
 import { Menu, type MenuAnchor, type MenuItem } from '../../components/menu';
+import type { AgentTabItem } from '../agents/agent-console';
 import { type DocumentsState, isPreview, isUnsaved } from '../documents/documents-reducer';
 import { tabsToTheRight } from './close-plan';
 import { fileName } from './file-name';
@@ -28,6 +29,19 @@ interface OpenMenu {
  * to be replaced by the next one. It is set in italics, the convention every
  * editor with this behavior uses, and a double click keeps it. Dragging keeps
  * it too, through the reorder itself.
+ *
+ * Agent consoles are tabs here too (T233-C, ADR-026), after the documents and
+ * never among them. Two things about that are deliberate:
+ *
+ * - **They are a second source, never a fake `DocumentTab`.** A console has no
+ *   path, no buffer and no dirty state, and inventing a `Document` for one
+ *   would put a non-file into the contract T030 owns. It also keeps them out of
+ *   `documents.state.order`, which is what `buildSessionTabs` walks — so a
+ *   console can never reach `SessionTab` and never needs the migration T231
+ *   priced this feature on.
+ * - **They are grouped at the end** rather than interleaved. That is the
+ *   legible half of T231's objection kept: one strip, two kinds, still telling
+ *   them apart at a glance. Reordering is a document affair for now.
  */
 export function TabStrip({
   state,
@@ -36,6 +50,7 @@ export function TabStrip({
   onClose,
   onCloseMany,
   onReorder,
+  agents,
 }: {
   state: DocumentsState;
   onActivate: (documentId: DocumentId) => void;
@@ -45,11 +60,23 @@ export function TabStrip({
   /** Close a list of documents in order, asking about each unsaved one. */
   onCloseMany: (documentIds: readonly DocumentId[]) => void;
   onReorder: (documentId: DocumentId, toIndex: number) => void;
+  /** The open agent consoles. Absent with no workspace, and then there are none. */
+  agents?: {
+    readonly items: readonly AgentTabItem[];
+    /** Non-null while a console is showing, which is what deactivates the documents. */
+    readonly activeId: string | null;
+    onActivate: (sessionId: string) => void;
+    onPromote: (sessionId: string) => void;
+    onClose: (sessionId: string) => void;
+  };
 }) {
   const [dragging, setDragging] = useState<DocumentId | null>(null);
   const [menu, setMenu] = useState<OpenMenu | null>(null);
   const dismissMenu = useCallback(() => setMenu(null), []);
-  if (state.order.length === 0) return null;
+  const agentItems = agents?.items ?? [];
+  // A console outlives the last file: closing every document must not take the
+  // agent you are watching off the screen with them.
+  if (state.order.length === 0 && agentItems.length === 0) return null;
 
   function onDrop(event: DragEvent<HTMLButtonElement>, index: number) {
     event.preventDefault();
@@ -90,7 +117,10 @@ export function TabStrip({
       {state.order.map((id, index) => {
         const tab = state.tabs[id];
         if (!tab) return null;
-        const isActive = id === state.activeId;
+        // A document tab cannot be the active one while a console is showing.
+        // `documents.state.activeId` is deliberately left pointing at it — that
+        // is what session restore persists — so the check is here, in the view.
+        const isActive = id === state.activeId && agents?.activeId == null;
         const unsaved = isUnsaved(tab);
         const preview = isPreview(state, id);
         const name = fileName(tab.document.path);
@@ -147,6 +177,52 @@ export function TabStrip({
               aria-label={`Close ${name}${unsaved ? ' (unsaved changes)' : ''}`}
               onClick={() => onClose(id)}
               onContextMenu={(event) => openMenu(event, id)}
+            >
+              ×
+            </button>
+          </div>
+        );
+      })}
+      {agentItems.map((item) => {
+        const isActive = item.sessionId === agents?.activeId;
+        return (
+          <div
+            key={`agent:${item.sessionId}`}
+            role="presentation"
+            className={`tabs__item tabs__item--agent${isActive ? ' tabs__item--active' : ''}`}
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              className={`tabs__tab${item.preview ? ' tabs__tab--preview' : ''}`}
+              title={
+                item.preview
+                  ? `${item.label} — ${item.hint} — preview, double-click to keep`
+                  : `${item.label} — ${item.hint}`
+              }
+              onClick={() => agents?.onActivate(item.sessionId)}
+              onDoubleClick={() => agents?.onPromote(item.sessionId)}
+              onAuxClick={(event) => {
+                if (event.button === 1) agents?.onClose(item.sessionId);
+              }}
+            >
+              {/* The status mark stands where a document's unsaved dot stands,
+                  so the two kinds of tab read in the same places. Its shape
+                  carries the status as well as its colour (T231 §10). */}
+              <span
+                className={`agent-status agent-status--${item.tone} tabs__agent-mark`}
+                aria-hidden="true"
+              >
+                <span className="agent-status__mark" />
+              </span>
+              {item.label}
+            </button>
+            <button
+              type="button"
+              className="tabs__close"
+              aria-label={`Close the ${item.label} agent console`}
+              onClick={() => agents?.onClose(item.sessionId)}
             >
               ×
             </button>

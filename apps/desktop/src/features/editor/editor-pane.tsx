@@ -10,6 +10,9 @@ import { type DocumentId, toCoreError } from '@gritty/protocol';
 import { type Dispatch, useCallback, useEffect, useRef, useState } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
 import { core } from '../../core/client';
+import { AgentConsole, agentTabItems } from '../agents/agent-console';
+import type { AgentConsoleController } from '../agents/use-agent-console';
+import type { AgentsController } from '../agents/use-agents';
 import {
   activeTab,
   type DocumentTab,
@@ -43,6 +46,12 @@ const EXTERNAL_MESSAGES: Record<PendingExternalState, string> = {
  * and large documents, the mixed line-ending notice, and the status bar.
  * Preferences, view modes and the editor binding are owned by `App` so the
  * session (T060) can restore and persist them.
+ *
+ * It also draws an agent console when one is the active tab (T233-C, ADR-026).
+ * The console takes the place of the surfaces, not of the pane: Monaco's own
+ * DOM is a detached element the binding appends into whichever container
+ * appears, so hiding the container costs nothing and disposes no model — unlike
+ * the attention queue, which unmounts this pane wholesale.
  */
 export function EditorPane({
   documents,
@@ -54,6 +63,8 @@ export function EditorPane({
   session,
   onRequestClose,
   onRequestCloseMany,
+  agents,
+  console: consoleController,
 }: {
   documents: DocumentsController;
   editor: EditorBinding;
@@ -64,6 +75,9 @@ export function EditorPane({
   session: SessionController;
   onRequestClose: (documentId: DocumentId) => void;
   onRequestCloseMany: (documentIds: readonly DocumentId[]) => void;
+  /** The one shared roster; absent with no workspace open. */
+  agents?: AgentsController;
+  console?: AgentConsoleController;
 }) {
   const { state } = documents;
   const [workers, setWorkers] = useState(workerStatus.snapshot());
@@ -71,6 +85,23 @@ export function EditorPane({
 
   const active = activeTab(state);
   const activeEol = active ? (editor.eols[active.document.id] ?? null) : null;
+
+  // The console showing now, resolved against the one shared roster. A tab
+  // whose session has left the roster resolves to null and the reducer drops
+  // the tab on the same publish, so this is the instant in between.
+  const consoleSession =
+    consoleController?.activeId == null || agents === undefined
+      ? null
+      : (agents.roster.sessions.find((s) => s.id === consoleController.activeId) ?? null);
+  const showConsole = consoleSession !== null;
+  const agentTabs =
+    consoleController && agents
+      ? agentTabItems(
+          consoleController.openTabs,
+          consoleController.previewId,
+          agents.roster.sessions,
+        )
+      : [];
 
   // Markdown: link outcomes and notices; the view modes come from `App`.
   const [brokenTargets, setBrokenTargets] = useState<ReadonlySet<string>>(() => new Set());
@@ -82,8 +113,9 @@ export function EditorPane({
   const mode = active
     ? viewModeFor(modes, active.document.id, active.document.languageId)
     : 'source';
-  const showPreview = isMarkdown && mode !== 'source';
-  const showEditor = active !== null && active.text !== null && !(isMarkdown && mode === 'preview');
+  const showPreview = !showConsole && isMarkdown && mode !== 'source';
+  const showEditor =
+    !showConsole && active !== null && active.text !== null && !(isMarkdown && mode === 'preview');
 
   const followLink = useCallback(
     async (action: NonNullable<PreviewLinkAction>) => {
@@ -150,13 +182,31 @@ export function EditorPane({
       <div className="editor__bar">
         <TabStrip
           state={state}
-          onActivate={documents.activate}
+          onActivate={(documentId) => {
+            // Activating a document is what takes the console off the screen.
+            // `documents.activate` still runs, so the document the session
+            // restores to is the one that was last actually chosen.
+            consoleController?.showDocuments();
+            documents.activate(documentId);
+          }}
           onPromote={documents.promoteTab}
           onClose={onRequestClose}
           onCloseMany={onRequestCloseMany}
           onReorder={documents.reorder}
+          agents={
+            consoleController && {
+              items: agentTabs,
+              activeId: consoleController.activeId,
+              onActivate: consoleController.show,
+              onPromote: consoleController.keep,
+              onClose: consoleController.close,
+            }
+          }
         />
-        {isMarkdown && active && (
+        {/* Source / Split / Preview and the editor settings both describe a
+            document. While a console is showing there is no document they
+            could be about, so they are not drawn rather than drawn inert. */}
+        {!showConsole && isMarkdown && active && (
           <MarkdownToolbar
             mode={mode}
             onMode={(next) =>
@@ -167,7 +217,7 @@ export function EditorPane({
             onDismissNotice={() => setPreviewNotice(null)}
           />
         )}
-        <PreferencesPopover prefs={prefs} onChange={onPrefsChange} />
+        {!showConsole && <PreferencesPopover prefs={prefs} onChange={onPrefsChange} />}
       </div>
 
       {documents.error && (
@@ -191,7 +241,7 @@ export function EditorPane({
 
       <RecoveryPrompt session={session} />
 
-      {active && <Banners tab={active} eol={activeEol} documents={documents} />}
+      {!showConsole && active && <Banners tab={active} eol={activeEol} documents={documents} />}
 
       <div className="editor__surfaces">
         <section
@@ -200,6 +250,9 @@ export function EditorPane({
           hidden={!showEditor}
           aria-label={active ? `Contents of ${active.document.path}` : 'Editor'}
         />
+        {showConsole && consoleSession && agents && consoleController && (
+          <AgentConsole session={consoleSession} controller={consoleController} agents={agents} />
+        )}
         {showPreview && active && (
           <MarkdownPreview
             key={active.document.id}
@@ -214,14 +267,14 @@ export function EditorPane({
           />
         )}
       </div>
-      {!active && (
+      {!active && !showConsole && (
         <p className="editor__empty">
           {state.order.length === 0
             ? 'No document open. Click a file in the explorer.'
             : 'Select a tab.'}
         </p>
       )}
-      {active?.document.binary && (
+      {!showConsole && active?.document.binary && (
         <p className="editor__placeholder">
           Binary file ({active.document.size.toLocaleString()} bytes). It is not shown and cannot be
           edited; saving is disabled so it can never be corrupted.

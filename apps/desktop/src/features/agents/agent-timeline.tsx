@@ -70,10 +70,10 @@ export function AgentTimelinePanel({
   const ended = session.activity === 'ENDED';
 
   return (
-    <section className="agent-rail__timeline" aria-label="Timeline">
-      <div className="agent-rail__timeline-head">
-        <span className="agent-rail__timeline-title">{title ?? 'Selected session'}</span>
-        <span className="agent-rail__spacer" />
+    <section className="agent-console__timeline" aria-label="Timeline">
+      <div className="agent-console__timeline-head">
+        <span className="agent-console__timeline-title">{title ?? 'Selected session'}</span>
+        <span className="agent-console__spacer" />
         <AgentStatusBadge activity={session.activity} />
       </div>
 
@@ -87,23 +87,23 @@ export function AgentTimelinePanel({
       )}
 
       {timeline === null ? (
-        <p className="agent-rail__placeholder">Opening…</p>
+        <p className="agent-console__placeholder">Opening…</p>
       ) : rows.length === 0 ? (
         // Three states that are not the same thing (§6): nothing to read,
         // nothing said yet, and a session that finished without saying
         // anything. Collapsing them would make an unreadable transcript look
         // like a quiet agent.
         !timeline.transcriptEvidence ? (
-          <p className="agent-rail__note">
+          <p className="agent-console__note">
             No transcript could be read for this session, so there is nothing to follow. Gritty
             knows it is running, not what it is doing.
           </p>
         ) : ended ? (
-          <p className="agent-rail__placeholder">
+          <p className="agent-console__placeholder">
             This session ended with nothing in its transcript to show.
           </p>
         ) : (
-          <p className="agent-rail__placeholder">
+          <p className="agent-console__placeholder">
             Nothing in this session's transcript yet. New entries appear here as the agent works.
           </p>
         )
@@ -126,7 +126,7 @@ export function AgentTimelinePanel({
       {/* The feed stopped growing; nothing was removed (§6, and the failure
           table's "the session ends mid-render"). */}
       {ended && rows.length > 0 && (
-        <p className="agent-rail__placeholder">
+        <p className="agent-console__placeholder">
           This session has ended. The feed above is what it left behind.
         </p>
       )}
@@ -210,14 +210,29 @@ function Feed({
 /** One line of the feed. Every string it draws is a text node. */
 function FeedRow({ row }: { row: TimelineRow }) {
   const at = row.at === null ? null : clockTime(row.at);
+  const tool = row.tone === 'tool';
+  /**
+   * How the call went, as a class on the row itself and not only as a badge.
+   *
+   * Artboard 12a draws a command block with its outcome down its left edge, and
+   * that is the channel that survives a feed being skimmed: a failed call is
+   * findable without reading a badge on every row. `null` while it is still
+   * outstanding is the honest state, and reads as *running* rather than as ok.
+   */
+  const outcome = !tool ? null : row.outcome === null ? 'running' : row.outcome.ok ? 'ok' : 'fail';
   return (
     <li
       className={`agent-feed__row agent-feed__row--${row.tone}${
-        row.sidechain ? ' agent-feed__row--sidechain' : ''
-      }`}
+        outcome === null ? '' : ` agent-feed__row--${outcome}`
+      }${row.sidechain ? ' agent-feed__row--sidechain' : ''}`}
     >
       <span className="agent-feed__head">
         <span className="agent-feed__label">{row.label}</span>
+        {/* For a tool the name qualifies the label rather than filling the row:
+            "TOOL · Bash" reads as one thing, and it leaves the body for the
+            command — which is what the reader came for. Drawn before the badge
+            so the head reads left to right as what · which · how it went. */}
+        {tool && <span className="agent-feed__tool">{row.text}</span>}
         {/* Marked and subordinate, never hidden: T220 dropped subagent work and
             listed that as a known limitation (§4). */}
         {row.sidechain && (
@@ -225,24 +240,27 @@ function FeedRow({ row }: { row: TimelineRow }) {
             subagent
           </span>
         )}
-        {row.tone === 'tool' &&
-          (row.outcome === null ? (
-            <span className="agent-feed__badge agent-feed__badge--running">running</span>
-          ) : (
-            <span
-              className={`agent-feed__badge agent-feed__badge--${row.outcome.ok ? 'ok' : 'fail'}`}
-            >
-              {row.outcome.ok ? 'ok' : 'failed'}
-            </span>
-          ))}
-        <span className="agent-rail__spacer" />
+        {tool && (
+          <span className={`agent-feed__badge agent-feed__badge--${outcome}`}>
+            {outcome === 'fail' ? 'failed' : outcome}
+          </span>
+        )}
+        <span className="agent-console__spacer" />
         {at !== null && <span className="agent-feed__at">{at}</span>}
       </span>
-      <p className="agent-feed__text">{row.text}</p>
-      {row.detail !== null && <p className="agent-feed__detail">{row.detail}</p>}
+      {/* A tool's name is already in the head; drawing it again here is the
+          redundancy that made every call look alike. */}
+      {!tool && <p className="agent-feed__text">{row.text}</p>}
+      {row.detail !== null && (
+        // A tool's `detail` is its *input* — the command. It is the row's
+        // subject, so it is drawn as the row's subject and not as an aside.
+        <p className={`agent-feed__detail${tool ? ' agent-feed__detail--input' : ''}`}>
+          {row.detail}
+        </p>
+      )}
       {/* The result's own preview, under the call it belongs to. Only for a
           paired tool row: an unpaired result already drew its detail above. */}
-      {row.tone === 'tool' && row.outcome?.detail != null && (
+      {tool && row.outcome?.detail != null && (
         <p className="agent-feed__detail agent-feed__detail--result">{row.outcome.detail}</p>
       )}
     </li>

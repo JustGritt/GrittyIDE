@@ -489,39 +489,6 @@ textarea:focus-visible {
   flex: 1;
 }
 
-/* With the agent rail (T231) the body is a third region wide. The rail is
-   anchored right, so its gutter comes before it and its own track is the last.
-
-   The `clamp()` is the rail's half of the editor-minimum bargain the sidebar
-   already makes in CSS: the rail may take what is left after the sidebar, the
-   two gutters and the editor's minimum, and no more. Squeezed past that it
-   shrinks toward the width of its collapsed strip rather than pushing the
-   editor below what it needs — the same rule the drag enforces, holding when
-   nothing is being dragged.
-
-   Collapsed, the rail is exactly its 32px strip and there is no gutter, so the
-   template has four tracks for four children. */
-.shell__body--rail {
-  grid-template-columns:
-    min(var(--sidebar-width, 244px), calc(100% - 8px - 22.5rem))
-    8px
-    minmax(0, 1fr)
-    8px
-    clamp(
-      var(--section-h),
-      var(--agent-rail-width, 320px),
-      max(var(--section-h), calc(100% - var(--sidebar-width, 244px) - 16px - 22.5rem))
-    );
-}
-
-.shell__body--rail-collapsed {
-  grid-template-columns:
-    min(var(--sidebar-width, 244px), calc(100% - 8px - 22.5rem))
-    8px
-    minmax(0, 1fr)
-    var(--section-h);
-}
-
 /* The column is a surface of its own, edge to edge. The hairline between it and
    the editor belongs to the gutter, so the line you see is the line you grab.
 
@@ -539,9 +506,7 @@ textarea:focus-visible {
    row scrolls as one instead of the tree scrolling inside a fixed frame —
    otherwise a notice above the tree is simply cut off. */
 @media (max-width: 60rem) {
-  .shell__body,
-  .shell__body--rail,
-  .shell__body--rail-collapsed {
+  .shell__body {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(24rem, 1fr) auto;
   }
@@ -3046,287 +3011,133 @@ textarea:focus-visible {
 }
 
 /* ---------------------------------------------------------------------------
-   The agent rail (T231)
+   The agent console (T233-C, ADR-026; design artboards 11a/12a)
 
-   The third region of the shell, to the right of the editor: the coding agents
-   running on this machine, beside your code rather than instead of it. Its
-   chrome is one 32px row and the body is what collapses, following the dock —
-   and, like the dock, a collapsed rail still reports. Folded, the row turns on
-   its side into a 32px strip carrying the label and the needs-you count.
+   What the rail's body was, given the whole editor pane instead of 320px. It is
+   a tab beside the open files, so this block styles a surface that fills
+   `editor__surfaces` rather than a column with a splitter.
 
-   Every colour is an ADR-016 token (there is no literal here), and every status
-   carries a shape as well as a colour so the list survives without colour
-   vision.
+   Six class names here were the rail's — `__timeline`, `__timeline-head`,
+   `__timeline-title`, `__spacer`, `__note`, `__placeholder`. They are renamed
+   rather than deleted because `agent-timeline.tsx` and `permission-prompt.tsx`
+   still use them; the rules are the rail's, unchanged.
+
+   Every colour is an ADR-016 token (there is no literal here).
    --------------------------------------------------------------------------- */
 
-.agent-rail {
-  display: flex;
-  flex-direction: column;
+.agent-console {
+  flex: 1;
   min-width: 0;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
-  background: var(--surface-base);
+  background: var(--surface-editor);
 }
 
-.agent-rail__bar {
-  height: var(--section-h);
+.agent-console__bar {
   flex: none;
+  height: var(--section-h);
   display: flex;
   align-items: center;
   gap: var(--gap-sm);
-  padding: 0 var(--gap-sm) 0 var(--gap-md);
+  padding: 0 var(--gap-md);
   border-bottom: 1px solid var(--border);
 }
 
-/* Collapsed the rail has no gutter beside it, so it draws its own hairline —
-   expanded, that line belongs to the splitter, which is the line you grab. */
-.agent-rail--collapsed {
-  border-left: 1px solid var(--border);
+/* Which agent, beside how it is doing: the same two-channel encoding the
+   sidebar rows and the terminal tabs use. */
+.agent-console__identity {
+  flex: none;
+  width: 3px;
+  height: 16px;
+  border-radius: 2px;
+  background: var(--accent);
 }
 
-.agent-rail--collapsed .agent-rail__bar {
-  /* The strip is the whole rail when it is folded, so the row that is normally
-     32px tall becomes the column that is 32px wide. */
-  flex: 1;
-  height: auto;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-start;
-  gap: var(--gap);
-  padding: var(--gap-md) 0;
-  border-bottom: none;
-}
-
-.agent-rail__label {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-sm);
-  padding: 2px 6px;
-  background: transparent;
-  color: var(--fg-dim);
-  font-weight: 600;
-}
-
-/* Reads top-to-bottom in the strip, which is the only way a word fits in 32px
-   without abbreviating it into something else. */
-.agent-rail--collapsed .agent-rail__label {
-  writing-mode: vertical-rl;
-  padding: 6px 2px;
-}
-
-.agent-rail__needs {
-  color: var(--warn-text);
-  font-variant-numeric: tabular-nums;
-}
-
-/* The count survives the fold; the sentence around it does not. */
-.agent-rail--collapsed .agent-rail__needs-word {
-  display: none;
-}
-
-.agent-rail__spacer {
-  flex: 1;
-}
-
-.agent-rail__chord {
-  font-size: var(--text-label);
+.agent-console__source,
+.agent-console__meta {
+  flex: none;
+  font-size: var(--text-meta);
   color: var(--fg-faint);
 }
 
-.agent-rail__body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  /* The rail never scrolls sideways as a whole (T232 §8): a long line wraps,
-     or scrolls inside the one container that owns it. */
-  overflow-x: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-sm);
-  padding: var(--gap-sm);
-}
-
-/* Following a session, the body stops scrolling as one column. The roster keeps
-   a bounded share of the height and the timeline takes the rest, so a feed that
-   grows all day cannot push the list that selects it out of reach. */
-.agent-rail__body--following {
-  overflow: hidden;
-}
-
-.agent-rail__error {
-  font-size: var(--text-control);
-}
-
-.agent-rail__note {
-  margin: 0;
-  font-size: var(--text-control);
-  line-height: 1.5;
-  color: var(--warn-text);
-}
-
-.agent-rail__empty,
-.agent-rail__placeholder {
-  margin: 0;
-  padding: var(--gap-sm);
-  font-size: var(--text-control);
-  line-height: 1.5;
-  color: var(--fg-muted);
-}
-
-.agent-rail__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-/* A row is a toggle, not a tab: it opens one session's timeline. */
-.agent-rail__row {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 2px;
-  padding: 6px var(--gap-sm);
-  border-radius: var(--radius-md);
-  background: transparent;
-  text-align: left;
-}
-
-.agent-rail__row:hover:not(:disabled) {
-  background: var(--ghost);
-}
-
-.agent-rail__row--selected,
-.agent-rail__row--selected:hover:not(:disabled) {
-  background: var(--accent-wash-strong);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
-}
-
-/* The roster is machine-wide: a session from another project is marked rather
-   than hidden, and marked by an edge rather than by dimming, which the ended
-   status already uses. */
-.agent-rail__row--away {
-  border-left: 2px solid var(--fg-gutter);
-  padding-left: calc(var(--gap-sm) - 2px);
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
-}
-
-/* Transcript text is untrusted and can be long: one line, clipped. */
-.agent-rail__task {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--fg);
-}
-
-.agent-rail__unknown {
-  color: var(--fg-faint);
-  font-style: italic;
-}
-
-.agent-rail__meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--gap-sm);
-  min-width: 0;
-  font-size: var(--text-control);
-  color: var(--fg-faint);
-}
-
-.agent-rail__root {
-  min-width: 0;
+.agent-console__root {
+  flex: none;
+  max-width: 32ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--font-mono);
   font-size: var(--text-meta);
-}
-
-.agent-rail__away {
-  padding: 0 5px;
-  border-radius: 999px;
-  background: var(--ghost);
-  font-size: var(--text-label);
-  letter-spacing: var(--tracking-label);
-  text-transform: uppercase;
   color: var(--fg-muted);
 }
 
-.agent-rail__tool {
+.agent-console__unknown {
+  font-size: var(--text-meta);
+  color: var(--fg-gutter);
+}
+
+/* The agent's own sentence, on its own line: it is untrusted text of unbounded
+   interest and it must not push the status off the end of the bar. */
+.agent-console__task {
+  flex: none;
+  margin: 0;
+  padding: var(--gap-sm) var(--gap-md);
+  font-size: var(--text-control);
+  color: var(--fg-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: var(--text-control);
-  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border);
 }
 
-.agent-rail__foot {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-sm);
+.agent-console__error {
+  flex: none;
+  padding: var(--gap-sm) var(--gap-md);
 }
 
-.agent-rail__pending {
-  font-size: var(--text-control);
-  color: var(--fg-faint);
+.agent-console__spacer {
+  flex: 1;
 }
 
-/* Where the badge beside it got its verdict (T221 §24). Quiet, because it is
-   the footnote to a status and not a status of its own — but present, because
-   a `BLOCKED` row with no provenance is a claim the user cannot check. */
-.agent-rail__source {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--text-label);
-  color: var(--fg-faint);
-}
-
-/* The selected session's feed, and the files it touched (T232). */
-.agent-rail__timeline {
+/* The feed and the files above it (T232), filling what is left of the pane. */
+.agent-console__timeline {
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: var(--gap-sm);
-  margin-top: var(--gap-sm);
-  padding-top: var(--gap-sm);
-  border-top: 1px solid var(--border);
+  padding: var(--gap-sm) var(--gap-md) var(--gap-md);
+  overflow: hidden;
 }
 
-.agent-rail__timeline-head {
+.agent-console__timeline-head {
+  flex: none;
   display: flex;
   align-items: center;
   gap: var(--gap-sm);
-  padding: 0 var(--gap-sm);
-}
-
-.agent-rail__timeline-title {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.agent-console__timeline-title {
+  font-size: var(--text-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
   font-weight: 600;
+  color: var(--fg-muted);
 }
 
-/* The two halves of a followed rail, declared after the rules they refine so
-   the cascade needs no specificity trick to reach them. */
-.agent-rail__body--following .agent-rail__list {
-  flex: 0 1 auto;
-  min-height: 0;
-  max-height: 40%;
-  overflow-y: auto;
-  overflow-x: hidden;
+.agent-console__note {
+  margin: 0;
+  font-size: var(--text-micro);
+  color: var(--warn-text);
 }
 
-.agent-rail__body--following .agent-rail__timeline {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: hidden;
+.agent-console__placeholder {
+  margin: 0;
+  font-size: var(--text-micro);
+  color: var(--fg-faint);
 }
 
 /* The files the session wrote (T232 §9). Above the feed rather than below it:
@@ -3454,10 +3265,11 @@ textarea:focus-visible {
   flex-direction: column;
   gap: 2px;
   min-width: 0;
-  padding: 3px var(--gap-sm) 3px calc(var(--gap-sm) + 3px);
+  padding: 4px var(--gap-sm) 5px calc(var(--gap-sm) + 3px);
   /* The kind of an entry is an edge down its left, so the feed can be read at a
      glance without relying on the colour of the text (the same reasoning as the
-     status marks: hue is never the only channel). */
+     status marks: hue is never the only channel). The label above it is toned
+     to match, so the two channels agree and neither is load-bearing alone. */
   border-left: 3px solid transparent;
 }
 
@@ -3475,6 +3287,14 @@ textarea:focus-visible {
   letter-spacing: var(--tracking-label);
   text-transform: uppercase;
   color: var(--fg-muted);
+}
+
+/* A tool's name, qualifying the label rather than filling the row. */
+.agent-feed__tool {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  color: var(--fg-dim);
 }
 
 .agent-feed__at {
@@ -3541,8 +3361,21 @@ textarea:focus-visible {
   overflow-wrap: anywhere;
 }
 
+/* The command: the row's subject, so it is set like one — bright, on the page
+   rather than in a well (artboard 12a sets the command in `--fg` and its output
+   below in a quieter grey). */
+.agent-feed__detail--input {
+  padding: 2px 0 2px 0;
+  background: none;
+  color: var(--fg);
+  max-height: 4.5rem;
+}
+
+/* What came back. Recessed and quieter than the command above it: it is
+   evidence, and it is usually the longest thing on the row. */
 .agent-feed__detail--result {
   border-left: 2px solid var(--border);
+  color: var(--fg-faint);
 }
 
 /* Subagent work: indented and quieter, marked rather than hidden (§4). */
@@ -3551,8 +3384,18 @@ textarea:focus-visible {
   opacity: 0.82;
 }
 
+/* What you asked. The one row a long feed is skimmed *for*, so it is the one
+   row with a fill behind it — and the space above it is what turns a flat list
+   into turns you can count. */
 .agent-feed__row--prompt {
   border-left-color: var(--accent);
+  background: var(--accent-wash);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  margin-top: var(--gap-sm);
+}
+
+.agent-feed__row--prompt .agent-feed__label {
+  color: var(--accent-text);
 }
 
 .agent-feed__row--prompt .agent-feed__text {
@@ -3563,24 +3406,71 @@ textarea:focus-visible {
   border-left-color: var(--fg-gutter);
 }
 
+/* Prose, and the only prose in the feed: a step larger and looser than the
+   machine lines around it, which is what lets the eye settle on it. */
+.agent-feed__row--assistant .agent-feed__text {
+  font-size: var(--text-code);
+  line-height: 1.6;
+}
+
+/* Reasoning, not conclusions. Subordinate on three channels at once — dimmer,
+   italic, and a dashed edge where an answer has a solid one — because it is the
+   thing most often skipped and it must be skippable. */
+.agent-feed__row--thinking {
+  border-left-color: var(--fg-gutter);
+  border-left-style: dashed;
+}
+
+.agent-feed__row--thinking .agent-feed__label {
+  color: var(--fg-faint);
+}
+
 .agent-feed__row--thinking .agent-feed__text {
   color: var(--fg-faint);
   font-style: italic;
 }
 
-.agent-feed__row--tool .agent-feed__text,
+/* A tool row no longer draws a `__text` — its name sits in the head — so it is
+   not in this list any more. */
 .agent-feed__row--file .agent-feed__text,
 .agent-feed__row--result .agent-feed__text {
   font-family: var(--font-mono);
   font-size: var(--text-meta);
 }
 
-.agent-feed__row--tool {
-  border-left-color: var(--accent-fill);
+/* `--accent-fill` was almost the surface colour, so every call read as an
+   unmarked row. The edge now says how the call went, which is the thing worth
+   finding when a feed is skimmed. */
+.agent-feed__row--tool.agent-feed__row--running {
+  border-left-color: var(--accent);
+}
+
+.agent-feed__row--tool.agent-feed__row--ok {
+  border-left-color: var(--ok);
+}
+
+.agent-feed__row--tool.agent-feed__row--fail {
+  border-left-color: var(--error);
+}
+
+.agent-feed__row--tool .agent-feed__label {
+  color: var(--fg-faint);
+}
+
+/* A failed call is worth finding from across the feed, so it gets the fill the
+   prompt and the permission row get. Success does not: most calls succeed, and
+   a feed where every row is tinted has no emphasis left to spend. */
+.agent-feed__row--tool.agent-feed__row--fail {
+  background: var(--error-wash);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
 
 .agent-feed__row--file {
   border-left-color: var(--ok);
+}
+
+.agent-feed__row--file .agent-feed__label {
+  color: var(--ok-text);
 }
 
 .agent-feed__row--notice {
@@ -3710,32 +3600,6 @@ textarea:focus-visible {
   border-radius: 2px;
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--fg-muted);
-}
-
-/* Stacked, there is no width to take from the editor: the rail stops being a
-   column and becomes the last row, the way the sidebar becomes the first. */
-@media (max-width: 60rem) {
-  .agent-rail,
-  .agent-rail--collapsed {
-    border-left: none;
-    border-top: 1px solid var(--border);
-  }
-
-  .agent-rail--collapsed .agent-rail__bar {
-    height: var(--section-h);
-    flex-direction: row;
-    justify-content: flex-start;
-    padding: 0 var(--gap-md);
-  }
-
-  .agent-rail--collapsed .agent-rail__label {
-    writing-mode: horizontal-tb;
-    padding: 2px 6px;
-  }
-
-  .agent-rail--collapsed .agent-rail__needs-word {
-    display: inline;
-  }
 }
 
 /* The queue takes the whole body: one column of items, one of detail. */
@@ -4457,4 +4321,341 @@ textarea:focus-visible {
 
 .island__card--permission {
   border-left-color: var(--warn);
+}
+
+/* ---------------------------------------------------------------------------
+   The Agents section (T233-S, design artboard 12a; collapse from 11b)
+
+   Pinned above the file tree, in the sidebar's own 300px column. Every colour
+   is an ADR-016 token — there is no literal here — and the status marks are
+   the rail's, reached through the shared `.agent-status--*` classes so a tone
+   cannot mean one thing in the sidebar and another in the rail.
+   --------------------------------------------------------------------------- */
+
+.agents-section {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+  /* Bounded, so a busy machine cannot push the tree off the column. Past this
+     the list scrolls inside its own share the way the dev panels do. */
+  max-height: 45%;
+  min-height: var(--section-h);
+}
+
+.agents-section__bar {
+  height: var(--section-h);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 0 var(--gap-md) 0 var(--gap-sm);
+}
+
+.agents-section__label {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 3px 6px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--text-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.agents-section__label:hover {
+  background: var(--ghost);
+  color: var(--fg);
+}
+
+.agents-section__caret {
+  font-size: 9px;
+  color: var(--fg-faint);
+  /* Its own box, so the label does not shift by a pixel when the glyph swaps. */
+  width: 9px;
+  flex: none;
+}
+
+.agents-section__count {
+  font-size: var(--text-meta);
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--fg-muted);
+}
+
+.agents-section__spacer {
+  flex: 1;
+}
+
+/* Collapsed, the section still reports: one mark per agent, and the count of
+   those waiting. A surface that goes quiet when folded is worse than one that
+   takes the space (artboard 11b). */
+.agents-section__dots {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  flex: none;
+}
+
+.agents-section__dot {
+  /* The shared class draws the mark; the label beside it is not wanted here. */
+  gap: 0;
+}
+
+.agents-section__needs {
+  flex: none;
+  font-size: var(--text-meta);
+  color: var(--warn-text);
+}
+
+.agents-section__bar button.btn--bare {
+  padding: 3px 6px;
+  font-size: var(--text-meta);
+}
+
+.agents-section__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 var(--gap-xs) var(--gap-sm);
+}
+
+.agents-section__empty {
+  margin: 0;
+  padding: 2px var(--gap-sm) var(--gap-sm);
+  font-size: var(--text-micro);
+  color: var(--fg-faint);
+}
+
+.agents-section__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agents-section__row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  border-radius: var(--radius-sm);
+  padding-right: var(--gap-sm);
+}
+
+.agents-section__row:hover {
+  background: var(--ghost);
+}
+
+.agents-section__row--selected {
+  background: var(--accent-wash-strong);
+}
+
+.agents-section__pick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 5px var(--gap-sm);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+
+/* A run Gritty owns has no console to open yet, so its row is not a button.
+   It keeps the same box so the two kinds of row line up. */
+.agents-section__pick--static {
+  cursor: default;
+}
+
+/* Identity, not status: which agent this is. The status mark beside it says
+   how it is doing, and the pair is the same two-channel encoding the terminal
+   tabs use. Owned runs take the accent; observed sessions stay neutral, which
+   is the boundary made visible. */
+.agents-section__identity {
+  flex: none;
+  width: 3px;
+  align-self: stretch;
+  min-height: 26px;
+  border-radius: 2px;
+  background: var(--fg-gutter);
+}
+
+.agents-section__row--owned .agents-section__identity {
+  background: var(--accent);
+}
+
+.agents-section__status {
+  flex: none;
+}
+
+.agents-section__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.agents-section__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  min-width: 0;
+}
+
+.agents-section__id {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-control);
+  color: var(--fg);
+}
+
+/* Agent output is untrusted text: it wraps to nothing and never widens the
+   sidebar (the rail makes the same promise about the same strings). */
+.agents-section__title,
+.agents-section__detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agents-section__title {
+  font-size: var(--text-micro);
+  color: var(--fg-muted);
+}
+
+.agents-section__detail {
+  font-size: var(--text-meta);
+  color: var(--fg-faint);
+}
+
+.agents-section__badge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-meta);
+}
+
+.agents-section__badge--attention {
+  background: var(--warn);
+  color: var(--surface-chrome);
+  font-weight: 600;
+}
+
+.agents-section__badge--quiet {
+  background: var(--ghost);
+  color: var(--fg-muted);
+}
+
+/* Shown on hover or focus rather than always: cancelling is destructive, and a
+   button that is always under the pointer is one that gets hit by accident. */
+.agents-section__cancel {
+  flex: none;
+  padding: 2px 6px;
+  font-size: var(--text-meta);
+  visibility: hidden;
+}
+
+.agents-section__row:hover .agents-section__cancel,
+.agents-section__cancel:focus-visible {
+  visibility: visible;
+}
+
+/* The run tone `AgentStatusTone` has no member for, because a session cannot
+   fail and a run can (T233-M). A cross: the one mark here that is not a solid
+   body, so a failure reads as a failure without relying on the colour. */
+.agent-status--failed {
+  color: var(--error-text);
+}
+
+.agent-status--failed .agent-status__mark {
+  background: transparent;
+  border-radius: 0;
+  box-shadow:
+    inset 0 0 0 1px var(--error),
+    0 0 0 1px transparent;
+  transform: rotate(45deg);
+  width: 7px;
+  height: 7px;
+}
+
+/* Artboard 9a's section tab, in place of T048's EXPLORER label. Still a
+   heading: there is no second tab to switch to until T100-U has git status to
+   put in one, and a lone tab that cannot be left is not a tab. */
+.explorer__toolbar h2.explorer__tab {
+  padding: 4px var(--gap-sm);
+  border-radius: var(--radius-sm);
+  background: var(--surface-active);
+  color: var(--fg);
+}
+
+/* The three things the section inherited when the rail was deleted (T233-C):
+   a place for the roster's refusal, the note that explains why every row would
+   read as Ended, and the reveal for the rows kept out of the default view. */
+
+.agents-section__error {
+  padding: 0 var(--gap-sm) var(--gap-sm);
+}
+
+.agents-section__note {
+  margin: 0;
+  padding: 2px var(--gap-sm) var(--gap-sm);
+  font-size: var(--text-micro);
+  color: var(--warn-text);
+}
+
+.agents-section__more {
+  width: 100%;
+  padding: 4px var(--gap-sm);
+  text-align: left;
+  font-size: var(--text-meta);
+  color: var(--fg-faint);
+}
+
+.agents-section__more:hover {
+  color: var(--fg-muted);
+}
+
+/* Machine-wide, so a row from another workspace says so in words as well as by
+   the quieter edge the class draws down its left. */
+.agents-section__row--elsewhere .agents-section__identity {
+  background: var(--fg-gutter);
+  opacity: 0.6;
+}
+
+.agents-section__away {
+  flex: none;
+  font-size: var(--text-meta);
+  color: var(--fg-faint);
+}
+
+/* An agent console in the document tab strip (T233-C, ADR-026). Grouped after
+   the files and marked with the status shape, so one strip still reads as two
+   kinds of thing at a glance — the legible half of T231's objection, kept. */
+.tabs__item--agent {
+  border-left: 1px solid var(--border);
+}
+
+.tabs__agent-mark {
+  flex: none;
+  /* Where a document tab's unsaved dot sits, so the two kinds line up. */
+  margin-right: 2px;
+}
+
+/* The agent a console is showing, in the status bar (T233-C). The document
+   half of the bar is what disappears, not the bar — T049's rule, unchanged. */
+.statusbar__agent {
+  font-family: var(--font-mono);
+  color: var(--fg-dim);
 }

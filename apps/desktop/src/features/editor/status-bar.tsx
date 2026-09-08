@@ -23,6 +23,7 @@ export function StatusBar({
   documents,
   onClose,
   permissionsWaiting,
+  agentConsole,
 }: {
   health: HealthState;
   workspace: Workspace | null;
@@ -40,6 +41,16 @@ export function StatusBar({
    * the queue says what.
    */
   permissionsWaiting: number;
+  /**
+   * The agent console showing instead of a document, if one is (T233-C).
+   *
+   * `tab` is deliberately still the last active *document* — that is what
+   * session restore persists — so without this the bar would describe a file
+   * the user is not looking at. A name and a status, and no more: the
+   * `permissionsWaiting` counter above already says when an agent needs you,
+   * and saying it twice in one bar would be worse than saying it once.
+   */
+  agentConsole?: { readonly label: string; readonly status: string } | null;
 }) {
   const [cursor, setCursor] = useState<CursorPosition | null>(null);
   useEffect(() => subscribeCursor(setCursor), [subscribeCursor]);
@@ -56,7 +67,13 @@ export function StatusBar({
             : `${permissionsWaiting} permissions waiting`}
         </span>
       )}
-      {tab ? (
+      {agentConsole ? (
+        <>
+          <span className="statusbar__spacer" />
+          <span className="statusbar__agent">{agentConsole.label}</span>
+          <span>{agentConsole.status}</span>
+        </>
+      ) : tab ? (
         <DocumentFacts
           tab={tab}
           eol={eol}

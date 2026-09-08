@@ -1,17 +1,18 @@
 import { AgentIntegrationSettings } from './agent-integration-settings';
-import { AGENT_RAIL_CHORD_HINT } from './agent-rail-chords';
 import { AgentStatusBadge } from './agent-status-badge';
 import { mostUrgent, runningCount, taskLine } from './agents-reducer';
+import { AGENTS_SECTION_CHORD_HINT } from './agents-section-chords';
 import type { AgentsController } from './use-agents';
 
 /**
  * The agent roster inside the island — reduced to a count and one row (T231 §7).
  *
- * The rail is the primary surface now. The island keeps the summary because it
- * is always on screen, and keeps the single row worth interrupting for so the
- * user does not have to open the rail to learn there is nothing to do. It does
- * *not* keep a roster of its own: it reads the same `AgentsController` the rail
- * does, so the two cannot report different counts.
+ * The sidebar's Agents section is the primary surface now (T233-C). The island
+ * keeps the summary because it is always on screen and it is *machine-wide*,
+ * where the sidebar is scoped to the open workspace — and it keeps the single
+ * row worth interrupting for, so the user does not have to look down to learn
+ * there is nothing to do. It does *not* keep a roster of its own: it reads the
+ * same `AgentsController`, so the two cannot report different counts.
  *
  * Still deliberately read-only. Every session here is one another terminal
  * owns; nothing in Gritty starts, stops or answers one.
@@ -26,10 +27,11 @@ export function AgentsSection({ controller }: { controller: AgentsController }) 
       <div className="agents__head">
         <span className="agents__title">Agents</span>
         <span className="island__spacer" />
-        {/* Where the rest of them are. No control, just the way in — the rail
-            is a read, and so is this. */}
+        {/* Where the rest of them are. No control, just the way in — the
+            sidebar section is a read, and so is this. */}
         <span className="agents__hint">
-          The rail lists them all <kbd className="island__chord">{AGENT_RAIL_CHORD_HINT}</kbd>
+          The sidebar lists them all{' '}
+          <kbd className="island__chord">{AGENTS_SECTION_CHORD_HINT}</kbd>
         </span>
         {/* The hook integration (T221) lives here, in settings, and not as a
             control on a session row: it changes a file the user owns, and that
@@ -38,11 +40,11 @@ export function AgentsSection({ controller }: { controller: AgentsController }) 
         <AgentIntegrationSettings />
       </div>
 
-      {/* The envelope itself belongs to the rail, which is where the rescan
-          is; saying nothing here would leave the island claiming to still be
-          looking when the scan already failed. */}
+      {/* The envelope itself belongs to the sidebar section, which is where
+          the rescan is; saying nothing here would leave the island claiming to
+          still be looking when the scan already failed. */}
       {controller.error && !loaded ? (
-        <p className="island__empty">The agent roster could not be read. The rail says why.</p>
+        <p className="island__empty">The agent roster could not be read. The sidebar says why.</p>
       ) : !loaded ? (
         <p className="island__empty">Looking for agent sessions…</p>
       ) : roster.sessions.length === 0 ? (

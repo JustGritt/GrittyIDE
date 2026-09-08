@@ -1,15 +1,17 @@
 import { type SessionTab, toCoreError } from '@gritty/protocol';
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Splitter } from './components/splitter';
 import { boundsWithin } from './components/splitter-geometry';
 import { core } from './core/client';
-import { AgentRail } from './features/agents/agent-rail';
+import { agentStatus } from './features/agents/agent-status';
+import { SidebarAgents } from './features/agents/agents-section';
 import {
   askingSessions,
   isPermissionQueueChord,
   PermissionBanner,
 } from './features/agents/permission-banner';
-import { useAgentRail } from './features/agents/use-agent-rail';
+import { rosterRows } from './features/agents/roster-model';
+import { useAgentConsole } from './features/agents/use-agent-console';
 import { useAgents } from './features/agents/use-agents';
 import { activeTab } from './features/documents/documents-reducer';
 import { useDocuments } from './features/documents/use-documents';
@@ -28,6 +30,7 @@ import { useLastSession } from './features/launcher/use-last-session';
 import { viewModesReducer } from './features/markdown/view-modes';
 import { OperationsPanel } from './features/operations/operations-panel';
 import { RunsPanel } from './features/runs/runs-panel';
+import { useRuns } from './features/runs/use-runs';
 import { DEFAULT_LAYOUT, type Layout, PANE_LIMITS } from './features/session/persisted-layout';
 import { SessionNotices } from './features/session/session-notices';
 import { useSession } from './features/session/use-session';
@@ -90,24 +93,47 @@ export function App() {
   // answering a question in either clears it in the other.
   const workstreams = useWorkstreams(workspace);
   // Machine-wide, so it takes no workspace and outlives changes of one. One
-  // controller for both surfaces that read it (T231): the rail is the primary
-  // one and the island keeps a count, and two rosters would drift apart.
+  // controller for every surface that reads it: the sidebar section, the
+  // island's count and the console, and three rosters would drift apart.
   const agents = useAgents();
-  const rail = useAgentRail({
+  // Runs Gritty owns, scoped to the open workspace — the other half of the
+  // sidebar's Agents section. `agents` is machine-wide and observed; these are
+  // started here and cancellable, and `docs/architecture/agent-runs.md` keeps
+  // the two apart everywhere but the row model that draws them side by side.
+  const runs = useRuns(workspace);
+  // The agent consoles open as editor tabs (T233-C, ADR-026), and the one
+  // follower they share between them. Nothing here is persisted: a session id
+  // is rediscovered each launch, which is both why restoring a console would
+  // be wrong and why none of this needs the migration T231 priced it on.
+  const agentConsole = useAgentConsole({
     agents,
-    open: layout.agentRail.open,
-    onOpenChange: useCallback(
-      (open: boolean) =>
-        setLayout((current) => ({ ...current, agentRail: { ...current.agentRail, open } })),
-      [],
-    ),
-    // How a file the agent touched reaches the editor (T232). The rail is given
-    // the document store rather than its own way in, so opening from the
+    // How a file the agent touched reaches the editor (T232). The console is
+    // given the document store rather than its own way in, so opening from the
     // timeline is the same `documents.status` / `documents.open` pair the
     // explorer and the launcher already use.
     documents,
     workspaceId: workspace?.id ?? null,
   });
+  // One list for the sidebar's Agents section: the runs Gritty owns and the
+  // sessions it merely observes, projected onto a common row and ordered
+  // needs-you first. Sessions are filtered to this workspace inside the model;
+  // the island above stays machine-wide, which is the split that lets both
+  // exist without being two rosters of the same thing.
+  // What the status bar says while a console is showing. Resolved here because
+  // `App` already holds the roster; `null` whenever a document has the pane.
+  const consoleFacts = useMemo(() => {
+    if (agentConsole.activeId === null) return null;
+    const session = agents.roster.sessions.find((item) => item.id === agentConsole.activeId);
+    if (!session) return null;
+    return {
+      label: session.rootName ?? session.id.slice(0, 7),
+      status: agentStatus(session.activity).label,
+    };
+  }, [agentConsole.activeId, agents.roster.sessions]);
+  const agentRows = useMemo(
+    () => rosterRows(runs.runs, agents.roster, workstreams.workstreams),
+    [runs.runs, agents.roster, workstreams.workstreams],
+  );
   // What the previous window had open, for the launcher's resume rail (T051).
   // Asked for whenever no workspace is open, which is exactly when the
   // launcher is on screen — including after the user closes one mid-run.
@@ -125,7 +151,7 @@ export function App() {
 
   // ⌥⌘A opens the queue on its permissions (artboard 12b). A fourth hand-gated
   // listener, because there is still no shortcut registry — the same apology
-  // `agent-rail.tsx`, `island.tsx` and `terminal-panel.tsx` each make. It does
+  // `agents-section.tsx`, `island.tsx` and `terminal-panel.tsx` each make. It does
   // not collide with the island's ⌥A: every existing matcher rejects `metaKey`.
   useEffect(() => {
     if (!workspace) return;
@@ -227,20 +253,6 @@ export function App() {
       ),
     [],
   );
-  // The editor's minimum is measured against the sidebar as well, because on
-  // this axis the rail is the third pane rather than the second: what is left
-  // for the rail is the window minus the sidebar minus the editor.
-  const sidebarWidth = layout.panes.sidebarWidth;
-  const agentRailBounds = useCallback(
-    (root: HTMLElement) =>
-      boundsWithin(
-        root.clientWidth - sidebarWidth,
-        PANE_LIMITS.agentRail.min,
-        EDITOR_MIN_WIDTH,
-        PANE_LIMITS.agentRail.max,
-      ),
-    [sidebarWidth],
-  );
 
   return (
     <main
@@ -250,7 +262,6 @@ export function App() {
         {
           '--sidebar-width': `${layout.panes.sidebarWidth}px`,
           '--terminal-height': `${layout.panes.terminalHeight}px`,
-          '--agent-rail-width': `${layout.panes.agentRailWidth}px`,
         } as React.CSSProperties
       }
     >
@@ -300,8 +311,40 @@ export function App() {
           />
         </div>
       ) : workspace ? (
-        <div className={`shell__body shell__body--rail${rail.open ? '' : '-collapsed'}`}>
+        <div className="shell__body">
           <aside className="shell__sidebar">
+            {/* Above the tree, and pinned there (artboard 12a): an agent that
+                stopped to ask you something must not be one tab away. */}
+            <SidebarAgents
+              rows={agentRows}
+              needsYou={agents.roster.needsYou}
+              loaded={agents.loaded}
+              processEvidence={agents.roster.processEvidence}
+              error={agents.error}
+              onDismissError={agents.clearError}
+              open={layout.agents.open}
+              onOpenChange={(open) => setLayout((current) => ({ ...current, agents: { open } }))}
+              // A row opens its console as an editor tab, exactly as a file
+              // opens as one: a single click is a preview the next click
+              // replaces, a double click keeps it (T041's rule, not a second).
+              selectedKey={
+                agentConsole.activeId === null ? null : `session:${agentConsole.activeId}`
+              }
+              onSelect={(row) => {
+                if (row.sessionId === null) return;
+                agentConsole.show(row.sessionId);
+              }}
+              onKeep={(row) => {
+                if (row.sessionId === null) return;
+                agentConsole.keep(row.sessionId);
+              }}
+              onCancel={(runId) => void runs.cancel(runId)}
+              onRescan={() => void agents.refresh()}
+              busy={agents.busy}
+              // The island's ⌥ chords win while it is open — there is no
+              // shortcut registry to arbitrate for them.
+              chords={!islandOpen}
+            />
             <ExplorerPanel
               explorer={explorer}
               onOpenFile={(workspaceId, path, preview) =>
@@ -336,35 +379,9 @@ export function App() {
             session={session}
             onRequestClose={closeFlow.request}
             onRequestCloseMany={closeFlow.requestMany}
+            agents={agents}
+            console={agentConsole}
           />
-          {/* Only while the rail is open, for the dock's reason: resizing a
-              collapsed pane means nothing and an invisible tab stop is worse
-              than no gutter. */}
-          {rail.open && (
-            <Splitter
-              orientation="vertical"
-              label="Resize the agent rail"
-              value={layout.panes.agentRailWidth}
-              fallback={PANE_LIMITS.agentRail.default}
-              // The rail is anchored to the right, so it grows as the pointer
-              // moves left — against the axis, like the dock.
-              direction={-1}
-              target={shell}
-              property="--agent-rail-width"
-              bounds={agentRailBounds}
-              onCommit={(agentRailWidth) =>
-                setLayout((current) => ({
-                  ...current,
-                  panes: { ...current.panes, agentRailWidth },
-                }))
-              }
-            />
-          )}
-          {/* The third region (T231): what the machine's agents are doing,
-              beside your code rather than instead of it. The island's ⌥ chords
-              win while it is open — there is no shortcut registry to arbitrate
-              for them. */}
-          <AgentRail agents={agents} rail={rail} chords={!islandOpen} />
         </div>
       ) : session.state.phase === 'ready' ? (
         <Launcher
@@ -442,6 +459,9 @@ export function App() {
         documents={documents}
         onClose={closeFlow.request}
         permissionsWaiting={askingSessions(agents.roster.sessions).length}
+        // While a console has the pane, the bar describes the agent rather
+        // than the document that is still the active one underneath it.
+        agentConsole={consoleFacts}
       />
       {closeFlow.tab && (
         <CloseDialog

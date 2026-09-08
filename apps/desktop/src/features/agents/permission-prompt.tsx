@@ -58,7 +58,7 @@ export function PermissionPrompt({
 
   // The card owns these keys while it is on screen, and only while it is. They
   // are gated by hand because there is no central shortcut registry — the same
-  // apology `agent-rail.tsx` makes, and the same shape.
+  // apology `agents-section.tsx` makes, and the same shape.
   useEffect(() => {
     if (busy) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -147,7 +147,7 @@ export function PermissionPrompt({
         >
           Deny <kbd>{PERMISSION_CHORD_HINT.DENY}</kbd>
         </button>
-        <span className="agent-rail__spacer" />
+        <span className="agent-console__spacer" />
         {onReveal && (
           <button type="button" className="btn--bare permission__aside-action" onClick={onReveal}>
             Answer in its terminal

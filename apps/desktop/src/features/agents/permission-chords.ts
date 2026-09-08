@@ -5,7 +5,7 @@ import type { AgentPermissionVerdict } from '@gritty/protocol';
  * `⌘⏎` allows for the run, `esc` denies.
  *
  * Matched on `event.code`, never `event.key`, for the reason
- * `agent-rail-chords.ts` and `terminal-chords.ts` both give: on macOS a
+ * `agents-section-chords.ts` and `terminal-chords.ts` both give: on macOS a
  * modifier composes, so `key` is whatever character came out the other side.
  * `code` is the physical key and is what a chord is actually about.
  *
