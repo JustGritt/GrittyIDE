@@ -1,8 +1,8 @@
-//! Git baseline (T100): `git.status` and `git.diff` against the open
-//! workspace's root, as domain objects.
+//! Git reads (T100, extended by T101-C): `git.status`, `git.diff`, `git.log`
+//! and `git.show` against the open workspace's root, as domain objects.
 //!
 //! The repository work lives in `gritty-git`; this module owns identity, the
-//! error envelope and the decision to run a read as an operation. Both
+//! error envelope and the decision to run a read as an operation. All four
 //! commands follow `workspace.list`'s shape exactly
 //! (`crate::workspace::WorkspaceManager::list`): resolve the [`WorkspaceId`],
 //! run the read on the blocking pool, wait up to [`DEFAULT_GIT_BUDGET`], and
@@ -23,6 +23,14 @@
 //! a repository reports `NotARepository`, which is a follow-up (T100's report),
 //! not a silent behaviour.
 //!
+//! ## Nothing here writes
+//!
+//! Four reads, and no fifth command that stages, commits or discards. That is
+//! not an omission: a write needs the `git` binary rather than `gix`, because
+//! `open.rs` deliberately loads no clean filter and a filterless *write* would
+//! put un-cleaned content in the index. ADR-029 is that decision, and an ADR is
+//! not an agent's to make.
+//!
 //! ## What this module is not
 //!
 //! It is not a `ChangeSet` and knows nothing about workstreams. `ChangeSet`
@@ -39,7 +47,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use gritty_git::{
-    DiffOptions, GitError, MAX_PAGE_SIZE, PageOptions, Repository, StatusOptions, open,
+    DiffOptions, GitError, LogOptions, MAX_PAGE_SIZE, PageOptions, Repository, ShowOptions,
+    StatusOptions, open,
 };
 use gritty_workspace::WorkspaceRoot;
 use tokio::runtime::Handle;
@@ -51,17 +60,32 @@ use crate::protocol::error::{CoreError, CoreErrorCode};
 use crate::protocol::ids::CorrelationId;
 use crate::workspace::WorkspaceManager;
 
-use wire::{GitDiffRequest, GitDiffResponse, GitStatusRequest, GitStatusResponse};
+use wire::{
+    GitDiffRequest, GitDiffResponse, GitLogRequest, GitLogResponse, GitShowRequest,
+    GitShowResponse, GitStatusRequest, GitStatusResponse,
+};
 
 /// Operation kind of a status that outlived its budget.
 pub const STATUS_KIND: &str = "git.status";
 /// Operation kind of a diff that outlived its budget.
 pub const DIFF_KIND: &str = "git.diff";
+/// Operation kind of a log walk that outlived its budget.
+pub const LOG_KIND: &str = "git.log";
+/// Operation kind of a blob read that outlived its budget.
+pub const SHOW_KIND: &str = "git.show";
 
-/// How long either command waits before handing the read over to an operation.
+/// How long a read waits before handing over to an operation.
 /// The same 100 ms `workspace.list` uses: long enough that an ordinary
 /// repository answers inline, short enough that a slow one never looks frozen.
 pub const DEFAULT_GIT_BUDGET: Duration = Duration::from_millis(100);
+
+/// Default commits per page for `git.log`.
+///
+/// Small, because a history list is read a screen at a time and the next page
+/// costs one more call. The walk is also the one read here whose total cost is
+/// unbounded by the repository's *current* state — it is bounded by its whole
+/// history — so a modest default matters more than it does for a status.
+pub const DEFAULT_LOG_PAGE_SIZE: u32 = 50;
 
 /// Default files per page for `git.diff`.
 ///
@@ -242,6 +266,139 @@ impl GitService {
         }
     }
 
+    /// `git.log`. See the module documentation for the budget hand-over.
+    pub async fn log(
+        self: &Arc<Self>,
+        request: GitLogRequest,
+        actor: Actor,
+        correlation: CorrelationId,
+        budget: Duration,
+    ) -> Result<GitLogResponse, CoreError> {
+        let (workspace, root) = self
+            .workspaces
+            .require(&request.workspace_id, &correlation)?;
+        let page = page_options(request.cursor, request.page_size, DEFAULT_LOG_PAGE_SIZE)?;
+        let Some(repository) = self.open_root(&root).await? else {
+            return Ok(GitLogResponse::NotARepository);
+        };
+        let options = LogOptions {
+            page,
+            start: request.start.clone(),
+            path: request.path.clone(),
+        };
+
+        let interrupt = Arc::new(AtomicBool::new(false));
+        #[cfg(test)]
+        let delay = self.delay();
+        let mut job = {
+            let interrupt = Arc::clone(&interrupt);
+            self.handle.spawn_blocking(move || {
+                #[cfg(test)]
+                std::thread::sleep(delay);
+                gritty_git::log(&repository, &options, &interrupt)
+            })
+        };
+        match tokio::time::timeout(budget, &mut job).await {
+            Ok(joined) => Ok(GitLogResponse::Ready {
+                page: Box::new(finish(joined, "git log")?),
+            }),
+            Err(_elapsed) => {
+                tracing::debug!(
+                    workspace = %workspace.id,
+                    budget_ms = budget.as_millis() as u64,
+                    "git log exceeded its budget; continuing as an operation"
+                );
+                let spec = OperationSpec {
+                    kind: OperationKind::new(LOG_KIND),
+                    actor,
+                    workspace_id: Some(workspace.id),
+                    correlation_id: correlation,
+                    durable: false,
+                };
+                let operation = self.registry.start(spec, move |ctx| async move {
+                    let _stop = InterruptOnDrop(interrupt);
+                    tokio::select! {
+                        biased;
+                        () = ctx.cancelled() => Err(CoreError::cancelled("git log cancelled")),
+                        joined = &mut job => {
+                            let page = finish(joined, "git log")?;
+                            Ok(Some(serde_json::to_value(page)?))
+                        }
+                    }
+                });
+                Ok(GitLogResponse::Pending {
+                    operation: Box::new(operation),
+                })
+            }
+        }
+    }
+
+    /// `git.show`. See the module documentation for the budget hand-over.
+    pub async fn show(
+        self: &Arc<Self>,
+        request: GitShowRequest,
+        actor: Actor,
+        correlation: CorrelationId,
+        budget: Duration,
+    ) -> Result<GitShowResponse, CoreError> {
+        let (workspace, root) = self
+            .workspaces
+            .require(&request.workspace_id, &correlation)?;
+        let Some(repository) = self.open_root(&root).await? else {
+            return Ok(GitShowResponse::NotARepository);
+        };
+        let options = ShowOptions {
+            path: request.path.clone(),
+            revision: request.revision.clone(),
+            max_bytes: None,
+        };
+
+        let interrupt = Arc::new(AtomicBool::new(false));
+        #[cfg(test)]
+        let delay = self.delay();
+        let mut job = {
+            let interrupt = Arc::clone(&interrupt);
+            self.handle.spawn_blocking(move || {
+                #[cfg(test)]
+                std::thread::sleep(delay);
+                gritty_git::show(&repository, &options, &interrupt)
+            })
+        };
+        match tokio::time::timeout(budget, &mut job).await {
+            Ok(joined) => Ok(GitShowResponse::Ready {
+                blob: Box::new(finish(joined, "git show")?),
+            }),
+            Err(_elapsed) => {
+                tracing::debug!(
+                    workspace = %workspace.id,
+                    budget_ms = budget.as_millis() as u64,
+                    "git show exceeded its budget; continuing as an operation"
+                );
+                let spec = OperationSpec {
+                    kind: OperationKind::new(SHOW_KIND),
+                    actor,
+                    workspace_id: Some(workspace.id),
+                    correlation_id: correlation,
+                    durable: false,
+                };
+                let operation = self.registry.start(spec, move |ctx| async move {
+                    let _stop = InterruptOnDrop(interrupt);
+                    tokio::select! {
+                        biased;
+                        () = ctx.cancelled() => Err(CoreError::cancelled("git show cancelled")),
+                        joined = &mut job => {
+                            let blob = finish(joined, "git show")?;
+                            Ok(Some(serde_json::to_value(blob)?))
+                        }
+                    }
+                });
+                Ok(GitShowResponse::Pending {
+                    operation: Box::new(operation),
+                })
+            }
+        }
+    }
+
     /// Open the workspace root, or `Ok(None)` when it is not a repository.
     ///
     /// Runs on the blocking pool because it reads `.git/config` and the ref
@@ -313,6 +470,12 @@ impl From<GitError> for CoreError {
             ),
             GitError::NotATree { ref spec } => {
                 Self::invalid_input("target", format!("{spec} does not name a commit or a tree"))
+            }
+            // `NotFound` rather than `InvalidInput`: the request was well
+            // formed and the repository simply does not have that path at that
+            // revision, which is usually the true and interesting answer.
+            GitError::NotFoundAtRevision { ref path, ref spec } => {
+                Self::not_found(format!("{path} does not exist at {spec}"))
             }
             GitError::Cancelled => Self::cancelled("git read cancelled"),
             // A corrupt object, an unreadable pack or a stale lock held by

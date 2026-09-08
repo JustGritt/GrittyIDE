@@ -2364,6 +2364,149 @@ fn git_commands_validate_before_they_read() {
     assert_eq!(bad_page["code"], "InvalidInput");
 }
 
+/// The two reads T101-C added, over the real IPC: a page of history, and the
+/// content of a file at a revision.
+///
+/// What this proves that the crate tests cannot is the serialization — a
+/// `CommitPage` and a `BlobContent` surviving the trip into the WebView's JSON
+/// with their camelCase field names intact.
+#[test]
+fn git_log_and_show_read_history_through_the_adapters() {
+    let repo = gritty_git::fixtures::history();
+    let harness = Harness::new();
+    let workspace = harness.open_workspace(repo.path());
+    let workspace_id = workspace["id"].clone();
+
+    let log = harness
+        .session(
+            "git_log",
+            json!({ "workspaceId": workspace_id, "pageSize": 2 }),
+        )
+        .expect("walk the history");
+    assert_eq!(log["status"], "ready");
+    let page = &log["page"];
+    let commits = page["commits"].as_array().expect("commits");
+    assert_eq!(commits.len(), 2);
+    assert_eq!(
+        commits[0]["subject"],
+        "fourth: change main and add a binary"
+    );
+    // The page is truncated, so it carries a cursor, and the cursor is the last
+    // id on it — the boundary a second call continues from.
+    assert_eq!(page["truncated"], true);
+    assert_eq!(page["cursor"], commits[1]["id"]);
+    assert!(commits[0]["author"]["name"].is_string());
+    assert!(commits[0]["shortId"].is_string());
+
+    let next = harness
+        .session(
+            "git_log",
+            json!({
+                "workspaceId": workspace_id,
+                "pageSize": 2,
+                "cursor": page["cursor"].clone(),
+            }),
+        )
+        .expect("continue the walk");
+    let rest = next["page"]["commits"].as_array().expect("commits");
+    assert_eq!(rest.len(), 2);
+    assert_eq!(rest[1]["subject"], "first");
+
+    let blob = harness
+        .session(
+            "git_show",
+            json!({ "workspaceId": workspace_id, "path": "src/main.rs" }),
+        )
+        .expect("read the file at HEAD");
+    assert_eq!(blob["status"], "ready");
+    assert_eq!(blob["blob"]["text"], "fn main() { println!(); }\n");
+    assert_eq!(blob["blob"]["encoding"], "utf-8");
+
+    // The original side of a diff: the same path, one revision earlier.
+    let earlier = harness
+        .session(
+            "git_show",
+            json!({
+                "workspaceId": workspace_id,
+                "path": "src/main.rs",
+                "revision": "HEAD~1",
+            }),
+        )
+        .expect("read the file at HEAD~1");
+    assert_eq!(earlier["blob"]["text"], "fn main() {}\n");
+}
+
+/// A binary blob is a labelled value, and the refusals land where they should.
+#[test]
+fn git_show_labels_a_binary_blob_and_refuses_what_it_cannot_read() {
+    let repo = gritty_git::fixtures::history();
+    let harness = Harness::new();
+    let workspace = harness.open_workspace(repo.path());
+    let workspace_id = workspace["id"].clone();
+
+    let binary = harness
+        .session(
+            "git_show",
+            json!({ "workspaceId": workspace_id, "path": "logo.bin" }),
+        )
+        .expect("a binary blob is not an error");
+    assert_eq!(binary["status"], "ready");
+    assert_eq!(binary["blob"]["noText"], "BINARY");
+    assert!(binary["blob"]["text"].is_null());
+
+    // Absent at that revision: `NotFound`, not an empty file.
+    let missing = harness
+        .session(
+            "git_show",
+            json!({
+                "workspaceId": workspace_id,
+                "path": "src/main.rs",
+                "revision": "HEAD~3",
+            }),
+        )
+        .expect_err("the path is not in that revision");
+    assert_eq!(missing["code"], "NotFound");
+
+    // A path leaving the workspace root is refused while parsing.
+    let traversal = harness
+        .session(
+            "git_show",
+            json!({ "workspaceId": workspace_id, "path": "../secrets" }),
+        )
+        .expect_err("a path leaving the root is refused");
+    assert_eq!(traversal["code"], "InvalidInput");
+
+    let unknown = harness
+        .session(
+            "git_log",
+            json!({ "workspaceId": workspace_id, "start": "no-such-ref" }),
+        )
+        .expect_err("an unknown revision cannot be walked");
+    assert_eq!(unknown["code"], "InvalidInput");
+}
+
+/// A workspace that is not a repository answers both new reads as a value.
+#[test]
+fn git_log_and_show_report_a_plain_directory_rather_than_failing() {
+    let repo = gritty_git::fixtures::TestRepo::plain_directory();
+    let harness = Harness::new();
+    let workspace = harness.open_workspace(repo.path());
+    let workspace_id = workspace["id"].clone();
+
+    let log = harness
+        .session("git_log", json!({ "workspaceId": workspace_id }))
+        .expect("a plain directory is not a failure");
+    assert_eq!(log["status"], "notARepository");
+
+    let blob = harness
+        .session(
+            "git_show",
+            json!({ "workspaceId": workspace_id, "path": "README.md" }),
+        )
+        .expect("a plain directory is not a failure");
+    assert_eq!(blob["status"], "notARepository");
+}
+
 /// `runs.start` is the real provider's door and refuses everything that should
 /// never reach a process (T310-B).
 ///

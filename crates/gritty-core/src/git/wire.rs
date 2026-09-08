@@ -20,7 +20,7 @@
 //! [`DirectoryPage`]: gritty_workspace::DirectoryPage
 //! [`ListDirectoryResponse`]: crate::workspace::ListDirectoryResponse
 
-use gritty_git::{DiffSummary, RepositoryStatus};
+use gritty_git::{BlobContent, CommitPage, DiffSummary, RepositoryStatus};
 use gritty_workspace::WorkspacePath;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -100,6 +100,79 @@ pub enum GitDiffResponse {
     },
     NotARepository,
     /// `OperationCompleted.result` is the [`DiffSummary`].
+    Pending {
+        operation: Box<Operation>,
+    },
+}
+
+/// `git.log`: a bounded page of the history behind a revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GitLogRequest {
+    pub workspace_id: WorkspaceId,
+    /// Revision to walk back from; `HEAD` when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub start: Option<String>,
+    /// Restrict the walk to commits that touched this path. The bounded way to
+    /// ask "what happened to this file", instead of paging all of history and
+    /// filtering in the UI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub path: Option<WorkspacePath>,
+    /// Continue a truncated walk (`CommitPage.cursor`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cursor: Option<String>,
+    /// Commits per page, `1..=5000`. Defaults to
+    /// [`DEFAULT_LOG_PAGE_SIZE`](super::DEFAULT_LOG_PAGE_SIZE), which is small
+    /// because a history list is read a screen at a time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub page_size: Option<u32>,
+}
+
+/// What `git.log` returns. The same three arms as [`GitStatusResponse`], for
+/// the same reasons.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum GitLogResponse {
+    Ready {
+        page: Box<CommitPage>,
+    },
+    NotARepository,
+    /// `OperationCompleted.result` is the [`CommitPage`].
+    Pending {
+        operation: Box<Operation>,
+    },
+}
+
+/// `git.show`: the content of one path at one revision.
+///
+/// This is the *original* side of a diff. Unlike the other three reads it names
+/// exactly one object, so it does not page: a blob is whole or it is refused
+/// for being too large, and there is no middle state a cursor could describe.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GitShowRequest {
+    pub workspace_id: WorkspaceId,
+    pub path: WorkspacePath,
+    /// Revision to read the path at; `HEAD` when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub revision: Option<String>,
+}
+
+/// What `git.show` returns. The same three arms as [`GitStatusResponse`], for
+/// the same reasons.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum GitShowResponse {
+    Ready {
+        blob: Box<BlobContent>,
+    },
+    NotARepository,
+    /// `OperationCompleted.result` is the [`BlobContent`].
     Pending {
         operation: Box<Operation>,
     },

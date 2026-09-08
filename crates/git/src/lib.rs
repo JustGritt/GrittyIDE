@@ -49,18 +49,23 @@ pub mod diff;
 pub mod error;
 #[cfg(any(test, feature = "fixtures"))]
 pub mod fixtures;
+pub mod log;
 pub mod model;
 pub mod open;
 mod page;
 mod path;
+pub mod show;
 pub mod status;
 
 pub use diff::{DiffOptions, diff};
 pub use error::GitError;
+pub use log::{LogOptions, log};
 pub use model::{
-    DiffChangeKind, DiffHunk, DiffLimits, DiffLine, DiffLineKind, DiffSummary, EntryKind, FileDiff,
-    FileState, FileStatus, RepositoryState, RepositoryStatus, UpstreamStatus,
+    BlobContent, CommitPage, CommitSignature, CommitSummary, DiffChangeKind, DiffHunk, DiffLimits,
+    DiffLine, DiffLineKind, DiffSummary, EntryKind, FileDiff, FileState, FileStatus,
+    MAX_SHOW_BYTES, NoTextReason, RepositoryState, RepositoryStatus, UpstreamStatus,
 };
 pub use open::{Repository, open};
 pub use page::{CANCEL_CHECK_INTERVAL, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, PageOptions};
+pub use show::{ShowOptions, show};
 pub use status::{StatusOptions, status};

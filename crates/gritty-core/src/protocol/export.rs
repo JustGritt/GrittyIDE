@@ -30,7 +30,10 @@ use crate::document::{
     ReloadDocumentRequest, SaveDocumentRequest, UpdateDocumentRequest,
 };
 use crate::event::{CoreEvent, EventMeta};
-use crate::git::wire::{GitDiffRequest, GitDiffResponse, GitStatusRequest, GitStatusResponse};
+use crate::git::wire::{
+    GitDiffRequest, GitDiffResponse, GitLogRequest, GitLogResponse, GitShowRequest,
+    GitShowResponse, GitStatusRequest, GitStatusResponse,
+};
 use crate::health::HealthReport;
 use crate::operation::Operation;
 use crate::operation::demo::StartDemoRequest;
@@ -123,6 +126,12 @@ fn export_bindings() {
     GitStatusResponse::export_all(&cfg).expect("export GitStatusResponse");
     GitDiffRequest::export_all(&cfg).expect("export GitDiffRequest");
     GitDiffResponse::export_all(&cfg).expect("export GitDiffResponse");
+    // T101-C: the two remaining reads. `CommitPage`, `CommitSummary`,
+    // `CommitSignature`, `BlobContent` and `NoTextReason` follow transitively.
+    GitLogRequest::export_all(&cfg).expect("export GitLogRequest");
+    GitLogResponse::export_all(&cfg).expect("export GitLogResponse");
+    GitShowRequest::export_all(&cfg).expect("export GitShowRequest");
+    GitShowResponse::export_all(&cfg).expect("export GitShowResponse");
     // Search (T080, reaching the shell in PROTO-W3). `SearchMatch`,
     // `SearchSummary`, `SkipCounts`, `MatchKind` and `SearchScope` live in
     // `gritty-search` and come along transitively.

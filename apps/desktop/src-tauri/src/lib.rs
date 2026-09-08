@@ -251,6 +251,8 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::runs_events,
             commands::git_status,
             commands::git_diff,
+            commands::git_log,
+            commands::git_show,
             commands::search_query,
             commands::files_create,
             commands::files_rename,

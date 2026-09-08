@@ -74,6 +74,8 @@ export const COMMANDS = {
   'runs.events': 'runs_events',
   'git.status': 'git_status',
   'git.diff': 'git_diff',
+  'git.log': 'git_log',
+  'git.show': 'git_show',
   'search.query': 'search_query',
   'shell.revealPath': 'shell_reveal_path',
   'files.create': 'files_create',

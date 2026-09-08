@@ -255,3 +255,23 @@ pub fn many_changes(files: usize) -> TestRepo {
     }
     repo
 }
+
+/// A repository with a short, deterministic history: four commits, one of
+/// which does not touch `src/main.rs`, plus a binary blob.
+///
+/// Built for `log` and `show`, which need *history* rather than the working-tree
+/// changes [`clean`] and [`many_changes`] provide.
+pub fn history() -> TestRepo {
+    let repo = TestRepo::init();
+    repo.write("README.md", "one\n");
+    repo.commit_all("first");
+    repo.write("src/main.rs", "fn main() {}\n");
+    repo.commit_all("second: add main");
+    // Touches only README, so a path-filtered log over src/main.rs must skip it.
+    repo.write("README.md", "one\ntwo\n");
+    repo.commit_all("third: README only");
+    repo.write("src/main.rs", "fn main() { println!(); }\n");
+    repo.write("logo.bin", [0u8, 1, 2, 3, 0, 255]);
+    repo.commit_all("fourth: change main and add a binary");
+    repo
+}

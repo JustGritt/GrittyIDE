@@ -40,6 +40,10 @@ import {
   type ForgetWorkspaceRequest,
   type GitDiffRequest,
   type GitDiffResponse,
+  type GitLogRequest,
+  type GitLogResponse,
+  type GitShowRequest,
+  type GitShowResponse,
   type GitStatusRequest,
   type GitStatusResponse,
   type HealthReport,
@@ -523,8 +527,10 @@ export interface CoreClient {
    *   `Operation`, whose `OperationCompleted.result` carries the payload. No
    *   new event family: the `Operation*` events already report it.
    *
-   * Neither call writes. Nothing here stages, commits, checks out or fetches;
-   * a write surface is a later task and a deliberate decision, not an omission.
+   * **None of these four writes.** Nothing here stages, commits, discards,
+   * checks out or fetches. A write surface is a later task and a deliberate
+   * decision, not an omission: it needs the `git` binary rather than `gix`, for
+   * reasons ADR-029 sets out, and an ADR is not an agent's to decide.
    */
   git: {
     /**
@@ -545,6 +551,25 @@ export interface CoreClient {
      * file's hunks to reach one of them.
      */
     diff(request: GitDiffRequest): Promise<GitDiffResponse>;
+    /**
+     * A page of the history behind a revision (`HEAD` when absent), newest
+     * first.
+     *
+     * `path` restricts the walk to commits that touched one file. The page
+     * carries no total: counting every commit means walking the whole history
+     * to render a number beside twenty rows, and reporting a count that was
+     * never computed would be worse.
+     */
+    log(request: GitLogRequest): Promise<GitLogResponse>;
+    /**
+     * The content of one path at one revision — the *original* side of a diff.
+     *
+     * `git.diff` returns hunks with bounded context, and bounded context cannot
+     * reconstruct a whole file, so a side-by-side view needs this. Binary and
+     * oversized blobs come back with `noText` saying which, and never as an
+     * error.
+     */
+    show(request: GitShowRequest): Promise<GitShowResponse>;
   };
   /**
    * Find-in-files over the open workspace. One call, and it is always an
@@ -808,6 +833,8 @@ export function createCoreClient(
     git: {
       status: (request) => command<GitStatusResponse>('git.status', { request }),
       diff: (request) => command<GitDiffResponse>('git.diff', { request }),
+      log: (request) => command<GitLogResponse>('git.log', { request }),
+      show: (request) => command<GitShowResponse>('git.show', { request }),
     },
     files: {
       create: (request) => command<FileOperationResult>('files.create', { request }),

@@ -20,9 +20,17 @@
 //! (`docs/Gritty IDE Project Plan.md` §7), it is workstream-linked, and rule 6
 //! keeps it out of here. This module builds its primitives, not itself.
 
-use gritty_workspace::WorkspacePath;
+use gritty_workspace::{DocumentEncoding, WorkspacePath};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+
+/// Largest blob `git.show` will decode; 16 MiB.
+///
+/// Below `MAX_DOCUMENT_BYTES` (64 MiB) on purpose. A document is opened because
+/// the user asked for that one file; a blob at a revision is fetched to sit
+/// beside another one in a diff, so two of them cross the boundary at once and
+/// neither is worth 64 MiB of it.
+pub const MAX_SHOW_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Which multi-step operation the repository is in the middle of.
 ///
@@ -300,4 +308,136 @@ impl Default for DiffLimits {
             max_blob_bytes: 2 * 1024 * 1024,
         }
     }
+}
+
+/// Who wrote a commit, or who recorded it, and when.
+///
+/// The time is kept as the two numbers Git itself stores — seconds since the
+/// epoch, and the offset the author's machine was at — rather than as a
+/// formatted string. A rendered timestamp is a presentation decision, and this
+/// is the layer that must not make one: the UI knows the reader's locale and
+/// this crate does not.
+///
+/// `name` and `email` are untrusted repository content (`AGENTS.md` rule 13):
+/// decoded lossily, passed through unchanged, never interpreted, never logged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitSignature {
+    pub name: String,
+    pub email: String,
+    /// Seconds since the Unix epoch, UTC.
+    pub time: i64,
+    /// Offset from UTC in seconds, as the commit recorded it. Kept so a commit
+    /// can be shown in the timezone it was made in, which is what `git log`
+    /// does by default.
+    pub offset_seconds: i32,
+}
+
+/// One commit in a history walk.
+///
+/// Deliberately *not* a diff. What changed in a commit is `git.diff` against
+/// it, paged and bounded on its own terms; putting a file list here would make
+/// the cost of one page of history the cost of diffing every commit in it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitSummary {
+    /// Full hex object id.
+    pub id: String,
+    /// The abbreviation this repository considers unambiguous — Git's own
+    /// answer, not a fixed prefix length, because the length that disambiguates
+    /// grows with the object count.
+    pub short_id: String,
+    /// Full hex ids of the parents. Empty for a root commit, more than one for
+    /// a merge — which is how a caller tells a merge apart without a second
+    /// field that could disagree with this one.
+    pub parents: Vec<String>,
+    pub author: CommitSignature,
+    /// Usually equal to `author`; different after a rebase, a cherry-pick or an
+    /// amend by someone else.
+    pub committer: CommitSignature,
+    /// The first line of the message.
+    pub subject: String,
+    /// Everything after the first blank line, absent when there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub body: Option<String>,
+}
+
+/// What `git.log` returns: one bounded page of history.
+///
+/// **There is no `total`**, and that is deliberate rather than an omission.
+/// `RepositoryStatus` and `DiffSummary` can both count their whole list cheaply
+/// because the walk that produces a page produces all of it. Counting every
+/// commit in a repository means walking the entire history — seconds on a large
+/// one — to render a number beside a page of twenty. Reporting a count Gritty
+/// did not compute would be worse; so the page says whether more follow, and
+/// nothing else.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitPage {
+    /// The revision the walk started from, as the caller wrote it (`HEAD` when
+    /// they wrote nothing).
+    pub start: String,
+    /// The object id `start` resolved to. Absent on an unborn branch, where
+    /// there is genuinely no commit and `commits` is empty — which is a value,
+    /// not a failure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub resolved: Option<String>,
+    /// This page, newest first.
+    pub commits: Vec<CommitSummary>,
+    /// More commits follow; pass `cursor` back to continue.
+    pub truncated: bool,
+    /// Opaque continuation token, present when `truncated`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cursor: Option<String>,
+}
+
+/// Why `git.show` returned no text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum NoTextReason {
+    /// The blob contains a NUL byte or is not valid UTF-8. The same rule
+    /// `gritty_workspace::detect` applies to a file on disk, applied by the
+    /// same function — a blob and a file must not disagree about what "binary"
+    /// means.
+    Binary,
+    /// Above [`MAX_SHOW_BYTES`]. The whole content crosses the IPC boundary as
+    /// one string, so the bound protects the WebView, exactly as
+    /// `MAX_DOCUMENT_BYTES` does for a document.
+    TooLarge,
+}
+
+/// The content of one path at one revision, as `git.show` returns it.
+///
+/// This exists so a diff can have an *original* side. `git.diff` returns hunks
+/// with bounded context, and bounded context cannot reconstruct a whole file —
+/// so a side-by-side view of a change needs the file itself, at the revision it
+/// is being compared against.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BlobContent {
+    pub path: WorkspacePath,
+    /// The revision as the caller wrote it.
+    pub revision: String,
+    /// The object id `revision` resolved to.
+    pub resolved: String,
+    /// The blob's own object id, so a caller can tell two revisions apart that
+    /// happen to carry identical content.
+    pub blob: String,
+    /// Size of the blob in bytes, reported whether or not the text came with
+    /// it — a caller that gets no text still learns how big the thing was.
+    pub size: u64,
+    /// The decoded text, absent when `no_text` says why.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub text: Option<String>,
+    /// Set exactly when `text` is absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub no_text: Option<NoTextReason>,
+    /// How the bytes were interpreted, so a byte order mark that was stripped
+    /// from `text` can be written back by whoever needs the original bytes.
+    pub encoding: DocumentEncoding,
 }

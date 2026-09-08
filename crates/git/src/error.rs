@@ -27,6 +27,14 @@ pub enum GitError {
     #[error("revision {spec} does not name a commit or a tree")]
     NotATree { spec: String },
 
+    /// The revision resolved, and the path is not in it. Kept apart from
+    /// [`Self::UnknownRevision`] because the two send a reader to different
+    /// places: a bad revision is a mistake in the request, while a path that is
+    /// absent at a revision is usually the true and interesting answer — the
+    /// file had not been added yet.
+    #[error("{path} does not exist at {spec}")]
+    NotFoundAtRevision { path: String, spec: String },
+
     /// The repository was found but something inside it could not be read: a
     /// corrupt object, an unreadable pack, a permission failure, a stale lock
     /// held by another process. Retryable, because the common cases are

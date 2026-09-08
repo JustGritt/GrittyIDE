@@ -29,7 +29,8 @@ use gritty_core::document::{
 };
 use gritty_core::git::DEFAULT_GIT_BUDGET;
 use gritty_core::git::wire::{
-    GitDiffRequest, GitDiffResponse, GitStatusRequest, GitStatusResponse,
+    GitDiffRequest, GitDiffResponse, GitLogRequest, GitLogResponse, GitShowRequest,
+    GitShowResponse, GitStatusRequest, GitStatusResponse,
 };
 use gritty_core::health::ShellInfo;
 use gritty_core::operation::demo::{StartDemoRequest, start_demo};
@@ -1118,6 +1119,45 @@ pub async fn git_diff(
     guard("git.diff", move |correlation| async move {
         let request: GitDiffRequest = parse_request(request)?;
         git.diff(request, Actor::User, correlation, DEFAULT_GIT_BUDGET)
+            .await
+    })
+    .await
+}
+
+/// `git.log`
+///
+/// A page of history behind a revision, newest first, with the same budget
+/// hand-over as the other reads. `path` narrows the walk to the commits that
+/// changed one file.
+#[tauri::command]
+pub async fn git_log(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<GitLogResponse, CoreError> {
+    let git = core.git.clone();
+    guard("git.log", move |correlation| async move {
+        let request: GitLogRequest = parse_request(request)?;
+        git.log(request, Actor::User, correlation, DEFAULT_GIT_BUDGET)
+            .await
+    })
+    .await
+}
+
+/// `git.show`
+///
+/// One path at one revision — the original side of a diff. A binary or
+/// oversized blob answers with `noText` saying which, rather than an error; a
+/// path that is absent at that revision is `NotFound`, because "did not exist
+/// yet" and "was empty" are different answers.
+#[tauri::command]
+pub async fn git_show(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<GitShowResponse, CoreError> {
+    let git = core.git.clone();
+    guard("git.show", move |correlation| async move {
+        let request: GitShowRequest = parse_request(request)?;
+        git.show(request, Actor::User, correlation, DEFAULT_GIT_BUDGET)
             .await
     })
     .await
