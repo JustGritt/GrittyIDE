@@ -46,8 +46,8 @@
 use std::time::Duration;
 
 use gritty_agent_claude::{
-    ClaudeError, ClaudeExit, ClaudeLaunch, ClaudeObservation, ClaudePermissionAsk, ClaudeProcess,
-    ClaudeToolDone, ClaudeToolIntent, ClaudeToolUse, ClaudeTurnEnd, ClaudeVerdict, READY_TIMEOUT,
+    ClaudeError, ClaudeExit, ClaudeObservation, ClaudePermissionAsk, ClaudeProcess, ClaudeToolDone,
+    ClaudeToolIntent, ClaudeToolUse, ClaudeTurnEnd, ClaudeVerdict, READY_TIMEOUT,
 };
 use gritty_workspace::WorkspacePath;
 
@@ -58,6 +58,14 @@ use super::wire::{
 };
 use crate::protocol::error::{CoreError, CoreErrorCode};
 use crate::protocol::time::Timestamp;
+
+/// The adapter's launch description, re-exported so the composition root can
+/// build one without taking its own dependency on `gritty-agent-claude`.
+///
+/// The shell calls the typed core protocol and nothing else; `src-tauri` wiring
+/// is the one place allowed to name a driver at all, and it should name as
+/// little of the adapter as it can get away with.
+pub use gritty_agent_claude::ClaudeLaunch;
 
 /// Who answers a `can_use_tool`.
 ///
@@ -309,10 +317,7 @@ fn apply(
 /// `INTERRUPTED` ending is not reachable from a driver, so it is reported as a
 /// failure whose message says plainly that supervision was lost rather than
 /// that the agent was wrong.
-fn end_from_exit(
-    context: &AgentRunContext,
-    exit: &ClaudeExit,
-) -> Result<AgentRunState, CoreError> {
+fn end_from_exit(context: &AgentRunContext, exit: &ClaudeExit) -> Result<AgentRunState, CoreError> {
     match exit.run_state() {
         "FINISHED" => {
             // No summary: the agent's own last word already arrived as
@@ -388,9 +393,9 @@ fn events_for(observation: &ClaudeObservation) -> Vec<AgentRunEvent> {
         // A state change and an activity; no event. The run leaving `STARTING`
         // is visible in the run itself.
         ClaudeObservation::Ready(_) => Vec::new(),
-        ClaudeObservation::PromptEchoed { text } => vec![AgentRunEvent::PromptStarted {
-            text: text.clone(),
-        }],
+        ClaudeObservation::PromptEchoed { text } => {
+            vec![AgentRunEvent::PromptStarted { text: text.clone() }]
+        }
         ClaudeObservation::Thought
         | ClaudeObservation::Said { .. }
         | ClaudeObservation::Unknown { .. } => Vec::new(),

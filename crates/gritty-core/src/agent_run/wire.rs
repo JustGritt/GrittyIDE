@@ -109,8 +109,9 @@ pub fn clip_optional(text: Option<&str>, max: usize) -> Option<String> {
 /// Those are different questions with different answers, and the two lanes stay
 /// disjoint exactly because the types do.
 ///
-/// One variant today. T310 adds the second, and until it does, a run cannot
-/// touch a real process by construction.
+/// Two variants. `FAKE` is what makes the deterministic path testable
+/// anywhere; `CLAUDE_CODE` is the one with a real process behind it, added by
+/// T310-B.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AgentRunProvider {
@@ -118,15 +119,26 @@ pub enum AgentRunProvider {
     /// filesystem. Its events are scripted fiction, which is what makes it safe
     /// to run anywhere, including CI.
     Fake,
+    /// A real Claude Code process Gritty spawned, framed by
+    /// `gritty-agent-claude` and translated by `agent_run::claude_driver`
+    /// (T310-B).
+    ///
+    /// Deliberately **not** the same value as the observed roster's
+    /// `AgentProvider::ClaudeCode`, though they spell the same word: that one
+    /// is a provider Gritty *discovered*, this one is a provider Gritty offers
+    /// to *start*, and the two enums stay separate so a new discoverable agent
+    /// never silently becomes a startable one.
+    ClaudeCode,
 }
 
 impl AgentRunProvider {
-    pub const ALL: &'static [Self] = &[Self::Fake];
+    pub const ALL: &'static [Self] = &[Self::Fake, Self::ClaudeCode];
 
     /// The stored and transmitted spelling, which is the serde one.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Fake => "FAKE",
+            Self::ClaudeCode => "CLAUDE_CODE",
         }
     }
 
@@ -691,9 +703,12 @@ mod tests {
                 serde_json::json!(provider.as_str())
             );
         }
-        // The point of the separate enum: a provider only the observed roster
-        // knows about is not a run provider.
-        let error = AgentRunProvider::parse("CLAUDE_CODE").expect_err("not a run provider");
+        // The point of the separate enum, still made — with a provider the
+        // observed roster can discover and this one cannot start. `CLAUDE_CODE`
+        // used to stand here and stopped being the example when T310-B made it
+        // startable; the assertion is rewritten rather than deleted, because
+        // what it was written to prove is still true.
+        let error = AgentRunProvider::parse("CODEX").expect_err("not a run provider");
         assert_eq!(error.code, CoreErrorCode::Internal);
     }
 

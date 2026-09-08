@@ -61,6 +61,7 @@ import {
   type OwnershipConflict,
   type OwnershipMap,
   PROTOCOL_VERSION,
+  type PromptRunRequest,
   type RaiseDecisionRequest,
   type RecentWorkspace,
   type RecentWorkspacesRequest,
@@ -83,6 +84,7 @@ import {
   type SpawnTerminalRequest,
   type StartDemoRequest,
   type StartFakeRunRequest,
+  type StartRunRequest,
   type Terminal,
   type TerminalProfile,
   type TransitionWorkstreamRequest,
@@ -439,14 +441,41 @@ export interface CoreClient {
     /**
      * Start a scripted run against a workstream in the open workspace.
      *
-     * `FAKE` is the only provider that exists, so this is the only way to
-     * start a run at all: nothing here can reach a real process until T310
-     * adds the second variant. The workstream must exist (`NotFound`) and the
-     * workspace must be open (`NotFound`); past `MAX_CONCURRENT_RUNS` active
-     * runs the core refuses with `Conflict`, naming the count. `script` picks
-     * one of the adapter's presets and defaults to its first.
+     * The deterministic path, and deliberately still its own command: a
+     * fiction and a real process behind one name would make the run every
+     * test depends on indistinguishable from the one that spends money. Use
+     * {@link start} for a real provider. The workstream must exist
+     * (`NotFound`) and the workspace must be open (`NotFound`); past
+     * `MAX_CONCURRENT_RUNS` active runs the core refuses with `Conflict`,
+     * naming the count. `script` picks one of the adapter's presets and
+     * defaults to its first.
      */
     startFake(request: StartFakeRunRequest): Promise<AgentRun>;
+    /**
+     * Start a run against a real provider (T310-B).
+     *
+     * `provider: 'FAKE'` is rejected with `InvalidInput` — it has its own
+     * command. `prompt` is the first thing to say to the agent and is queued
+     * before the run exists, so it and every later prompt travel one path.
+     *
+     * The run appears in `STARTING` and reaches `RUNNING` only once the
+     * provider's session announces itself, which is what that state is for.
+     */
+    start(request: StartRunRequest): Promise<AgentRun>;
+    /**
+     * Say something to a run that is already running (T310-B).
+     *
+     * **Nothing is optimistic.** Resolving means the text was queued, not that
+     * the agent has seen it: the user's own words appear in the feed when
+     * `PROMPT_STARTED` arrives, which is the run confirming them.
+     *
+     * Rejects with `Conflict` naming the state when the run is not accepting a
+     * prompt (it has ended, is stopping, is `STARTING`, or is stopped on a
+     * permission), when the run has no prompt channel at all, and when the
+     * caller has already queued the most the core will hold. Never silently
+     * dropped.
+     */
+    prompt(request: PromptRunRequest): Promise<AgentRun>;
     /**
      * Ask a run to stop. Cooperative and idempotent, like `operations.cancel`:
      * an unknown id rejects with `NotFound`, a run that already ended returns
@@ -706,6 +735,8 @@ export function createCoreClient(
     },
     runs: {
       startFake: (request) => command<AgentRun>('runs.startFake', { request }),
+      start: (request) => command<AgentRun>('runs.start', { request }),
+      prompt: (request) => command<AgentRun>('runs.prompt', { request }),
       cancel: (request) => command<AgentRun>('runs.cancel', { request }),
       list: (request) => command<AgentRun[]>('runs.list', { request }),
       events: (request) => command<AgentRunEventLog>('runs.events', { request }),

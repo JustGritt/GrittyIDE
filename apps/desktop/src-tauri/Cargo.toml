@@ -16,6 +16,10 @@ name = "gritty_desktop_lib"
 tauri-build = { workspace = true }
 
 [dependencies]
+# T310-B: `runs.start` mints the provider session id it passes to the child,
+# which is what lets the observed roster exclude Gritty's own process without
+# parsing a command line. Already a workspace dependency; no new crate.
+uuid = { workspace = true }
 gritty-core = { workspace = true }
 gritty-terminal = { workspace = true }
 gritty-persistence = { workspace = true }

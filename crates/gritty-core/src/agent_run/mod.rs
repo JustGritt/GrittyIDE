@@ -67,13 +67,16 @@ pub mod wire;
 #[cfg(test)]
 mod tests;
 
-pub use claude_driver::{ClaudeDriverOptions, PermissionPolicy};
+pub use claude_driver::{ClaudeDriverOptions, ClaudeLaunch, PermissionPolicy};
 pub use fake_driver::{DEMO_STEP_DELAY, FakeDriverOptions};
 pub use manager::{
     AgentRunContext, AgentRunManager, AgentRunSpec, FINISHED_RETENTION, MAX_CONCURRENT_RUNS,
     MAX_QUEUED_PROMPTS, OwnedProviderSession, RunInbox, RunInboxReceiver, RunInput,
 };
-pub use request::{CancelRunRequest, ListRunsRequest, RunEventsRequest, StartFakeRunRequest};
+pub use request::{
+    CancelRunRequest, ListRunsRequest, MAX_PROMPT_TEXT, PromptRunRequest, RunEventsRequest,
+    StartFakeRunRequest, StartRunRequest,
+};
 pub use state::AgentRunState;
 pub use wire::{
     AgentRun, AgentRunActivity, AgentRunActivityKind, AgentRunChangedPayload, AgentRunEvent,

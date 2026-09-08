@@ -85,6 +85,7 @@ impl Harness {
                 opener: opener.clone(),
                 data_dir: Some(data_dir),
                 pty_host: pty.clone(),
+                claude_binary: None,
             },
         );
         let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
@@ -2330,4 +2331,132 @@ fn git_commands_validate_before_they_read() {
         )
         .expect_err("a zero page is refused");
     assert_eq!(bad_page["code"], "InvalidInput");
+}
+
+/// `runs.start` is the real provider's door and refuses everything that should
+/// never reach a process (T310-B).
+///
+/// None of this needs `claude`: every case is refused at the boundary, before
+/// anything is spawned.
+#[test]
+fn starting_a_real_run_refuses_the_fake_and_an_unknown_workstream() {
+    let root = TempWorkspace::new("run-start-refuse");
+    let harness = Harness::new();
+    let (workspace_id, workstream_id) = harness.workspace_and_workstream(&root.0);
+
+    // The fiction keeps its own front door: accepting `FAKE` here would give it
+    // two, and the deterministic path every other test depends on would stop
+    // being distinguishable from the one that spends money.
+    let fake = harness
+        .session(
+            "runs_start",
+            json!({
+                "workspaceId": workspace_id,
+                "workstreamId": workstream_id,
+                "provider": "FAKE",
+            }),
+        )
+        .expect_err("a fake run is not started here");
+    assert_eq!(fake["code"], "InvalidInput");
+    assert_eq!(fake["details"]["field"], "provider");
+
+    let unknown_workstream = harness
+        .session(
+            "runs_start",
+            json!({
+                "workspaceId": workspace_id,
+                "workstreamId": "ws-nope",
+                "provider": "CLAUDE_CODE",
+            }),
+        )
+        .expect_err("an unknown workstream is refused");
+    assert_eq!(unknown_workstream["code"], "NotFound");
+
+    let blank_prompt = harness
+        .session(
+            "runs_start",
+            json!({
+                "workspaceId": workspace_id,
+                "workstreamId": workstream_id,
+                "provider": "CLAUDE_CODE",
+                "prompt": "   ",
+            }),
+        )
+        .expect_err("a blank prompt is refused");
+    assert_eq!(blank_prompt["code"], "InvalidInput");
+    assert_eq!(blank_prompt["details"]["field"], "text");
+
+    // None of the refusals created anything.
+    let listed = harness
+        .session("runs_list", json!({ "workspaceId": workspace_id }))
+        .expect("list runs");
+    assert!(listed.as_array().unwrap().is_empty(), "{listed}");
+}
+
+/// `runs.prompt` refuses rather than queues, and every refusal names what is in
+/// the way (T310-B §4).
+///
+/// A `FAKE` run is the perfect subject: it is a real run in a real state with
+/// no prompt channel at all, so the "this run cannot be spoken to" path is
+/// exercised without a process anywhere.
+#[test]
+fn prompting_refuses_an_unknown_run_a_blank_prompt_and_a_run_with_no_channel() {
+    let root = TempWorkspace::new("run-prompt-refuse");
+    let harness = Harness::new();
+    let (workspace_id, workstream_id) = harness.workspace_and_workstream(&root.0);
+
+    let unknown = harness
+        .session(
+            "runs_prompt",
+            json!({ "runId": "run-nope", "text": "hello" }),
+        )
+        .expect_err("an unknown run is refused");
+    assert_eq!(unknown["code"], "NotFound");
+
+    let started = harness
+        .session(
+            "runs_start_fake",
+            json!({
+                "workspaceId": workspace_id,
+                "workstreamId": workstream_id,
+                "script": "quick",
+            }),
+        )
+        .expect("start the fake run");
+    let run_id = started["id"].clone();
+
+    let blank = harness
+        .session("runs_prompt", json!({ "runId": run_id, "text": "  " }))
+        .expect_err("a blank prompt is refused");
+    assert_eq!(blank["code"], "InvalidInput");
+    assert_eq!(blank["details"]["field"], "text");
+
+    // The shape check passes and the run exists, so this reaches the manager
+    // and is refused there. *Which* refusal depends on how far the script has
+    // got — a `STARTING` run is turned away before its missing channel is even
+    // looked at — so this asserts the part that is deterministic: it is a
+    // `Conflict`, and it says what is in the way rather than saying nothing.
+    // The full matrix, with the state controlled, is a manager unit test
+    // (`agent_run::tests::a_prompt_is_refused_at_every_edge`).
+    let no_channel = harness
+        .session("runs_prompt", json!({ "runId": run_id, "text": "hello" }))
+        .expect_err("a fake run cannot be prompted");
+    assert_eq!(no_channel["code"], "Conflict");
+    let reason = no_channel["message"].as_str().expect("a message");
+    assert!(
+        reason.contains("FAKE") || reason.contains("not accepting"),
+        "the refusal names what is in the way: {reason}"
+    );
+
+    // And once it is over, the refusal names the state instead.
+    let ended = harness.run_until(&run_id, &workspace_id, is_terminal);
+    let terminal = harness
+        .session("runs_prompt", json!({ "runId": run_id, "text": "hello" }))
+        .expect_err("an ended run is refused");
+    assert_eq!(terminal["code"], "Conflict");
+    let message = terminal["message"].as_str().expect("a message");
+    assert!(
+        message.contains(ended["state"].as_str().expect("a state")),
+        "the refusal names the state it is in: {message}"
+    );
 }

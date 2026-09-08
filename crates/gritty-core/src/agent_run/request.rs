@@ -1,10 +1,10 @@
-//! Request shapes of the `runs.*` command surface (T300-CMD, §16).
+//! Request shapes of the `runs.*` command surface (T300-CMD §16, T310-B).
 //!
-//! Five commands, four requests: `runs.startFake`, `runs.cancel`, `runs.list`
-//! and `runs.events` each take one, and `core.health` reports the protocol
-//! minor they were added in. Their responses are types [`super::wire`] already
-//! carries — [`super::wire::AgentRun`] and [`super::wire::AgentRunEventLog`] —
-//! so nothing here describes a *result*.
+//! Six commands, six requests: `runs.startFake`, `runs.start`, `runs.prompt`,
+//! `runs.cancel`, `runs.list` and `runs.events` each take one, and `core.health`
+//! reports the protocol minor they were added in. Their responses are types
+//! [`super::wire`] already carries — [`super::wire::AgentRun`] and
+//! [`super::wire::AgentRunEventLog`] — so nothing here describes a *result*.
 //!
 //! # Why these live beside the manager rather than in `wire.rs`
 //!
@@ -16,18 +16,22 @@
 //! to the thing that serves it — and it means the frozen contract stays one
 //! file that a reader can hold in their head.
 //!
-//! # Nothing here starts a real provider
+//! # The fiction keeps its own front door
 //!
-//! There is deliberately no `runs.start`. [`super::wire::AgentRunProvider`] has
-//! one variant, `FAKE`, so the only run that can exist is a scripted fiction,
-//! and a run cannot touch a real process by construction until T310 adds the
-//! second. There is likewise no command that *answers* a run: a run can reach
-//! `BLOCKED` or `NEEDS_DECISION`, but turning that into something the user
-//! replies to is T335's, and half of it built here would be redone there.
+//! `runs.start` (T310-B) reaches a real provider; `runs.startFake` is unchanged
+//! and still the only way to a scripted one. Folding them together would put a
+//! fiction and a process behind one name, and the fake is the deterministic
+//! path every other test depends on — so [`StartRunRequest::validate`] refuses
+//! `FAKE` outright rather than quietly forwarding it.
+//!
+//! There is still no command that *answers* a run: a run can reach `BLOCKED` or
+//! `NEEDS_DECISION` and `runs.prompt` does not resolve either — one stop at a
+//! time, and the answer to a block is a verdict, which is `T310-ANSWER`'s.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use super::wire::AgentRunProvider;
 use crate::protocol::error::CoreError;
 use crate::protocol::ids::{AgentRunId, WorkspaceId, WorkstreamId};
 
@@ -86,6 +90,90 @@ impl StartFakeRunRequest {
         }
         Ok(())
     }
+}
+
+/// Longest prompt accepted, in characters.
+///
+/// **Deliberately much larger than `MAX_TEXT`, and the difference is the
+/// point.** `MAX_TEXT` (2000) bounds untrusted *adapter output* for display, so
+/// clipping it costs a reader nothing. This bounds what a person typed, and it
+/// is about to be sent to a model and paid for — silently truncating it would
+/// be worse than refusing it, so the request refuses and the full text reaches
+/// the child. The recorded `PROMPT_STARTED` is still clipped to `MAX_TEXT` on
+/// the way into the ring, because that one is a preview.
+pub const MAX_PROMPT_TEXT: usize = 16 * 1024;
+
+/// `runs.start` — start a run against a real provider.
+///
+/// Separate from `StartFakeRunRequest`, which stays exactly as it is: folding a
+/// scripted fiction and a real process behind one command name would make the
+/// deterministic path every other test depends on indistinguishable from the
+/// one that spends money.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct StartRunRequest {
+    pub workspace_id: WorkspaceId,
+    pub workstream_id: WorkstreamId,
+    /// Which provider to start. `FAKE` is refused here — it has its own
+    /// command, and accepting it would give the fiction two front doors.
+    pub provider: AgentRunProvider,
+    /// The first thing to say to the agent. Absent starts a run that waits.
+    ///
+    /// It is *seeded into the run's inbox* before the run exists, so the first
+    /// prompt and every later one travel the same path and the driver needs no
+    /// special case for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub prompt: Option<String>,
+}
+
+impl StartRunRequest {
+    /// Reject a provider that has no process behind it, and a prompt that is
+    /// blank or oversized.
+    pub fn validate(&self) -> Result<(), CoreError> {
+        if self.provider == AgentRunProvider::Fake {
+            return Err(CoreError::invalid_input(
+                "provider",
+                "a fake run is started with runs.startFake, not runs.start",
+            ));
+        }
+        if let Some(prompt) = self.prompt.as_deref() {
+            validate_prompt(prompt)?;
+        }
+        Ok(())
+    }
+}
+
+/// `runs.prompt` — say something to a run that is already running.
+///
+/// The one thing the run contract has never had. A prompt for a run that is not
+/// accepting one is `Conflict` naming the state — never silently dropped — and
+/// a caller that outruns the agent is refused rather than queued without limit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptRunRequest {
+    pub run_id: AgentRunId,
+    pub text: String,
+}
+
+impl PromptRunRequest {
+    pub fn validate(&self) -> Result<(), CoreError> {
+        validate_prompt(&self.text)
+    }
+}
+
+/// Shape only: blank is a mistake, oversized is refused rather than clipped.
+fn validate_prompt(text: &str) -> Result<(), CoreError> {
+    if text.trim().is_empty() {
+        return Err(CoreError::invalid_input("text", "a prompt cannot be blank"));
+    }
+    if text.chars().count() > MAX_PROMPT_TEXT {
+        return Err(CoreError::invalid_input(
+            "text",
+            format!("a prompt may be at most {MAX_PROMPT_TEXT} characters"),
+        ));
+    }
+    Ok(())
 }
 
 /// `runs.cancel` — ask a run to stop.

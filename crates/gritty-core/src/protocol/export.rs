@@ -11,7 +11,8 @@ use ts_rs::{Config, TS};
 
 use super::{CORE_EVENT_CHANNEL, PROTOCOL_VERSION};
 use crate::agent_run::request::{
-    CancelRunRequest, ListRunsRequest, RunEventsRequest, StartFakeRunRequest,
+    CancelRunRequest, ListRunsRequest, PromptRunRequest, RunEventsRequest, StartFakeRunRequest,
+    StartRunRequest,
 };
 use crate::agent_run::wire::{
     AgentRun, AgentRunActivity, AgentRunChangedPayload, AgentRunEvent,
@@ -126,6 +127,8 @@ fn export_bindings() {
     SearchMatchesFoundPayload::export_all(&cfg).expect("export SearchMatchesFoundPayload");
     SearchCompletion::export_all(&cfg).expect("export SearchCompletion");
     StartFakeRunRequest::export_all(&cfg).expect("export StartFakeRunRequest");
+    StartRunRequest::export_all(&cfg).expect("export StartRunRequest");
+    PromptRunRequest::export_all(&cfg).expect("export PromptRunRequest");
     CancelRunRequest::export_all(&cfg).expect("export CancelRunRequest");
     ListRunsRequest::export_all(&cfg).expect("export ListRunsRequest");
     RunEventsRequest::export_all(&cfg).expect("export RunEventsRequest");

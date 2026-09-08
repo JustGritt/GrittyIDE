@@ -966,7 +966,9 @@ impl AgentRunManager {
     ) -> Result<AgentRun, CoreError> {
         let mut inner = self.lock();
         let Some(entry) = inner.entries.get_mut(id) else {
-            return Err(CoreError::not_found(format!("agent run {id} does not exist")));
+            return Err(CoreError::not_found(format!(
+                "agent run {id} does not exist"
+            )));
         };
         let state = entry.snapshot.state;
         if state.is_terminal() {

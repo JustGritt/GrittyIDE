@@ -67,6 +67,8 @@ export const COMMANDS = {
   'agents.permissionGrants': 'agents_permission_grants',
   'agents.revokeGrant': 'agents_revoke_grant',
   'runs.startFake': 'runs_start_fake',
+  'runs.start': 'runs_start',
+  'runs.prompt': 'runs_prompt',
   'runs.cancel': 'runs_cancel',
   'runs.list': 'runs_list',
   'runs.events': 'runs_events',

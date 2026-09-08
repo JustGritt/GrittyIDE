@@ -13,7 +13,9 @@ use std::time::Instant;
 
 use gritty_core::agent_run::{
     AgentRun, AgentRunEventLog, AgentRunProvider, AgentRunSpec, CancelRunRequest,
-    FakeDriverOptions, ListRunsRequest, RunEventsRequest, StartFakeRunRequest, fake_driver,
+    ClaudeDriverOptions, ClaudeLaunch, FakeDriverOptions, ListRunsRequest, OwnedProviderSession,
+    PromptRunRequest, RunEventsRequest, RunInbox, StartFakeRunRequest, StartRunRequest,
+    claude_driver, fake_driver,
 };
 use gritty_core::agent_session::{
     AgentIntegration, AgentIntegrationChange, AgentIntegrationChangeRequest,
@@ -1182,6 +1184,123 @@ pub async fn runs_start_fake(
         // Paced for a human, not for a test: the fake is instantaneous, and a
         // run that reaches FINISHED before the panel paints shows nothing.
         runs.start(spec, fake_driver::drive(script, FakeDriverOptions::demo()))
+    })
+    .await
+}
+
+/// `runs.start`
+///
+/// The real one (T310-B). `runs.startFake` is untouched beside it, because a
+/// fiction and a process behind one command name would make the deterministic
+/// path every other test depends on indistinguishable from the one that spends
+/// money — so `StartRunRequest::validate` refuses `FAKE` outright.
+///
+/// The same two checks `runs.startFake` makes here rather than in the manager,
+/// and for the same reason — the manager holds no database — plus one this
+/// command needs and that one does not: the workspace's **root**, which is the
+/// child's working directory.
+///
+/// Gritty mints the provider session id. That is what lets §8 exclude its own
+/// child from the observed roster without parsing anything, and it is why the
+/// id is handed to `start_with_inbox` rather than discovered afterwards.
+#[tauri::command]
+pub async fn runs_start(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentRun, CoreError> {
+    let runs = core.runs.clone();
+    let workstreams = core.workstreams.clone();
+    let workspaces = core.workspaces.clone();
+    let binary = core.claude_binary.clone();
+    guard("runs.start", move |correlation| async move {
+        let request: StartRunRequest = parse_request(request)?;
+        request.validate()?;
+
+        let known = workstreams
+            .list(
+                ListWorkstreamsRequest {
+                    workspace_id: request.workspace_id.clone(),
+                },
+                correlation.clone(),
+            )
+            .await?;
+        if !known
+            .iter()
+            .any(|workstream| workstream.id == request.workstream_id)
+        {
+            return Err(CoreError::not_found(format!(
+                "no workstream {} in this workspace",
+                request.workstream_id
+            )));
+        }
+
+        let Some((open_id, root)) = workspaces.current_open() else {
+            return Err(CoreError::not_found("no workspace is open"));
+        };
+        if open_id != request.workspace_id {
+            return Err(CoreError::not_found(format!(
+                "workspace {} is not open",
+                request.workspace_id
+            )));
+        }
+
+        // Minted here, so Gritty knows exactly which observed sessions are its
+        // own children. Not the `AgentRunId`: welding Gritty's identifier space
+        // to a provider's would break the moment `T310-RESUME` has to adopt an
+        // id the provider already owns.
+        let session_id = uuid::Uuid::now_v7().hyphenated().to_string();
+        let mut launch = ClaudeLaunch::new(&session_id, root.path())
+            .map_err(|error| CoreError::invalid_input("provider", error.to_string()))?;
+        if let Some(binary) = binary {
+            launch = launch.with_program(binary);
+        }
+
+        let (inbox, receiver) = RunInbox::pair();
+        if let Some(prompt) = request.prompt {
+            // Queued before the run exists, so the first prompt and every later
+            // one travel the same path.
+            inbox.seed(prompt);
+        }
+
+        let spec = AgentRunSpec {
+            workspace_id: request.workspace_id,
+            workstream_id: request.workstream_id,
+            provider: request.provider,
+            actor: Actor::User,
+            correlation_id: correlation,
+        };
+        runs.start_with_inbox(
+            spec,
+            inbox,
+            OwnedProviderSession {
+                session_id,
+                pid: None,
+            },
+            claude_driver::drive(launch, receiver, ClaudeDriverOptions::default()),
+        )
+    })
+    .await
+}
+
+/// `runs.prompt`
+///
+/// Say something to a run that is already running. Refuses rather than queues
+/// at every edge, and every refusal names what is in the way: the state, the
+/// provider, or the bound.
+///
+/// **Nothing is optimistic.** An `Ok` here means the text was queued, not that
+/// the agent has seen it — `PROMPT_STARTED` is the run's own confirmation and
+/// it arrives later, when the CLI replays the message back.
+#[tauri::command]
+pub async fn runs_prompt(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentRun, CoreError> {
+    let runs = core.runs.clone();
+    guard("runs.prompt", move |_| async move {
+        let request: PromptRunRequest = parse_request(request)?;
+        request.validate()?;
+        runs.prompt(&request.run_id, request.text, Actor::User)
     })
     .await
 }

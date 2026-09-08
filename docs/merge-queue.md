@@ -99,7 +99,7 @@ file decides.
 | `PROTOCOL_VERSION` | ~~2.16.0~~ | `T300-CMD` — landed on `main` |
 | `PROTOCOL_VERSION` | ~~2.17.0~~ | `PROTO-W2-GIT` — landed on `main` (`f261c71`) |
 | `PROTOCOL_VERSION` | **2.18.0** | `PROTO-W3` — the `search.query` command and its `CoreEvent` variant |
-| `PROTOCOL_VERSION` | **2.19.0** | `T310-B` — `runs.start` / `runs.prompt`, the `CLAUDE_CODE` variant |
+| `PROTOCOL_VERSION` | ~~2.19.0~~ | `T310-B` — `runs.start` / `runs.prompt`, the `CLAUDE_CODE` variant. **Spent 2026-09-08**; it takes no `SCHEMA_VERSION` and no migration, because a run is still not persisted (ADR-021 decides whether it should be, and is only `Proposed`). |
 
 **`PROTO-W2-GIT` claims 2.17.0 and nothing else.** It spends no migration and
 no `SCHEMA_VERSION`: `git.status` and `git.diff` are reads, and nothing about a

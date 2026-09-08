@@ -243,6 +243,8 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::agents_notifications,
             commands::agents_set_notifications,
             commands::runs_start_fake,
+            commands::runs_start,
+            commands::runs_prompt,
             commands::runs_cancel,
             commands::runs_list,
             commands::runs_events,
@@ -286,6 +288,9 @@ pub fn attach_core<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
             opener: Arc::new(shell::SystemOpener),
             data_dir,
             pty_host: Arc::new(gritty_terminal::SystemPtyHost::new()),
+            // `claude` on PATH. Overridden only by tests, which point it at a
+            // stub child so no test spawns a real agent.
+            claude_binary: None,
         },
     );
 }

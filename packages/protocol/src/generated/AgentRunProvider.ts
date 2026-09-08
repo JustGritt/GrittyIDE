@@ -10,7 +10,8 @@
  * Those are different questions with different answers, and the two lanes stay
  * disjoint exactly because the types do.
  *
- * One variant today. T310 adds the second, and until it does, a run cannot
- * touch a real process by construction.
+ * Two variants. `FAKE` is what makes the deterministic path testable
+ * anywhere; `CLAUDE_CODE` is the one with a real process behind it, added by
+ * T310-B.
  */
-export type AgentRunProvider = "FAKE";
+export type AgentRunProvider = "FAKE" | "CLAUDE_CODE";

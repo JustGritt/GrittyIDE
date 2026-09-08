@@ -47,6 +47,14 @@ pub struct CoreOptions {
     pub data_dir: Option<PathBuf>,
     /// Opens PTY sessions. Tests inject a fake so no test spawns a shell.
     pub pty_host: Arc<dyn PtyHost>,
+    /// The agent binary `runs.start` spawns; `None` uses `claude` on `PATH`.
+    ///
+    /// The same seam `pty_host` is, for the same reason: tests point it at a
+    /// stub child that behaves like the CLI, so no test spawns a real agent or
+    /// needs an API key. It is Rust-side only and **never reaches the wire** —
+    /// a renderer that could name the executable would be a renderer that can
+    /// run anything.
+    pub claude_binary: Option<PathBuf>,
 }
 
 pub struct Core {
@@ -68,6 +76,8 @@ pub struct Core {
     /// Agent runs Gritty **owns** (T300). Distinct from `agents`, which is the
     /// read-only roster of sessions it did not start; the two never meet.
     pub runs: Arc<AgentRunManager>,
+    /// See [`CoreOptions::claude_binary`].
+    pub claude_binary: Option<PathBuf>,
 }
 
 /// Delivers every envelope on the single core event channel. Failures are
@@ -94,6 +104,7 @@ impl Core {
                 opener: Arc::new(SystemOpener),
                 data_dir,
                 pty_host: Arc::new(SystemPtyHost::new()),
+                claude_binary: None,
             },
         )
     }
@@ -215,6 +226,7 @@ impl Core {
             ownership,
             agents,
             runs,
+            claude_binary: options.claude_binary,
         }
     }
 

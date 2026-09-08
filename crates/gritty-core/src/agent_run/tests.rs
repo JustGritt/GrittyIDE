@@ -20,7 +20,10 @@ use tokio::runtime::Handle;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
 
-use super::manager::{AgentRunContext, AgentRunManager, AgentRunSpec, MAX_CONCURRENT_RUNS};
+use super::manager::{
+    AgentRunContext, AgentRunManager, AgentRunSpec, MAX_CONCURRENT_RUNS, MAX_QUEUED_PROMPTS,
+    OwnedProviderSession, RunInbox,
+};
 use super::state::AgentRunState;
 use super::wire::{
     AgentRun, AgentRunActivity, AgentRunActivityKind, AgentRunEvent, AgentRunProvider, MAX_TEXT,
@@ -1098,4 +1101,138 @@ async fn events_of_an_unknown_run_are_not_found() {
         .events(&AgentRunId::from_raw("no-such-run"))
         .expect_err("unknown ids are not silently empty");
     assert_eq!(error.code, CoreErrorCode::NotFound);
+}
+
+/// Every edge `runs.prompt` refuses, with the state controlled rather than
+/// raced (T310-B §4).
+///
+/// The integration test through the real IPC can only assert that a prompt is
+/// refused; which refusal it gets depends on how far a script has run. Here the
+/// run is driven to exactly the state each case needs.
+#[tokio::test]
+async fn a_prompt_is_refused_at_every_edge() {
+    let mut harness = start();
+    let (run, script) = harness.scripted();
+
+    // Unknown id: the same wording every other `runs.*` lookup miss uses.
+    let unknown = harness
+        .manager
+        .prompt(
+            &AgentRunId::from_raw("run-nope"),
+            "hello".to_owned(),
+            Actor::User,
+        )
+        .expect_err("an unknown run is not found");
+    assert_eq!(unknown.code, CoreErrorCode::NotFound);
+
+    // `STARTING`: there is no child to speak to yet, and the refusal says so
+    // rather than queueing text that would be invisible if the run then failed.
+    let starting = harness
+        .manager
+        .prompt(&run.id, "hello".to_owned(), Actor::User)
+        .expect_err("a starting run is not accepting a prompt");
+    assert_eq!(starting.code, CoreErrorCode::Conflict);
+    assert!(
+        starting.message.contains("STARTING"),
+        "the refusal names the state: {}",
+        starting.message
+    );
+
+    // `RUNNING`, so the state check passes and the *channel* check is what
+    // answers: a fake has no inbox, and the refusal names the provider.
+    script
+        .act(|ctx| ctx.advance(AgentRunState::Running, None).map(|_| ()))
+        .await
+        .expect("the run reaches RUNNING");
+    let no_channel = harness
+        .manager
+        .prompt(&run.id, "hello".to_owned(), Actor::User)
+        .expect_err("a fake run has no prompt channel");
+    assert_eq!(no_channel.code, CoreErrorCode::Conflict);
+    assert!(
+        no_channel.message.contains("FAKE"),
+        "the refusal names the provider: {}",
+        no_channel.message
+    );
+
+    // Terminal: the state again, and it is the last word.
+    script
+        .act(|ctx| ctx.finish(None).map(|_| ()))
+        .await
+        .expect("the run finishes");
+    let ended = harness.ended(&run.id).await;
+    let terminal = harness
+        .manager
+        .prompt(&run.id, "hello".to_owned(), Actor::User)
+        .expect_err("an ended run cannot be prompted");
+    assert_eq!(terminal.code, CoreErrorCode::Conflict);
+    assert!(
+        terminal.message.contains(ended.state.as_str()),
+        "the refusal names the state: {}",
+        terminal.message
+    );
+}
+
+/// A prompt reaches a live driver, and the queue is bounded rather than
+/// unbounded (T310-B §4).
+///
+/// The driver here never reads its inbox, which is exactly the case the bound
+/// exists for: a caller that outruns the agent is refused, never allowed to
+/// grow memory without limit.
+#[tokio::test]
+async fn a_prompt_queue_is_bounded_and_refuses_rather_than_grows() {
+    let harness = start();
+    let (inbox, receiver) = RunInbox::pair();
+    let session = OwnedProviderSession {
+        session_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee".to_owned(),
+        pid: None,
+    };
+    // A driver that holds its inbox and never drains it, so the queue fills.
+    let drive = move |ctx: AgentRunContext| {
+        let mut receiver = receiver;
+        Box::pin(async move {
+            ctx.advance(AgentRunState::Running, None)?;
+            // Keep the receiver alive without taking from it.
+            ctx.cancelled().await;
+            let _ = &mut receiver;
+            Ok(())
+        }) as Driven
+    };
+    let run = harness
+        .manager
+        .start_with_inbox(harness.spec(), inbox, session.clone(), drive)
+        .expect("the run starts");
+
+    // Wait for the driver to have moved it to RUNNING before prompting.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while harness.manager.get(&run.id).map(|run| run.state) != Some(AgentRunState::Running) {
+        assert!(std::time::Instant::now() < deadline, "the driver never ran");
+        tokio::task::yield_now().await;
+    }
+
+    // The manager knows which provider session it owns, which is what the
+    // observed roster is later handed so it can exclude Gritty's own child.
+    assert_eq!(harness.manager.owned_provider_sessions(), vec![session]);
+
+    for index in 0..MAX_QUEUED_PROMPTS {
+        harness
+            .manager
+            .prompt(&run.id, format!("prompt {index}"), Actor::User)
+            .unwrap_or_else(|error| panic!("prompt {index} should be accepted: {error:?}"));
+    }
+    let full = harness
+        .manager
+        .prompt(&run.id, "one too many".to_owned(), Actor::User)
+        .expect_err("the queue is bounded");
+    assert_eq!(full.code, CoreErrorCode::Conflict);
+    assert!(
+        full.message.contains(&MAX_QUEUED_PROMPTS.to_string()),
+        "the refusal names the bound: {}",
+        full.message
+    );
+
+    // Accepting a prompt changes nothing about the run: it is queued, not seen.
+    let after = harness.manager.get(&run.id).expect("the run still exists");
+    assert_eq!(after.state, AgentRunState::Running);
+    assert!(after.activity.is_none());
 }
