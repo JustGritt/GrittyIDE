@@ -97,7 +97,9 @@ file decides.
 | Thing | Value | Branch |
 |---|---|---|
 | `PROTOCOL_VERSION` | ~~2.16.0~~ | `T300-CMD` — landed on `main` |
-| `PROTOCOL_VERSION` | **2.17.0** | `PROTO-W2-GIT` — the `git.*` commands |
+| `PROTOCOL_VERSION` | ~~2.17.0~~ | `PROTO-W2-GIT` — landed on `main` (`f261c71`) |
+| `PROTOCOL_VERSION` | **2.18.0** | `PROTO-W3` — the `search.query` command and its `CoreEvent` variant |
+| `PROTOCOL_VERSION` | **2.19.0** | `T310-B` — `runs.start` / `runs.prompt`, the `CLAUDE_CODE` variant |
 
 **`PROTO-W2-GIT` claims 2.17.0 and nothing else.** It spends no migration and
 no `SCHEMA_VERSION`: `git.status` and `git.diff` are reads, and nothing about a
@@ -130,8 +132,20 @@ rule below. `PROTOCOL_VERSION` **2.15.0** is on `main`; 2.13.0 and 2.14.0 were
 spent on the way and the resolved line took the highest. `SCHEMA_VERSION` is
 still **4** and migration **`0005` is free** — T326 needed neither.
 
-**The next free values are `PROTOCOL_VERSION` 2.18.0, `SCHEMA_VERSION` 5,
+**The next free values are `PROTOCOL_VERSION` 2.20.0, `SCHEMA_VERSION` 5,
 migration `0005`, and ADR-027.**
+
+**Claimed by the 2026-09-08 wave.** `PROTO-W3` takes **2.18.0** for `search.query`
+and the one `CoreEvent` variant T080 adds; it spends no `SCHEMA_VERSION` and no
+migration, because a search is a read and nothing about one is persisted. Its
+seams are the same four `PROTO-W2-GIT` names above, so the two must not be in
+flight together — `PROTO-W2-GIT` is already on `main`, which is what makes this
+safe. **2.19.0 is reserved for `T310-B`**, recorded now rather than when that
+ticket starts: the last handoff said 2.18.0 was "spoken for" by it and never
+wrote it down, which is rule 2's failure mode exactly. `T310-A` claims nothing —
+it is a new crate with no command, no event and no type on the wire, and
+`T100-U` claims nothing either, because `PROTO-W2-GIT` already shipped the wire
+it consumes.
 
 **ADR-026 is taken** by `T233-C` (`docs/decisions/ADR-026-agent-console-tab.md`,
 in the working tree at the time of writing). Recorded here after the fact rather
