@@ -11,6 +11,8 @@
 //! - [`WorkspacePath`]: the wire representation of a path inside the root
 //!   (`/`-separated, relative, no `.`/`..`; `""` is the root).
 //! - [`list_directory`]: one directory level, sorted, paginated, cancellable.
+//! - [`mutate`] (T042): create, rename/move, copy, remove and trash, resolved
+//!   through the same root policy and never following a final symlink.
 //! - [`file`] and [`detect`] (T030): bounded whole-file reads, content
 //!   detection (binary / UTF-8 / BOM / large), hashing, atomic replacement.
 //! - [`fixtures`]: the deterministic `large-repo` generator and the
@@ -21,6 +23,7 @@ pub mod error;
 pub mod file;
 pub mod fixtures;
 pub mod listing;
+pub mod mutate;
 pub mod path;
 pub mod root;
 pub mod watch;
@@ -38,6 +41,7 @@ pub use listing::{
     DEFAULT_PAGE_SIZE, DirEntry, DirEntryKind, DirectoryPage, IGNORED_DIRECTORY_NAMES, ListOptions,
     ListStats, Listing, MAX_PAGE_SIZE, SymlinkInfo, is_ignored, list_directory,
 };
+pub use mutate::{CopyOutcome, EntryKind};
 pub use path::WorkspacePath;
 pub use root::{ResolvedPath, WorkspaceRoot, canonicalize};
 pub use watch::{

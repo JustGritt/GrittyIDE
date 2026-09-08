@@ -100,6 +100,8 @@ file decides.
 | `PROTOCOL_VERSION` | ~~2.17.0~~ | `PROTO-W2-GIT` — landed on `main` (`f261c71`) |
 | `PROTOCOL_VERSION` | **2.18.0** | `PROTO-W3` — the `search.query` command and its `CoreEvent` variant |
 | `PROTOCOL_VERSION` | **2.19.0** | `T310-B` — `runs.start` / `runs.prompt`, the `CLAUDE_CODE` variant |
+| `PROTOCOL_VERSION` | **2.20.0** | `T042` — the `files.*` command domain |
+| ADR | **ADR-028** | `T042` — editing the file tree |
 
 **`PROTO-W2-GIT` claims 2.17.0 and nothing else.** It spends no migration and
 no `SCHEMA_VERSION`: `git.status` and `git.diff` are reads, and nothing about a
@@ -132,8 +134,11 @@ rule below. `PROTOCOL_VERSION` **2.15.0** is on `main`; 2.13.0 and 2.14.0 were
 spent on the way and the resolved line took the highest. `SCHEMA_VERSION` is
 still **4** and migration **`0005` is free** — T326 needed neither.
 
-**The next free values are `PROTOCOL_VERSION` 2.20.0, `SCHEMA_VERSION` 5,
-migration `0005`, and ADR-027.**
+**The next free values are `PROTOCOL_VERSION` 2.21.0, `SCHEMA_VERSION` 5,
+migration `0005`, and ADR-029.** ADR-027 is not free: `HANDOFF.md:102` reserves
+it for T310's "the feed comes from the run event ring, not the transcript"
+decision. That reservation was never written here, which is rule 2's failure
+mode again — it is written here now.
 
 **Claimed by the 2026-09-08 wave.** `PROTO-W3` takes **2.18.0** for `search.query`
 and the one `CoreEvent` variant T080 adds; it spends no `SCHEMA_VERSION` and no
@@ -169,12 +174,30 @@ Whoever writes the migration claims it here, and if that turns out to be some
 other ticket, ADR-021's §8 follows the number rather than the other way round.
 
 **ADR-021 fills the gap at 021**, which had been reserved by name in six
-documents since T300-C and never written. The next free ADR number is unchanged
-at **ADR-027**. While writing it, two rows in `docs/decisions/README.md` were
+documents since T300-C and never written. The next free ADR number was
+**ADR-027** when this was written; T042 has since taken **028** and left 027
+reserved, so the live answer is the "next free values" line above. While writing
+it, two rows in `docs/decisions/README.md` were
 found duplicated — ADR-024 and ADR-025 each appeared twice, once with a stale
 title and a wrong `Accepted` status — which is rule 3b's failure mode surviving
 in the index rather than in the filenames. The index now matches the files;
 nothing asserts against this, so it is worth looking for again after a wave.
+
+**`T042` spends 2.20.0 and ADR-028, rebased on top of the above.** The `files.*`
+domain — create, rename, move, delete, undo — is additive: new commands, new
+request/response types, one new `DocumentChangeCause` variant (`MOVED`), and
+**no** `CoreEvent` variant, because a mutation's response carries the
+directories to re-list and the T070 watcher already emits
+`WorkspaceEntriesChanged` for the rest. It spends no `SCHEMA_VERSION` and no
+migration: an undo journal lives for as long as the workspace is open and is
+deliberately not persisted.
+
+It claimed 2.20.0 rather than 2.19.0 because `T310-B` holds that, and it took
+**ADR-028** rather than 027 because `HANDOFF.md:102` had reserved 027 by name for
+T310's run-feed decision without ever writing it here — rule 2's failure mode,
+now recorded above. Its seams were exactly `PROTO-W3`'s, so it was built in a
+worktree and rebased once `PROTO-W3` landed (`1ed3505`); the only real conflict
+was `PROTOCOL_VERSION` itself, resolved to the higher claimed value.
 
 **ADR-026 is taken** by `T233-C` (`docs/decisions/ADR-026-agent-console-tab.md`,
 in the working tree at the time of writing). Recorded here after the fact rather

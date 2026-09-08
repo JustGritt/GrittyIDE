@@ -52,6 +52,10 @@ use crate::terminal::wire::{
     ResizeTerminalRequest, SpawnTerminalRequest, Terminal, TerminalColor, TerminalProfile,
     WriteTerminalRequest,
 };
+use crate::workspace::files::{
+    CreateEntryRequest, DeleteEntriesRequest, FileOperationResponse, FileOperationResult,
+    MoveEntriesRequest, RenameEntryRequest, UndoRequest,
+};
 use crate::workspace::{
     CloseWorkspaceRequest, ForgetWorkspaceRequest, ListDirectoryRequest, ListDirectoryResponse,
     OpenWorkspaceRequest, RecentWorkspace, RecentWorkspacesRequest, Workspace,
@@ -140,6 +144,15 @@ fn export_bindings() {
     CloseWorkspaceRequest::export_all(&cfg).expect("export CloseWorkspaceRequest");
     ListDirectoryRequest::export_all(&cfg).expect("export ListDirectoryRequest");
     ListDirectoryResponse::export_all(&cfg).expect("export ListDirectoryResponse");
+    // T042 `files.*`. `NewEntryKind`, `TransferMode`, `DeleteMode` and
+    // `MovedEntry` come along transitively through these roots.
+    CreateEntryRequest::export_all(&cfg).expect("export CreateEntryRequest");
+    RenameEntryRequest::export_all(&cfg).expect("export RenameEntryRequest");
+    MoveEntriesRequest::export_all(&cfg).expect("export MoveEntriesRequest");
+    DeleteEntriesRequest::export_all(&cfg).expect("export DeleteEntriesRequest");
+    UndoRequest::export_all(&cfg).expect("export UndoRequest");
+    FileOperationResult::export_all(&cfg).expect("export FileOperationResult");
+    FileOperationResponse::export_all(&cfg).expect("export FileOperationResponse");
     RecentWorkspace::export_all(&cfg).expect("export RecentWorkspace");
     RecentWorkspacesRequest::export_all(&cfg).expect("export RecentWorkspacesRequest");
     ForgetWorkspaceRequest::export_all(&cfg).expect("export ForgetWorkspaceRequest");
