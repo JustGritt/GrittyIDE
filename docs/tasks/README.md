@@ -19,6 +19,7 @@ the workflow below are hand-maintained.
 | [T030](T030-file-io-documents.md) | File I/O + document/buffer contract (Gate B) | 0/1A | T020 | done |
 | [T040](T040-monaco-shell.md) | Monaco shell | 0/1A | T030 | done |
 | [T041](T041-preview-tabs.md) | Preview tabs, and closing more than one at a time | 1A | T020, T030, T040 | review |
+| [T042](T042-explorer-file-operations.md) | Editing the file tree: create, rename, move, delete, undo | 1A | T020, T030, T040, T070 | doing |
 | [T045](T045-drag-and-drop.md) | Drag and drop files/folders onto the window | 1A | T030, T040 | review |
 | [T046](T046-resizable-panes.md) | Resizable panes, and a terminal on opening | 1A | T040, T060, T095 | done |
 | [T047](T047-terminal-names.md) | Naming terminal sessions | 1A | T090, T095 | done |
@@ -37,7 +38,7 @@ the workflow below are hand-maintained.
 | ADR-001 | Confirm or reject Tauri | 0 | Phase 0 tests | todo |
 | MANUAL-PASS-COVERAGE | The manual pass covers every task sitting at review (review-findings finding 6) | 0 | T041, T045, T051, T210, T220, T221, T231, T232, T325 | review |
 | [T070](T070-file-watcher.md) | File watcher | 1A/2 | T020, T030, ADR-001 | review |
-| [T080](T080-search.md) | Search: the walk, the match, the streamed result (the core half) | 2 | T020, T070, ADR-001 | todo |
+| [T080](T080-search.md) | Search: the walk, the match, the streamed result (the core half) | 2 | T020, T070, ADR-001 | doing |
 | [T100](T100-git-baseline.md) | Git baseline: gix status and typed diff (the core half) | 2 | T020, ADR-001 | review |
 | [T110](T110-diagnostics.md) | Diagnostics | 2 | T060, T090, T220, T325, ADR-001 | todo |
 | [T200](T200-workstream-model.md) | Workstream model + decisions (Gate C) | 3 | T010, T020, T060 | done |
@@ -54,9 +55,14 @@ the workflow below are hand-maintained.
 | [JSDOM-VITEST](JSDOM-VITEST-component-tests.md) | A jsdom vitest project, so a `.tsx` can be tested against a DOM | 3 | T096, T232 | review |
 | [T300](T300-agent-protocol-fake.md) | Agent event protocol + deterministic fake agent (Gate D) | 4 | T200, T210 | superseded |
 | T305 | Agent capability model | 4 | T300 | unspec |
-| T310 | First real adapter | 4 | T300, T305 | unspec |
+| T310 | First real adapter: a Claude Code run Gritty owns, and can prompt | 4 | T300-WIRE | superseded |
+| T310-A | gritty-agent-claude: the process, the framing, the translation | 4 | T300-WIRE | doing |
+| T310-B | CLAUDE_CODE, the run inbox, and runs.start/runs.prompt | 4 | T310-A | todo |
 | T315 | Live agent activity | 4 | T310 | superseded by T220/T230/T231/T232 |
+| T310-U | The prompt box, and an owned run in the console | 4 | T310-B | todo |
+| T310-ANSWER | Arm the host permission verdict for an owned run | 4 | T310-B | todo |
 | T320 | Context manifest | 4 | T300 | unspec |
+| T310-RESUME | Take over an observed session as an owned run | 4 | T310-B | unspec |
 | [T325](T325-workspace-ownership.md) | Workspace ownership registry | 4 | T200, T210, ADR-019 | done |
 | [T326](T326-ownership-violations.md) | Observed ownership violations | 4 | T223, T230, T325 | review |
 | T330 | Write interception (enforced ownership) | 4 | T325, ADR-018 amendment | unspec |
@@ -66,7 +72,7 @@ the workflow below are hand-maintained.
 | T410 | Attention queue | 5 | T210, T325, T335 | unspec |
 | ADR-017 | Decide the terminal command-block contract (drafted, undecided) | 2 | – | todo |
 | ADR-018A | ADR-018 amendment: a hook that may refuse a write | 4 | T326 | todo |
-| ADR-021 | Persistence for a run Gritty owns | 4 | T300-C | todo |
+| ADR-021 | Persistence for a run Gritty owns | 4 | T300-C | review |
 | ADR-022 | Search engine: in-process grep/ignore, or spawn ripgrep | 2 | – | review |
 | ADR-023 | Git library: gix, git2, or porcelain | 2 | – | review |
 | CI-COST | CI: self-hosted macOS runner, and stop burning metered minutes |  | – | review |
@@ -80,11 +86,11 @@ the workflow below are hand-maintained.
 | PLAN-FANOUT | Split the remaining work into fan-out-sized tickets, and the lanes to run them in |  | – | review |
 | PROTO-W2 | Wave 2 wire, in one PR: watcher, git, terminal blocks, diagnostics, violations | 2 | ADR-001, ADR-017, ADR-023 | todo |
 | PROTO-W2-GIT | The git wire: git.status and git.diff reach the shell | 2 | T100,ADR-023 | review |
-| PROTO-W3 | Wave 3 wire, in one PR: search | 2 | ADR-022 | todo |
+| PROTO-W3 | Wave 3 wire, in one PR: search | 2 | ADR-022 | doing |
 | SIDECAR-BUNDLE-CONFIG | Move externalBin to a bundle-time config so a compile never needs a staged binary | 3 | SIDECAR-FRESH-CHECKOUT | unspec |
 | SIDECAR-FRESH-CHECKOUT | A fresh clone or worktree cannot build gritty-desktop until T225's sidecar is staged by hand | 3 | T225 | review |
 | T080-U | The search panel | 2 | PROTO-W3, T080 | todo |
-| T100-U | Git status and diff, in the shell | 2 | PROTO-W2, T100 | blocked |
+| T100-U | Git status and diff, in the shell | 2 | PROTO-W2, T100 | review |
 | T222-CODEX | Codex, as one provider file | 3 | T222-SEAM | todo |
 | T222-SEAM | A provider registry, so providers stop being serial | 3 | T220 | unspec |
 | [T233](T233-agents-sidebar.md) | Agents in the left sidebar (design artboard 12a) | 3 | – | unspec |
@@ -96,9 +102,9 @@ the workflow below are hand-maintained.
 | T300-PANEL | A run belongs on its workstream's island row, not a fourth roster | 4 | T300-WIRE | unspec |
 | T300-WIRE | Connect the three Gate D halves: fake driver, manager, runs.* adapters | 4 | T300-CORE | review |
 | T400-R | Worktree create and remove | 5 | T100 | unspec |
-| T233-M | The roster row model: owned runs and observed sessions in one list | 3 | T300-C | doing |
-| T233-S | The Agents section in the left sidebar, and the sidebar tab strip (12a) | 3 | T233-M | doing |
-| T233-C | The full-height agent console, and retiring the right rail (12a) | 3 | T233-S,T232 | doing |
+| T233-M | The roster row model: owned runs and observed sessions in one list | 3 | T300-C | review |
+| T233-S | The Agents section in the left sidebar, and the sidebar tab strip (12a) | 3 | T233-M | review |
+| T233-C | The full-height agent console, and retiring the right rail (12a) | 3 | T233-S,T232 | review |
 <!-- board:table end -->
 
 ## Dependency graph (architecture addendum §2)
