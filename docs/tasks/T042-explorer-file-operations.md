@@ -1,7 +1,7 @@
 # Task T042 — Editing the file tree: create, rename, move, delete, undo
 
 - **Phase:** 1A
-- **Status:** doing
+- **Status:** review
 - **Depends on:** T020 (`WorkspaceRoot`, `WorkspacePath`, the path policy every
   mutation resolves through), T030 (the document/buffer contract, Gate B — a
   rename re-keys an open document rather than orphaning it), T040 (the tab strip
@@ -227,119 +227,109 @@ must not be open at the same time; whichever lands second rebases.
 
 ## Completion report
 
-**Status: the core is built and green; the wire and the UI surface are not.**
-This is a partial report, written so the next session starts from facts rather
-than from a diff.
-
 ### Summary
 
-The write half the explorer never had now exists and is tested end to end in
-Rust. `gritty_workspace::mutate` creates, renames, copies, removes and trashes,
-resolved through the same root policy `documents.save` uses. `files.*` puts five
-commands on top of it with an undo journal, the budget hand-over
-`workspace.list` already had, and the two things the document layer must be told.
-The renderer has the selection model the tree never had — as pure modules — plus
-the reducer fix that made it necessary.
+The explorer can change the tree. `gritty_workspace::mutate` does the
+filesystem work, `files.*` puts five commands and an undo journal on top of it,
+the wire carries them, and the explorer became a real tree widget to drive them
+— selection, keyboard, context menu, inline rename, drag-to-move.
 
-What is **not** done: the typed client, the Tauri adapters, and every pixel. No
-user can perform any of these operations yet. See "What remains".
+Built in a worktree because `PROTO-W3` held the wire's files for the first half
+of the session, then rebased onto it once it landed (`1ed3505`); the only real
+conflict was `PROTOCOL_VERSION`, resolved to the 2.20.0 this task had claimed.
 
 ### Files changed
 
 | File | What |
 |---|---|
 | `crates/workspace/src/mutate.rs` (new) | `create`, `rename`, `copy`, `remove`, `trash`, `exists`; the two resolution rules |
-| `crates/workspace/src/error.rs` | `AlreadyExists` |
-| `crates/workspace/src/lib.rs`, `Cargo.toml`, root `Cargo.toml` | module, re-exports, the `trash` dependency |
-| `crates/gritty-core/src/workspace/files.rs` (new) | the five commands, wire types, `DocumentTreeGuard`, the transfer planner and the copy-name rule |
+| `crates/workspace/src/error.rs`, `lib.rs`, `Cargo.toml`, root `Cargo.toml` | `AlreadyExists`, the module, the `trash` dependency |
+| `crates/gritty-core/src/workspace/files.rs` (new) | five commands, wire types, `DocumentTreeGuard`, the transfer planner, the copy-name rule |
 | `crates/gritty-core/src/workspace/journal.rs` (new) | the bounded undo/redo stacks, pure |
-| `crates/gritty-core/src/workspace/mod.rs` | modules, the `AlreadyExists` → `Conflict` arm |
 | `crates/gritty-core/src/document/mod.rs` | `DocumentChangeCause::Moved`, `rehome`, `dirty_under`, `relocate` |
-| `crates/gritty-core/src/protocol/{mod,export}.rs` | 2.20.0, seven new root types |
-| `packages/protocol/src/generated/**` | regenerated (11 new files) |
+| `crates/gritty-core/src/shell.rs` | `RevealPathRequest`, `reveal_path`, and `reveal` on `ExternalOpener` |
+| `crates/gritty-core/src/protocol/{mod,export}.rs` | 2.20.0, eight new root types |
+| the Tauri composition root (`commands`, `lib`, `core`, `shell`) | seven adapters, the handler table, `FileService` + its document guard, and the one platform branch |
+| `packages/protocol/src/{commands,client,types}.ts` + generated | the `files` namespace and `shell.revealPath` |
 | `apps/desktop/src/features/explorer/explorer-{names,selection,keymap}.ts` (new) | the three pure modules |
-| `apps/desktop/src/features/explorer/explorer-reducer.ts` | `selection` state, `pruneSelection`, the `applyPage` fix |
+| `apps/desktop/src/features/explorer/explorer-tree.tsx` (new) | the tree widget: roles, roving `tabIndex`, menu, inline input, drag, dialog |
+| `apps/desktop/src/features/explorer/{explorer-panel.tsx,explorer-reducer.ts,use-explorer.ts}` | the frame keeps the frame; selection state, `invalidate`, the `applyPage` fix; the six calls, the clipboard, undo labels |
+| `apps/desktop/src/app.css` | selection, focus ring, cut, drop target, inline input |
 | `docs/` | this file, ADR-028, `workspace.md`, `documents.md`, the ADR index, `merge-queue.md` |
 
 ### Tests executed
 
-`pnpm check` — **exit 0**, the whole gate: Biome, tsc, vitest, `cargo fmt
---check`, `clippy -D warnings`, `cargo test`, `check:generated`.
+`pnpm check` — **exit 0**: Biome, tsc, vitest, `cargo fmt --check`,
+`clippy -D warnings`, `cargo test`, `check:generated`.
 
-- `gritty-workspace` (8 new): nested create and refusal to truncate; the root, a
-  temp name and a file-as-parent; rename and an occupied name; a directory into
-  its own descendant; recursive copy and what a cancellation left; a symlink
-  moved, copied and removed **as itself** (a broken link renamed, a copied link
-  still a link, removing a link not following it); a symlink escaping the root
-  refused with nothing outside touched; recursive remove.
-- `gritty-core` (20 new): 6 journal (inverses, redo-clearing, refused-undo
-  leaves the stack, the bound, the round trip) and 14 `files` — 5 pure (ancestor
-  naming, the copy-name rule, dotfiles and double extensions, a separator
-  refused) and 9 against a real filesystem (create/undo/redo, rename telling the
-  document layer, a rename whose "name" is a path, the dirty-document conflict
-  and its force, a delete never being undoable, copy naming and undoing to
-  nothing, a move never inventing a name, an undo refused when the destination
-  was taken and still undoable after, an empty journal).
-- `apps/desktop` (36 new, 69 in the explorer overall): name policy, selection algebra,
-  keymap, and two reducer tests — selection pruned by a re-list, and `expanded`
-  surviving one.
-
-**Not tested, and not claimed:** nothing has been clicked. No drag has happened,
-nothing has reached Finder's Trash, and `trash::delete` has never been called
-outside a type check — the delete tests use `PERMANENT` deliberately, so the test
-suite cannot fill a developer's Trash.
+- `gritty-workspace` (8): nested create and no truncate; the root, a temp name,
+  a file-as-parent; rename onto an occupied name; a directory into its own
+  descendant; recursive copy and what a cancellation left; a symlink moved,
+  copied and removed **as itself**; a symlink escape refused with nothing
+  outside touched; recursive remove.
+- `gritty-core` (20): 6 journal, 14 `files` — the copy-name rule, dotfiles and
+  double extensions, a separator refused, create/undo/redo, rename telling the
+  document layer, the dirty-document conflict and its force, a delete never
+  being undoable, a move never inventing a name, an undo refused when the
+  destination was taken and still undoable after, an empty journal.
+- The command adapters (1): every command through the real Tauri adapters on
+  the mock runtime — the traversal/absolute/backslash table, an unknown
+  workspace, a `NotFound` target, the `ready` arm of a move, and undo/redo
+  walking the journal to empty and back.
+- `packages/protocol` (6): the request shapes, both arms of a move, the
+  dirty-document refusal surfacing as a `CoreError` that still names what is
+  unsaved, and `force` omitted rather than sent as `undefined`.
+- `apps/desktop` (46): name policy, selection algebra, keymap, the reducer's
+  new actions, `expanded` surviving a re-list, a tab following a rename — and
+  10 jsdom tests driving the real component (see below).
 
 ### Architectural decisions
 
-Recorded in full in ADR-028. Three were made *while building* and changed the
-spec above:
+In ADR-028. Four were made *while building* and changed the spec:
 
-- **A move never invents a name.** The copy-suffix rule is copy-only. Building it
-  the other way produced a real bug the tests caught: dragging a file onto the
-  folder it already lived in silently renamed it to `main copy.rs`.
+- **A move never invents a name.** The copy-suffix rule is copy-only. Written
+  the other way it produced a real bug the tests caught: dragging a file onto
+  the folder it already lived in silently renamed it to `main copy.rs`.
 - **The dirty-document guard is delete-only.** A move is safe because `rehome`
   carries the buffer, so refusing it would be a prompt with no danger behind it.
 - **Undo's `Remove` step is idempotent.** Undoing a create whose file something
-  else already deleted is that step's goal reached, not a failure — and removing
-  nothing cannot lose work.
+  else deleted is that step's goal reached, and removing nothing loses nothing.
+- **The documents layer needed no change.** `withDocument` already replaces the
+  path without bumping `bufferGeneration`, so a renamed file's tab follows and
+  Monaco keeps its undo stack. A test now pins that rather than leaving it
+  accidental.
 
 ### Known limitations
 
-- **A delete cannot be undone in Gritty on macOS.** Verified against the crate
-  source, not assumed: `trash-5.2.8/src/lib.rs:346-350` `#[cfg]`-excludes
-  `os_limited` (and so `restore_all`) on macOS.
-- **Cancelling a copy or delete leaves partial state.** `cancelledAfter` counts
-  what was written; nothing is rolled back.
+- **Nothing has been clicked.** This machine has no screen or assistive access,
+  so the manual pass in "Acceptance criteria" has **not** been performed. What
+  stands in for it is `explorer-tree.dom.test.tsx`: ten tests through the real
+  component and the real typed client over a stub transport. That covers the
+  wiring; it does not cover what the thing looks like, whether the drag feels
+  right, or whether an entry really lands in Finder's Trash.
+- **`trash::delete` has never actually run.** Every delete test uses
+  `PERMANENT`, deliberately, so the suite cannot fill a developer's Trash.
+- **A delete cannot be undone on macOS.** Verified against the crate source:
+  `trash-5.2.8/src/lib.rs:346-350` `#[cfg]`-excludes `os_limited`.
+- **Cancelling a copy or delete leaves partial state**; `cancelledAfter` counts
+  it and nothing is rolled back.
+- **Only the macOS arm of `reveal` has been run.** Windows and Linux compile and
+  are not claimed (rule 11).
 - `files.move` plans every destination before moving, so a batch where an early
   move frees a name a later one wants will not notice.
-- The Windows-reserved-name check warns and does not refuse (macOS-first).
-
-### What remains
-
-1. **The wire.** `COMMANDS`, the `CoreClient.files` namespace and its
-   implementation, `types.ts` re-exports, and one `#[tauri::command]` adapter per
-   command in `commands.rs` + `generate_handler!`. Mechanical, and **blocked**:
-   `packages/protocol/**` and `apps/desktop/src-tauri/src/**` were held by
-   `PROTO-W3`'s live lease for the whole of this session (AGENTS.md rule 15).
-2. **`FileService` is never constructed.** `core.rs` must build it and call
-   `set_document_guard` with the `DocumentManager`, the way
-   `set_close_guard` is already called.
-3. **The UI**: `role="tree"`/`treeitem` with the roving `tabIndex`, the context
-   menu (`components/menu.tsx`), the inline input (`terminal-pill.tsx`'s
-   pattern), the delete dialog (`close-dialog.tsx`), HTML5 drag
-   (`tab-strip.tsx`'s MIME pattern), and the `use-explorer` methods. Extracting
-   the tree into its own `explorer-tree.tsx` is worth doing rather than growing
-   `explorer-panel.tsx`, which `T100-U` is restructuring concurrently.
-4. **`documents-reducer.ts`** must handle `cause: MOVED` so the tab follows.
-5. **The manual pass** in "Acceptance criteria" — none of it has been performed.
+- The Windows-reserved-name check warns rather than refuses (macOS-first).
 
 ### Follow-up tasks
 
+- The manual pass: the acceptance list, performed by a human on a machine with a
+  screen. Until then this is "tested", not "seen working".
 - Whether a user-initiated mutation should consult a workstream's ownership
-  lease (T325/T330). Deliberately out of scope; undecided anywhere in the repo.
+  lease (T325/T330) — deliberately out of scope, undecided anywhere in the repo.
 - `docs/architecture/overview.md`'s command list is stale (it still says
-  `PROTOCOL_VERSION` is "currently 1.3.0") and `docs/decisions/README.md` has
-  duplicate ADR-024 and ADR-025 rows. Neither is this task's to fix in the same
-  PR, both are worth a ticket.
-- A cross-device rename falls back to copy-then-remove and that branch has no
-  test: it needs a mount point inside a workspace root, which no fixture has.
+  `PROTOCOL_VERSION` is "currently 1.3.0") and gains no `files.*` row here.
+- A cross-device rename falls back to copy-then-remove; that branch has no test,
+  because it needs a mount point inside a workspace root and no fixture has one.
+- The explorer's `.dom.test.tsx` shims nothing for `CSS.escape` or
+  `navigator.clipboard`; a jsdom without them would fail differently. The
+  `JSDOM-VITEST` ticket's "move the shims to a shared setup file at the second
+  consumer" is now due.
