@@ -1,7 +1,7 @@
 # Task T101-C — The read contract: `git.log` and `git.show`
 
 - **Phase:** 2
-- **Status:** in-progress
+- **Status:** review
 - **Depends on:** T100 (the git core), `PROTO-W2-GIT` (the wire it extends)
 
 ## Objective
@@ -54,9 +54,11 @@ error envelope is extended — `git.status` already established every piece.
 
 - **No write surface.** Nothing stages, commits, discards or checks out. That is
   `T102-*`, behind ADR-029.
-- **No implementation.** The `gix` walk and blob read are `T101-R`; this ticket
-  is the contract, so the two can be reviewed apart the way `T300-C` and
-  `T300-CORE` were.
+- ~~**No implementation.** The `gix` walk and blob read are `T101-R`.~~
+  **Departed from deliberately** — see the completion report: a registered
+  command name with no handler behind it is a client method that rejects at
+  runtime, and nothing in the tree asserts against that state. The two tickets
+  landed in one commit and are reviewed together.
 - No UI — that is `T101-U`.
 - No network. No `fetch`, and `git.log` walks local history only.
 - No change to the wire types T100 froze.
@@ -120,4 +122,100 @@ pnpm check
 
 ## Completion report
 
-_Filled on completion._
+### Summary
+
+`git.log` and `git.show` exist end to end, at `PROTOCOL_VERSION` 2.21.0. The
+Changes panel gained a **History** view on the first of them; the second has no
+consumer yet and is the original side the diff tab (`T101-D`) will need.
+
+**Built together with `T101-R` rather than landing alone**, and that is a
+deliberate departure from the ticket split. `commands.ts` naming `git_log` with
+no registered handler behind it is a client method that rejects at runtime, and
+nothing in the tree asserts against that state — there is no test cross-checking
+`COMMANDS` against `generate_handler!`. So the contract landed with its
+implementation, in one commit, and the two tickets are reviewed together.
+
+### Files changed
+
+| File | Why |
+|---|---|
+| `docs/merge-queue.md` | claim 2.21.0 and 2.22.0 and ADR-029 **before** spending any |
+| `docs/decisions/ADR-029-git-write-backend.md` | new; the write-backend decision, `Proposed` |
+| `crates/git/src/model.rs` | `CommitSummary`, `CommitSignature`, `CommitPage`, `BlobContent`, `NoTextReason`, `MAX_SHOW_BYTES` |
+| `crates/git/src/log.rs` | new; the paged walk and the path filter |
+| `crates/git/src/show.rs` | new; the blob read and the decode |
+| `crates/git/src/error.rs` | `NotFoundAtRevision` |
+| `crates/git/src/fixtures.rs` | `history()` — four commits, one binary blob |
+| `crates/gritty-core/src/git/wire.rs` | two requests, two three-armed responses |
+| `crates/gritty-core/src/git/mod.rs` | `log`/`show` on `GitService`, `LOG_KIND`/`SHOW_KIND`, `DEFAULT_LOG_PAGE_SIZE` |
+| `crates/gritty-core/src/protocol/{mod,export}.rs` | 2.21.0, four root exports |
+| `packages/protocol/src/generated/*` | 9 generated types (never hand-edited) |
+| `packages/protocol/src/{commands,client,types}.ts` | two names, two methods, nine re-exports |
+| `packages/protocol/src/git-client.test.ts` | +3 tests |
+| `apps/desktop/src-tauri/src/{commands,lib}.rs` | two adapters, two handler registrations |
+| `apps/desktop/src-tauri/tests/commands.rs` | +3 integration tests |
+
+### Tests actually executed
+
+- `cargo test -p gritty-git --lib` — 16 new (8 `log`, 8 `show`)
+- `cargo test -p gritty-desktop --test commands git_` — 6 passed, 3 new
+- `pnpm exec vitest run packages/protocol` — 103 passed across 17 files
+- `cargo test --workspace` — **exit 0**, 977 passed, 0 failed
+- `cargo clippy --workspace --all-targets -- -D warnings` — clean
+- `cargo fmt --all --check` — clean; `biome check .` — clean, 289 files
+
+### Architectural decisions
+
+**A `CommitPage` has no `total`.** `RepositoryStatus` and `DiffSummary` both
+carry one because the walk that produces a page produces the whole list.
+Counting every commit in a repository means walking its entire history to render
+a number beside twenty rows, and reporting a count that was never computed would
+be worse than reporting none. The page says only whether more follow.
+
+**The log cursor is a commit id, not an offset.** Nothing is cached, so a page
+boundary has to survive being recomputed; an offset silently skips a row when a
+commit lands between two pages. A cursor naming no commit in this history yields
+an empty page rather than restarting at the top — a boundary that finds nothing
+rather than a page that lies.
+
+**`git.show` reuses `gritty_workspace::decode_text`.** A blob and a file on disk
+must not disagree about what "binary" means, or a diff would show text on one
+side and refuse it on the other for the same file. The size cap is checked
+*before* the decode, so an oversized blob is never copied into a `String` on its
+way to being refused. `MAX_SHOW_BYTES` is 16 MiB against a document's 64 MiB,
+because two blobs cross the boundary at once for one diff.
+
+**No new dependency.** Both commands are `gix` calls inside the crate that
+already has it.
+
+### Known limitations
+
+- **The path filter does not follow renames.** A file's history stops at the
+  commit that renamed it. Rename detection over a whole history is far more
+  expensive than the per-diff detection `diff.rs` does, and a partial answer
+  presented as complete is what the failure table forbids. Documented in the
+  module header; a caller who wants the earlier history asks again with the old
+  path.
+- **The `pending` arm is not proven end to end**, the same gap `PROTO-W2-GIT`
+  recorded: provoking it needs the `#[cfg(test)]` `read_delay` hook inside
+  `gritty-core`, unreachable from the desktop integration test. The hand-over
+  itself is `git.status`'s and is tested there.
+- `git.show` has no consumer yet — `T101-D` is the diff tab.
+- **Not seen on a screen.** This session has no screen access.
+
+### Follow-up tasks
+
+| Ticket | Why |
+|---|---|
+| `T101-D` | the Monaco diff tab; blocked on `T310-U`'s uncommitted work in its three mount points |
+| `T102-C/R/U` | the write surface; blocked on ADR-029 |
+| `EXPLORER-FORCE-REPLAY` | `deleteAnyway` is dead code and the notice beside it replays the wrong action |
+| `CONFIRM-DIALOG` | no shared confirm dialog; a discard would be the third hand-written copy |
+
+### Remaining risks
+
+- `gix`'s commit walk is younger than libgit2's. Shallow clones, grafts and
+  replace refs are the likely edges; none is covered by a fixture.
+- The history is read on demand and never invalidated, so a commit made outside
+  Gritty is invisible until Refresh. T070 integration is a separate follow-up,
+  as it is for the status.
