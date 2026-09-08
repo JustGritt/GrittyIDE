@@ -57,12 +57,15 @@ the workflow below are hand-maintained.
 | T305 | Agent capability model | 4 | T300 | unspec |
 | T310 | First real adapter: a Claude Code run Gritty owns, and can prompt | 4 | T300-WIRE | superseded |
 | T310-A | gritty-agent-claude: the process, the framing, the translation | 4 | T300-WIRE | review |
-| T310-B | CLAUDE_CODE, the run inbox, and runs.start/runs.prompt | 4 | T310-A | doing |
+| T310-B | CLAUDE_CODE, the run inbox, and runs.start/runs.prompt | 4 | T310-A | review |
 | T315 | Live agent activity | 4 | T310 | superseded by T220/T230/T231/T232 |
-| T310-U | The prompt box, and an owned run in the console | 4 | T310-B | todo |
+| T310-U | The prompt box, and an owned run in the console | 4 | T310-B | review |
 | T310-ANSWER | Arm the host permission verdict for an owned run | 4 | T310-B | todo |
+| T310-VERDICT-EVENT | Record a permission verdict in a run's ring | 4 | T310-B | unspec |
 | T320 | Context manifest | 4 | T300 | unspec |
 | T310-RESUME | Take over an observed session as an owned run | 4 | T310-B | unspec |
+| T310-U-FILES | Files touched, on an owned run's console | 4 | T310-U | unspec |
+| T310-U-CANCEL | Stop a run from the console it is showing in | 4 | T310-U | unspec |
 | [T325](T325-workspace-ownership.md) | Workspace ownership registry | 4 | T200, T210, ADR-019 | done |
 | [T326](T326-ownership-violations.md) | Observed ownership violations | 4 | T223, T230, T325 | review |
 | T330 | Write interception (enforced ownership) | 4 | T325, ADR-018 amendment | unspec |
@@ -75,10 +78,13 @@ the workflow below are hand-maintained.
 | ADR-021 | Persistence for a run Gritty owns | 4 | T300-C | review |
 | ADR-022 | Search engine: in-process grep/ignore, or spawn ripgrep | 2 | – | review |
 | ADR-023 | Git library: gix, git2, or porcelain | 2 | – | review |
+| ADR-029 | Git writes run through the git binary, not gix | 2 | – | unspec |
 | CI-COST | CI: self-hosted macOS runner, and stop burning metered minutes |  | – | review |
 | CI-LINUX-DARK | Linux CI is dark until the minute allowance resets (1 Oct) or a spending limit is set |  | – | blocked |
 | [CI-RUNNER-GC](CI-RUNNER-GC-disk-retention.md) | Self-hosted runner never cleans up: target/ and stale bundles grow unbounded on the dev Mac |  | – | review |
+| CONFIRM-DIALOG | Extract a shared confirm dialog before a third copy is written | 2 | – | unspec |
 | [EVENT-LISTEN-GAP](EVENT-LISTEN-GAP-startup-events.md) | An event emitted before the WebView is listening reaches nobody | 1 | T010 | review |
+| EXPLORER-FORCE-REPLAY | deleteAnyway is dead code and the notice replays the wrong action | 2 | – | todo |
 | MARKDOWN-BENCH | A markdown benchmark with a recorded baseline, if a perf gate is wanted | 3 | MARKDOWN-BUDGET-FLAKE | unspec |
 | MARKDOWN-BUDGET-FLAKE | render.test.ts 2000ms wall-clock budget fails under concurrent-build load | 3 | – | review |
 | MONACO-JSDOM-FLAKE | model-eol.dom.test.ts times out its 10s beforeAll under load | 3 | JSDOM-VITEST | review |
@@ -91,6 +97,13 @@ the workflow below are hand-maintained.
 | SIDECAR-FRESH-CHECKOUT | A fresh clone or worktree cannot build gritty-desktop until T225's sidecar is staged by hand | 3 | T225 | review |
 | T080-U | The search panel | 2 | PROTO-W3, T080 | todo |
 | T100-U | Git status and diff, in the shell | 2 | PROTO-W2, T100 | review |
+| T101-C | The read contract: git.log and git.show | 2 | T100 | review |
+| T101-D | The diff as an editor tab (Monaco diff editor) on git.show | 2 | T101-R | blocked |
+| T101-R | gix: a paged commit walk, and a blob at a revision | 2 | T101-C | review |
+| T101-U | History in the git panel, on git.log | 2 | T101-R | review |
+| T102-C | The write contract: stage, unstage, discard, commit | 2 | ADR-029 | blocked |
+| T102-R | gritty-git-write: the subprocess adapter and the git probe | 2 | T102-C | blocked |
+| T102-U | Staging, discard and the commit box in the Changes panel | 2 | T102-R | blocked |
 | T222-CODEX | Codex, as one provider file | 3 | T222-SEAM | todo |
 | T222-SEAM | A provider registry, so providers stop being serial | 3 | T220 | unspec |
 | [T233](T233-agents-sidebar.md) | Agents in the left sidebar (design artboard 12a) | 3 | – | unspec |
