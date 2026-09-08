@@ -24,6 +24,7 @@ use gritty_core::session::{SessionService, SessionStore, SessionTap, TAP_CAPACIT
 use gritty_core::shell::{ExternalOpener, ShellService};
 use gritty_core::terminal::TerminalManager;
 use gritty_core::workspace::WorkspaceManager;
+use gritty_core::workspace::files::{DocumentTreeGuard, FileService};
 use gritty_core::workstream::WorkstreamManager;
 use gritty_persistence::DB_FILE_NAME;
 use gritty_terminal::SystemPtyHost;
@@ -60,6 +61,11 @@ pub struct Core {
     /// operation registry because its work is always a cancellable operation
     /// rather than something a command handler waits for.
     pub searches: Arc<SearchManager>,
+    /// Changing the tree (T042). Holds the operation registry for the same
+    /// reason `searches` does — a copy or delete over a large tree outlives a
+    /// command — and the document manager as a `Weak` guard, so a rename can
+    /// re-key the buffers that were open on the files it moved.
+    pub files: Arc<FileService>,
     pub session: Arc<SessionService>,
     pub terminals: Arc<TerminalManager>,
     pub workstreams: Arc<WorkstreamManager>,
@@ -136,6 +142,16 @@ impl Core {
             registry.clone(),
             handle.clone(),
         );
+        // Changing the tree (T042). The document manager is handed over as a
+        // `Weak` guard the way it installs itself as the workspace close guard
+        // above: `files.rename` must re-key open documents, because ADR-025's
+        // directory-grained watch can never report that a rename happened, and
+        // `files.delete` must be able to ask what is unsaved before it runs.
+        let files = FileService::new(handle.clone(), workspaces.clone(), registry.clone());
+        {
+            let as_guard: Arc<dyn DocumentTreeGuard> = documents.clone();
+            files.set_document_guard(Arc::downgrade(&as_guard));
+        }
         // Synchronous: a small database opens in milliseconds and the window
         // geometry must be known before the window shows.
         let data_dir = options.data_dir;
@@ -209,6 +225,7 @@ impl Core {
             shell,
             git,
             searches,
+            files,
             session,
             terminals,
             workstreams,

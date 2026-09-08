@@ -1081,8 +1081,10 @@ mod tests {
         let documents = Arc::new(FakeDocuments::default());
         let as_guard: Arc<dyn DocumentTreeGuard> = documents.clone();
         files.set_document_guard(Arc::downgrade(&as_guard));
-        // The composition root holds this; the test holds it through `documents`.
-        std::mem::forget(as_guard);
+        // Shares `documents`' allocation, so dropping this leaves the `Weak`
+        // valid — the same shape `DocumentManager::new` uses for the close
+        // guard. The `Harness` holds the strong reference.
+        drop(as_guard);
         Harness {
             files,
             documents,
