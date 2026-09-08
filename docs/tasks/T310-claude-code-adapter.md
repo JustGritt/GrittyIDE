@@ -592,3 +592,170 @@ What the process tests prove, by spawning real `/bin/sh` children:
   time the two halves meet, and that is where a mismatch in the published mapping
   would surface — which is why the mapping is published as assertable strings
   rather than described in prose.
+
+## Completion report — T310-B
+
+_`AgentRunProvider::CLAUDE_CODE`, the run inbox, `runs.start` / `runs.prompt`,
+and §8. T310-U (the console's prompt box) is not in this cut._
+
+### Summary
+
+A run Gritty owns now drives a real Claude Code process and can be spoken to
+while it runs. Three commits on `main`: `d179acf` (the inbox and the
+translation), `5672514` (the wire, protocol 2.19.0), `4cfee82` (§8 and the DEV
+panel affordance).
+
+**The split moved.** T310-A's report says plainly that
+`agent_run/claude_driver.rs` remained T310-B's file, so this ticket carried the
+core-side translation as well as everything the board listed. That is recorded
+here rather than silently absorbed.
+
+### The inbox (§4)
+
+`AgentRunManager::start` takes an already-built `FnOnce(AgentRunContext)`, so a
+receiver made *inside* `start` could never reach a driver constructed *outside*
+it. The driver owns its end by capturing it, exactly as `fake_driver::drive`
+captures its script, and `AgentRunContext` stays `Clone` and purely outbound.
+
+`start`'s signature is **untouched** and `start_with_inbox` sits beside it, so
+`fake_driver.rs` and `crates/agent-fake` needed no edit at all — the constraint
+"the fake keeps working with no edit to `agent-fake`" is met more strongly than
+by editing it carefully. Putting the sender on `AgentRunSpec` was rejected: that
+type is documented as *what a run needs before it exists*, and a supervision
+channel is not that.
+
+`MAX_QUEUED_PROMPTS = 4` lives in `manager.rs`, not `wire.rs`, because nothing
+on the wire reports pending prompts — it is supervision policy, which is the
+same line that puts `MAX_RUN_EVENTS` on the other side. `prompt()` refuses at
+six named edges and does its state check and `try_send` in one critical section,
+so a run cannot end between the two and leave text queued for a corpse.
+
+### Two decisions worth arguing with
+
+1. **`MAX_PROMPT_TEXT` (16 KiB) is not `MAX_TEXT` (2000).** `MAX_TEXT` bounds
+   untrusted *adapter output* for display, where clipping costs a reader
+   nothing. A prompt is what a person typed and is about to be paid for;
+   truncating it silently would be worse than refusing it. So the request
+   refuses, the full text reaches the child, and the recorded `PROMPT_STARTED`
+   is still clipped to `MAX_TEXT` because *that* one is a preview.
+
+2. **The permission seam is an enum, not a trait.** `PermissionPolicy::DenyAll`,
+   with `decide()` `async` so `T310-ANSWER` changes one body and no call site.
+   It matches the adapter's own choice for `ClaudeVerdict` and avoids the
+   abstraction-over-one-implementation hard rule 9 forbids.
+
+### A contract collision, resolved and not papered over
+
+**T310's failure table asks for something the frozen Gate D contract forbids.**
+The table says a child killed, or a pipe lost while it lives, ends the run
+`INTERRUPTED`. `manager.rs` is explicit that no driver can reach that state —
+*"a driver claiming to have been interrupted is claiming to know something only
+the supervisor knows"* — and `settle` maps a driver error to `FAILED`.
+
+The frozen contract wins. The run ends `FAILED` with an error naming the signal
+or the lost pipe, so the information survives even though the state's
+granularity does not. It is asserted, not left for a reader to notice:
+`state_agrees_with_the_adapter_except_for_interrupted` requires the adapter's
+`INTERRUPTED` to arrive as `FAILED` *and* the message to say supervision was
+lost. Widening a frozen contract needs deliberate review and an ADR, which is
+not this ticket's to take — filed below.
+
+### §8, and why its scope was widened
+
+The task file said `probe.rs` — **only**. That is not enough, and the
+widening was agreed with the user before anything was written.
+
+Gritty's own child is `claude -p …` in `ps` **and** writes an ordinary
+transcript under the session id Gritty minted. `transcript::scan` returns any
+`.jsonl` inside its 24-hour window, and `rosterRows` concatenates the two
+sources with no dedupe (`roster-model.ts:109`). A process-only filter therefore
+suppresses the process row and leaves the transcript row: the same agent still
+appears, now as a `TRANSCRIPT_ONLY` session that also reads as *not running* — a
+second lie on top of the first — and it lingers for a day after the run ends.
+The acceptance criterion would have passed its unit test while being false in
+the app.
+
+So the exclusion lands in `gritty_agents::discover`, where both sources meet.
+`transcript.rs` is untouched: one parameter and one `.filter` is the smallest
+widening that makes §8 true.
+
+`OwnedSessions` carries **two keys** because either alone has a hole. The
+session id is durable and names the transcript, but `discover_processes` has to
+recover it from a command line `ps` may have truncated. The pid is exact and
+needs no parsing but means nothing to a transcript that outlives the process.
+
+The seam into `agent_session` is a **closure, not a handle**. `ownership` is a
+handle because a registry is shared ground both lanes legitimately use; a run
+manager *is* the other lane, and `agent_run`/`agent_session` never import each
+other. `scan()` reads the set inside its `spawn_blocking`, so a run started
+while a tick was queued is still excluded by it.
+
+### Tests actually executed
+
+- `cargo test -p gritty-core --lib agent_run` — **107 passed, 0 failed** (13 new
+  `claude_driver` tests, 2 new manager tests).
+- `cargo test -p gritty-agents` — **110 passed, 0 failed** (2 new).
+- `cargo test -p gritty-desktop --test commands` — **51 passed, 0 failed**
+  (3 new).
+- `pnpm check` — **green, exit 0 captured from `$?`**, including
+  `check:generated`.
+
+**Three tests were verified to have teeth by making them fail on purpose**, then
+restored:
+
+- `a_session_gritty_owns_is_excluded_from_both_sources`, with the transcript
+  filter removed, reports the owned agent again as
+  `evidence: TranscriptOnly, process: None` — exactly the failure described
+  above.
+- `the_owned_set_is_read_on_every_scan`, with the set frozen at construction,
+  reports 2 sessions instead of 1. It is the assertion a captured-once
+  implementation would fail and every other test in that file would pass.
+- `a_real_run_starts_after_init_takes_two_turns_and_cancels_without_an_orphan`
+  first failed by asserting on a state (`WAITING`) that was already true from
+  turn one; it now waits on the *second* `PROMPT_FINISHED`, which is the thing
+  that actually marks the second turn.
+
+`a_real_run_…` covers T310's acceptance criteria minus the console, through the
+real IPC and with no `claude`, no credentials and no cost: the run leaves
+`STARTING` only after `system`/`init`, answers a prompt, takes a **second**
+prompt into the same process, and `runs.cancel` reaches a background job that
+sits in its own process group and ignores SIGTERM. "No orphan survives" is
+asserted against a live pid, never against the absence of a log line (rule 12).
+
+One test corrected an assertion of mine rather than the code:
+`WorkspacePath::parse("")` deliberately returns the workspace root, so an empty
+path is inside by definition. Asserted explicitly now so it reads as decided.
+
+### Known limitations
+
+- **The manual pass in `pnpm dev` was not run.** It needs the running app driven
+  by a person and this session has no way to do that. Every acceptance
+  criterion except "the same agent appears once in the *sidebar*" is covered by
+  the automated test above; the sidebar half is covered at the roster level
+  (`a_session_gritty_owns_is_excluded_from_both_sources`) but has not been seen
+  on screen.
+- **No run has ever driven the real `claude` binary through the manager.** The
+  adapter's own `tests/process.rs` drove the real framing against a recording,
+  and this ticket drove the whole stack against a stub. The two have never met a
+  live agent in one process.
+- **A narrow double-draw race remains.** The exclusion set is read fresh per
+  scan and a session id is registered before the child is spawned, so the window
+  is microseconds wide — but a `ps` that observed a child registered after the
+  set was read would report it twice for one tick.
+- **`MAX_CONCURRENT_RUNS = 4` was not re-justified.** Its doc comment says in
+  terms that *"T310 must justify it against real process cost … rather than
+  inherit it"*. This ticket inherited it. Filed.
+- **The DEV panel is the throwaway surface**, not the product's. A run still
+  belongs on its workstream's island row (`T300-PANEL`).
+
+### Follow-ups this task files rather than builds
+
+- **`T310-U`** — the console's prompt box, now with a process behind it.
+- **`T310-ANSWER`** — the verdict behind `PermissionPolicy`. Until it lands an
+  owned run can converse and read but is refused every gated tool.
+- **`RUN-INTERRUPTED-CONTRACT`** — decide whether a driver may report
+  `INTERRUPTED`, or whether the task's failure table should be corrected to say
+  `FAILED`. Today the two documents disagree and the code follows the frozen
+  one.
+- **`RUNS-CONCURRENCY-COST`** — re-take the `MAX_CONCURRENT_RUNS` judgement now
+  that a run is a real process with real token spend.

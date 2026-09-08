@@ -70,7 +70,28 @@ impl Harness {
         Self::build(Arc::new(RecordingOpener::default()), data_dir.to_path_buf())
     }
 
+    /// A harness whose `runs.start` spawns `program` instead of `claude`.
+    ///
+    /// The seam `pty_host` already is, for the same reason: no test spawns a
+    /// real agent, needs an API key, or costs money.
+    fn with_agent(program: PathBuf) -> Self {
+        let data = TempData::new("harness-agent");
+        let path = data.0.clone();
+        let mut harness =
+            Self::build_with(Arc::new(RecordingOpener::default()), path, Some(program));
+        harness._data_dir = Some(data);
+        harness
+    }
+
     fn build(opener: Arc<RecordingOpener>, data_dir: PathBuf) -> Self {
+        Self::build_with(opener, data_dir, None)
+    }
+
+    fn build_with(
+        opener: Arc<RecordingOpener>,
+        data_dir: PathBuf,
+        claude_binary: Option<PathBuf>,
+    ) -> Self {
         let pty = FakePtyHost::new();
         let app = configure(mock_builder())
             .build(mock_context(noop_assets()))
@@ -85,7 +106,7 @@ impl Harness {
                 opener: opener.clone(),
                 data_dir: Some(data_dir),
                 pty_host: pty.clone(),
-                claude_binary: None,
+                claude_binary,
             },
         );
         let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
@@ -2459,4 +2480,167 @@ fn prompting_refuses_an_unknown_run_a_blank_prompt_and_a_run_with_no_channel() {
         message.contains(ended["state"].as_str().expect("a state")),
         "the refusal names the state it is in: {message}"
     );
+}
+
+/// A run Gritty owns, driven end to end through the real IPC against a stub
+/// child (T310-B).
+///
+/// Everything T310's acceptance criteria ask for except the console: the run
+/// leaves `STARTING` only once the session announces itself, answers a prompt,
+/// takes a **second** prompt into the same process, and is cancelled without
+/// leaving an orphan. The stub is a `/bin/sh` script that behaves like the CLI
+/// in the ways this test is about, which is what lets it run in CI with no
+/// binary, no credentials and no cost.
+#[cfg(unix)]
+#[test]
+fn a_real_run_starts_after_init_takes_two_turns_and_cancels_without_an_orphan() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = std::env::temp_dir().join(format!("gritty-run-stub-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a stub directory");
+    let program = dir.join("claude-stub");
+    let pidfile = dir.join("background.pid");
+    // Ignores SIGTERM and leaves a background job in its own process group, so
+    // "no orphan survives" is asserted against a live pid rather than against
+    // the absence of a log line (rule 12). Announces a session, echoes each
+    // user turn back the way `--replay-user-messages` does, and ends each turn
+    // with a `result`.
+    std::fs::write(
+        &program,
+        format!(
+            r#"#!/bin/sh
+trap '' TERM
+( sleep 300 & echo $! > {pid} ) 
+printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s","tools":[]}}'
+while IFS= read -r line; do
+  printf '%s\n' '{{"type":"user","isReplay":true,"message":{{"role":"user","content":"echoed"}}}}'
+  printf '%s\n' '{{"type":"result","subtype":"success","is_error":false,"result":"done"}}'
+done
+"#,
+            pid = pidfile.display()
+        ),
+    )
+    .expect("write the stub");
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))
+        .expect("make it executable");
+
+    let root = TempWorkspace::new("run-real");
+    let harness = Harness::with_agent(program);
+    let (workspace_id, workstream_id) = harness.workspace_and_workstream(&root.0);
+
+    let started = harness
+        .session(
+            "runs_start",
+            json!({
+                "workspaceId": workspace_id,
+                "workstreamId": workstream_id,
+                "provider": "CLAUDE_CODE",
+                "prompt": "first",
+            }),
+        )
+        .expect("start the run");
+    assert_eq!(started["state"], "STARTING", "a run begins STARTING");
+    assert_eq!(started["provider"], "CLAUDE_CODE");
+    let run_id = started["id"].clone();
+
+    // It leaves STARTING only once `system`/`init` arrives — the case that
+    // state was introduced for, and the first adapter that can honour it.
+    let running = harness.run_until(&run_id, &workspace_id, |state| state != "STARTING");
+    assert!(
+        matches!(running["state"].as_str(), Some("RUNNING" | "WAITING")),
+        "the run is live after init: {running}"
+    );
+
+    // The turn completes, so the run parks in WAITING with nothing to do.
+    let waiting = harness.run_until(&run_id, &workspace_id, |state| state == "WAITING");
+    assert_eq!(waiting["state"], "WAITING");
+
+    // A second prompt, into the *same* process.
+    harness
+        .session("runs_prompt", json!({ "runId": run_id, "text": "second" }))
+        .expect("the run takes another turn");
+
+    // Waiting on the *event*, not on the state: the run was already `WAITING`
+    // from the first turn, so a state predicate would match before the second
+    // turn had begun and prove nothing.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let log = loop {
+        let log = harness
+            .session("runs_events", json!({ "runId": run_id }))
+            .expect("read the log back");
+        let finished = log["events"]
+            .as_array()
+            .expect("a log has events")
+            .iter()
+            .filter(|record| record["event"]["type"] == "PROMPT_FINISHED")
+            .count();
+        if finished >= 2 {
+            break log;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the second turn never ended: {log}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let kinds: Vec<&str> = log["events"]
+        .as_array()
+        .expect("a log has events")
+        .iter()
+        .map(|record| record["event"]["type"].as_str().expect("a typed event"))
+        .collect();
+    assert_eq!(
+        kinds
+            .iter()
+            .filter(|kind| **kind == "PROMPT_STARTED")
+            .count(),
+        2,
+        "both turns were acknowledged by the run itself: {kinds:?}"
+    );
+    assert_eq!(
+        kinds
+            .iter()
+            .filter(|kind| **kind == "PROMPT_FINISHED")
+            .count(),
+        2,
+        "both turns produced a reply: {kinds:?}"
+    );
+
+    // The background job the stub left behind, in its own process group and
+    // deaf to SIGTERM: exactly the orphan a cancel has to reach.
+    let background: i32 = std::fs::read_to_string(&pidfile)
+        .expect("the stub recorded its background job")
+        .trim()
+        .parse()
+        .expect("a pid");
+    assert!(is_running(background), "the background job is alive first");
+
+    harness
+        .session("runs_cancel", json!({ "runId": run_id }))
+        .expect("cancel the run");
+    let ended = harness.run_until(&run_id, &workspace_id, is_terminal);
+    assert_eq!(ended["state"], "CANCELLED");
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while is_running(background) {
+        assert!(
+            Instant::now() < deadline,
+            "the child's process group survived the cancel: {background} is still running"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Alive, without reaping: signal 0 asks the kernel rather than parsing `ps`.
+#[cfg(unix)]
+fn is_running(pid: i32) -> bool {
+    // SAFETY-free: `kill` with signal 0 performs no action, it only reports
+    // whether the process exists and is signallable.
+    std::process::Command::new("/bin/kill")
+        .args(["-0", &pid.to_string()])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
 }
