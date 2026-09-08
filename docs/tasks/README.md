@@ -56,7 +56,7 @@ the workflow below are hand-maintained.
 | [T300](T300-agent-protocol-fake.md) | Agent event protocol + deterministic fake agent (Gate D) | 4 | T200, T210 | superseded |
 | T305 | Agent capability model | 4 | T300 | unspec |
 | T310 | First real adapter: a Claude Code run Gritty owns, and can prompt | 4 | T300-WIRE | superseded |
-| T310-A | gritty-agent-claude: the process, the framing, the translation | 4 | T300-WIRE | doing |
+| T310-A | gritty-agent-claude: the process, the framing, the translation | 4 | T300-WIRE | review |
 | T310-B | CLAUDE_CODE, the run inbox, and runs.start/runs.prompt | 4 | T310-A | todo |
 | T315 | Live agent activity | 4 | T310 | superseded by T220/T230/T231/T232 |
 | T310-U | The prompt box, and an owned run in the console | 4 | T310-B | todo |
