@@ -248,6 +248,7 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::runs_events,
             commands::git_status,
             commands::git_diff,
+            commands::search_query,
             commands::agents_answer_permission,
             commands::agents_permission_grants,
             commands::agents_revoke_grant,

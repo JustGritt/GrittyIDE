@@ -119,6 +119,11 @@ impl Intent {
             | CoreEvent::AgentRunChanged(_)
             | CoreEvent::AgentRunEventAppended(_)
             | CoreEvent::DecisionRequested(_)
+            // A search result (T080) is a live answer about the tree as it is
+            // right now. Persisting a batch would let a restart present stale
+            // matches as current ones, and the operation model already refuses
+            // to replay them (T080's "no result replay" non-goal).
+            | CoreEvent::SearchMatchesFound(_)
             | CoreEvent::DecisionResolved(_) => None,
         }
     }

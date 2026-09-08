@@ -39,6 +39,7 @@ use gritty_core::ownership::{
 };
 use gritty_core::protocol::actor::Actor;
 use gritty_core::protocol::ids::CorrelationId;
+use gritty_core::search::wire::SearchQueryRequest;
 use gritty_core::session::{
     CandidatesRequest, DiscardSnapshotRequest, LastSession, RecoverSnapshotRequest,
     RecoveryCandidate, SessionRestoreResponse, UpdateSessionRequest,
@@ -1093,6 +1094,31 @@ pub async fn git_diff(
         let request: GitDiffRequest = parse_request(request)?;
         git.diff(request, Actor::User, correlation, DEFAULT_GIT_BUDGET)
             .await
+    })
+    .await
+}
+
+/// `search.query`
+///
+/// Unlike `workspace.list` and `git.status` there is no budget and no inline
+/// arm: a listing is bounded and can answer as a page, a search is open-ended
+/// and its output is a stream. So this always returns the `Operation`, and the
+/// matches arrive as `SearchMatchesFound` batches until it ends. Cancelling is
+/// `operations.cancel`; there is deliberately no `search.cancel`.
+///
+/// An empty query or a pattern that does not compile is `InvalidInput` with no
+/// operation created and no event emitted, which is why the validation lives in
+/// the core rather than here: it is a fact about the query, not about the
+/// adapter.
+#[tauri::command]
+pub async fn search_query(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<Operation, CoreError> {
+    let searches = core.searches.clone();
+    guard("search.query", move |correlation| async move {
+        let request: SearchQueryRequest = parse_request(request)?;
+        searches.query(request, Actor::User, correlation)
     })
     .await
 }

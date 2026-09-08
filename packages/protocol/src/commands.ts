@@ -72,6 +72,7 @@ export const COMMANDS = {
   'runs.events': 'runs_events',
   'git.status': 'git_status',
   'git.diff': 'git_diff',
+  'search.query': 'search_query',
 } as const;
 
 export type CommandName = keyof typeof COMMANDS;

@@ -32,6 +32,7 @@ use crate::ownership::wire::OwnershipMap;
 use crate::protocol::actor::Actor;
 use crate::protocol::error::CoreError;
 use crate::protocol::ids::{CorrelationId, DocumentId, OperationId, WorkspaceId};
+use crate::search::wire::SearchMatchesFoundPayload;
 use crate::session::wire::PersistenceStatusPayload;
 use crate::terminal::wire::{TerminalExitedPayload, TerminalOutputPayload};
 use crate::workspace::watch::WorkspaceEntriesChangedPayload;
@@ -146,6 +147,14 @@ pub enum CoreEvent {
     /// manager, never one event per call, and a consumer that missed one calls
     /// `runs.events` to resynchronise.
     AgentRunEventAppended(AgentRunEventAppendedPayload),
+    /// A bounded batch of matches from a running `search.query` (T080).
+    ///
+    /// A delta, and deliberately not `OperationProgress`: that event's
+    /// `message` is a human string, not match data. Batches are throttled and
+    /// the queue behind them is bounded (rule 8), and every batch carries
+    /// `truncatedMatches` so a match that was dropped is a number the UI can
+    /// show rather than a silent gap.
+    SearchMatchesFound(SearchMatchesFoundPayload),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -267,11 +276,13 @@ impl CoreEvent {
             Self::AgentTimelineAppended(_) => "AgentTimelineAppended",
             Self::AgentRunChanged(_) => "AgentRunChanged",
             Self::AgentRunEventAppended(_) => "AgentRunEventAppended",
+            Self::SearchMatchesFound(_) => "SearchMatchesFound",
             Self::OwnershipChanged(_) => "OwnershipChanged",
         }
     }
 
-    /// The operation an `Operation*` event is about.
+    /// The operation an event is about: the five `Operation*` events, and
+    /// `SearchMatchesFound`, which streams from one.
     pub fn operation_id(&self) -> Option<&OperationId> {
         match self {
             Self::OperationStarted(p) => Some(&p.operation.id),
@@ -279,6 +290,7 @@ impl CoreEvent {
             Self::OperationCompleted(p) => Some(&p.operation.id),
             Self::OperationFailed(p) => Some(&p.operation.id),
             Self::OperationCancelled(p) => Some(&p.operation.id),
+            Self::SearchMatchesFound(p) => Some(&p.operation_id),
             Self::WorkspaceOpened(_)
             | Self::WorkspaceClosed(_)
             | Self::WorkspaceEntriesChanged(_)

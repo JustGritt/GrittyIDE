@@ -24,7 +24,12 @@ gritty-agent-hook = { path = "crates/agent-hook" }
 # `gritty-core` depends on this so its run manager can drive it, exactly as it
 # depends on `gritty-agents` and `gritty-terminal`.
 gritty-agent-fake = { path = "crates/agent-fake" }
+# T310-A: the Claude Code adapter, built the same way and for the same reason —
+# `gritty-core` will depend on this so `agent_run/claude_driver.rs` can drive a
+# real child, and the reverse edge would be the same Cargo cycle.
+gritty-agent-claude = { path = "crates/agent-claude" }
 gritty-git = { path = "crates/git" }
+gritty-search = { path = "crates/search" }
 tauri = { version = "2.11.5", features = [] }
 tauri-build = { version = "2.6.3", features = [] }
 serde = { version = "1.0.229", features = ["derive"] }
@@ -84,6 +89,18 @@ gix = { version = "0.87.1", default-features = false, features = [
 # hand-rolling two platform backends would need far more unreviewed code than
 # a dependency; it is used only inside `gritty-workspace`.
 notify = "8.2.0"
+# T080 search: ripgrep's own engine, in-process (ADR-022). `grep-regex` compiles
+# the pattern, `grep-matcher` is the trait both sides speak (needed directly to
+# locate a match inside a line), `grep-searcher` drives a `Sink` we own — which
+# is what makes cancellation free and needs no adapter — and `ignore` is the
+# directory walker, taken with every gitignore source turned off. No `rg`
+# process is spawned, now or as a fallback. Only `crates/search` depends on
+# them, and they overlap nothing already in the tree: no crate here matches
+# text or walks a tree today.
+grep-matcher = "0.1.9"
+grep-regex = "0.1.14"
+grep-searcher = "0.1.17"
+ignore = "0.4.33"
 
 [workspace.lints.rust]
 # Unsafe code needs a justified, reviewed `#![allow(unsafe_code)]` in the crate.

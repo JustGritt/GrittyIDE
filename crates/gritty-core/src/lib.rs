@@ -20,6 +20,9 @@
 //! - [`git`]: read-only repository status and structured diffs (T100) over
 //!   the `gritty-git` adapter. Never a `ChangeSet`, and never linked to a
 //!   workstream: `git` and `workstream` do not import each other.
+//! - [`search`]: `search.query` (T080) over the `gritty-search` walk: always
+//!   an operation, matches streamed in bounded batches, cancelled through
+//!   `operations.cancel` like every other long-running read. Nothing indexed.
 //! - [`shell`]: opening external URLs through an injected opener (T050).
 //! - [`terminal`]: terminal sessions (T090) over the `gritty-terminal` crate:
 //!   the registry, the workspace-relative working directory and the
@@ -48,6 +51,7 @@ pub mod health;
 pub mod operation;
 pub mod ownership;
 pub mod protocol;
+pub mod search;
 pub mod session;
 pub mod shell;
 pub mod terminal;

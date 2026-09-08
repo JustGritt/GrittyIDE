@@ -19,6 +19,7 @@ use gritty_core::file_drop::FileDropService;
 use gritty_core::git::GitService;
 use gritty_core::operation::OperationRegistry;
 use gritty_core::ownership::OwnershipManager;
+use gritty_core::search::SearchManager;
 use gritty_core::session::{SessionService, SessionStore, SessionTap, TAP_CAPACITY, WriterConfig};
 use gritty_core::shell::{ExternalOpener, ShellService};
 use gritty_core::terminal::TerminalManager;
@@ -55,6 +56,10 @@ pub struct Core {
     pub documents: Arc<DocumentManager>,
     pub shell: Arc<ShellService>,
     pub git: Arc<GitService>,
+    /// Live searches over the open workspace (T080). Like `git`, it holds the
+    /// operation registry because its work is always a cancellable operation
+    /// rather than something a command handler waits for.
+    pub searches: Arc<SearchManager>,
     pub session: Arc<SessionService>,
     pub terminals: Arc<TerminalManager>,
     pub workstreams: Arc<WorkstreamManager>,
@@ -122,6 +127,15 @@ impl Core {
         // operation registry because a read that outlives its budget continues
         // as a cancellable operation rather than blocking the command.
         let git = GitService::new(workspaces.clone(), registry.clone(), handle.clone());
+        // Walks the tree and streams matches (T080). It takes the event bus
+        // as well as the registry: `SearchMatchesFound` is its own event, and
+        // the batching that bounds it lives on this side of the walk.
+        let searches = SearchManager::new(
+            workspaces.clone(),
+            events.clone(),
+            registry.clone(),
+            handle.clone(),
+        );
         // Synchronous: a small database opens in milliseconds and the window
         // geometry must be known before the window shows.
         let data_dir = options.data_dir;
@@ -194,6 +208,7 @@ impl Core {
             documents,
             shell,
             git,
+            searches,
             session,
             terminals,
             workstreams,

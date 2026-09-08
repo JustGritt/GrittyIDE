@@ -165,6 +165,46 @@ sandbox and does not pretend to be one. What the boundary does buy:
   process that puts itself in a new session survives, as it does when any
   terminal closes.
 
+## Searching the workspace (T080, ADR-022)
+
+Search is the one feature whose answer *is* repository content, so the rules
+above are stated again here rather than assumed.
+
+- **In-process, never a subprocess.** Matching runs on ripgrep's own crates
+  inside the core (ADR-022). No `rg` binary is located, bundled or executed, so
+  nothing here inherits the user's `PATH` or shell configuration as ambient
+  authority, and there is no second process-kill path to get wrong.
+- **The walk stays inside the root.** Symlinked directories are never descended
+  into (no `follow_links`), and a symlinked *file* is read only after
+  `WorkspaceRoot::resolve` proves its target is inside the root; one that
+  escapes is counted as `outsideRoot` and never opened. `.env` is searched like
+  any other file — nothing is filtered, as in the explorer — because the user
+  asked what is in their own tree.
+- **Reads are bounded.** One file at a time, refused above the same 64 MiB
+  `documents.open` refuses, classified by T030's binary test (NUL byte, or not
+  valid UTF-8) before anything is decoded. Memory mapping is off: the searcher
+  is handed a slice already read, so no file truncated underneath it can fault
+  the process.
+- **A user-typed regex is untrusted input.** The query is length-bounded
+  (1024 characters) and the compiled pattern is bounded by size, DFA size and
+  nesting limits; a pattern that exceeds them is `InvalidInput` before an
+  operation exists. The engine is linear-time, so a pattern cannot be made to
+  backtrack.
+- **Events carry a bounded excerpt, and this is the deliberate exception** to
+  "content never reaches events" above. A `SearchMatchesFound` batch carries
+  the matching line, capped at 400 characters and windowed around the match —
+  which is the result the user asked to see. It is not persisted (the session
+  tap drops the event) and it is never logged: search logs carry counts,
+  durations and paths only, and the query itself is kept out of even the
+  `Debug` form of the compiled matcher, because a query can be a secret the
+  user pasted.
+- **Delivery is bounded** — at most 200 matches per event, one event per 50 ms
+  per search, at most 2000 queued and 20 000 in total — and every match dropped
+  by those bounds is counted into `truncatedMatches` rather than silently
+  missing.
+- **Nothing is written and nothing is stored.** `search.query` reads; there is
+  no replace, no index, and no row in the session database.
+
 ## Process boundaries
 
 Agents, language servers, terminals, indexers and external tools run outside the

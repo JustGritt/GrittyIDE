@@ -38,7 +38,7 @@ the workflow below are hand-maintained.
 | ADR-001 | Confirm or reject Tauri | 0 | Phase 0 tests | todo |
 | MANUAL-PASS-COVERAGE | The manual pass covers every task sitting at review (review-findings finding 6) | 0 | T041, T045, T051, T210, T220, T221, T231, T232, T325 | review |
 | [T070](T070-file-watcher.md) | File watcher | 1A/2 | T020, T030, ADR-001 | review |
-| [T080](T080-search.md) | Search: the walk, the match, the streamed result (the core half) | 2 | T020, T070, ADR-001 | doing |
+| [T080](T080-search.md) | Search: the walk, the match, the streamed result (the core half) | 2 | T020, T070, ADR-001 | review |
 | [T100](T100-git-baseline.md) | Git baseline: gix status and typed diff (the core half) | 2 | T020, ADR-001 | review |
 | [T110](T110-diagnostics.md) | Diagnostics | 2 | T060, T090, T220, T325, ADR-001 | todo |
 | [T200](T200-workstream-model.md) | Workstream model + decisions (Gate C) | 3 | T010, T020, T060 | done |
@@ -86,7 +86,7 @@ the workflow below are hand-maintained.
 | PLAN-FANOUT | Split the remaining work into fan-out-sized tickets, and the lanes to run them in |  | – | review |
 | PROTO-W2 | Wave 2 wire, in one PR: watcher, git, terminal blocks, diagnostics, violations | 2 | ADR-001, ADR-017, ADR-023 | todo |
 | PROTO-W2-GIT | The git wire: git.status and git.diff reach the shell | 2 | T100,ADR-023 | review |
-| PROTO-W3 | Wave 3 wire, in one PR: search | 2 | ADR-022 | doing |
+| PROTO-W3 | Wave 3 wire, in one PR: search | 2 | ADR-022 | review |
 | SIDECAR-BUNDLE-CONFIG | Move externalBin to a bundle-time config so a compile never needs a staged binary | 3 | SIDECAR-FRESH-CHECKOUT | unspec |
 | SIDECAR-FRESH-CHECKOUT | A fresh clone or worktree cannot build gritty-desktop until T225's sidecar is staged by hand | 3 | T225 | review |
 | T080-U | The search panel | 2 | PROTO-W3, T080 | todo |

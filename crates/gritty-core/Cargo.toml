@@ -13,6 +13,7 @@ gritty-agent-fake = { workspace = true }
 gritty-agents = { workspace = true }
 gritty-git = { workspace = true }
 gritty-persistence = { workspace = true }
+gritty-search = { workspace = true }
 gritty-terminal = { workspace = true }
 gritty-workspace = { workspace = true }
 serde = { workspace = true }

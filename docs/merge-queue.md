@@ -147,6 +147,19 @@ it is a new crate with no command, no event and no type on the wire, and
 `T100-U` claims nothing either, because `PROTO-W2-GIT` already shipped the wire
 it consumes.
 
+**2.18.0 is now spent, not just claimed.** `PROTO-W3` built it together with
+T080 in one session (`crates/gritty-core/src/protocol/mod.rs`), and spent
+nothing else: no `SCHEMA_VERSION`, no migration, no ADR number. Its seams, for
+whoever lands beside it, are `PROTO-W2-GIT`'s four plus two the git wire did not
+touch — `crates/gritty-core/src/event/mod.rs` (one `CoreEvent` variant,
+`SearchMatchesFound`, plus its `name()` and `operation_id()` arms) and
+`crates/gritty-core/src/session/tap.rs` (the exhaustive match that decides what
+is persisted). A branch that also adds a `CoreEvent` variant will conflict on
+both, and the conflict is the *lucky* outcome: two variants added in different
+places merge cleanly and leave `tap.rs` non-exhaustive, which the compiler
+catches, while `export.rs` and the generated directory would merge cleanly and
+wrongly. Resolve the Rust and re-run `cargo test -p gritty-core` (rule 4).
+
 **`SCHEMA_VERSION` 5 and migration `0005` are still free, and ADR-021 names
 both.** `docs/decisions/ADR-021-agent-run-persistence.md` (written 2026-09-08,
 `Proposed`) says a persisted run needs `0005_agent_runs.sql` and

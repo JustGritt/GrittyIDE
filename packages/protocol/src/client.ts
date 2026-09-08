@@ -77,6 +77,7 @@ import {
   type RevokeGrantRequest,
   type RunEventsRequest,
   type SaveDocumentRequest,
+  type SearchQueryRequest,
   type SessionRestoreResponse,
   type SetAgentNotificationsRequest,
   type SpawnTerminalRequest,
@@ -502,6 +503,35 @@ export interface CoreClient {
      */
     diff(request: GitDiffRequest): Promise<GitDiffResponse>;
   };
+  /**
+   * Find-in-files over the open workspace. One call, and it is always an
+   * `Operation`.
+   *
+   * There is no inline arm and no page: a listing is bounded and can answer as
+   * one, a search is open-ended and answers as a stream. So `query` resolves
+   * with the operation as soon as it exists, and the caller watches two things:
+   *
+   * - `SearchMatchesFound` — bounded, throttled batches of matches. Each
+   *   carries `truncatedMatches`; a non-zero count means matches were found and
+   *   genuinely never delivered, and the UI must say so rather than presenting
+   *   a partial list as complete.
+   * - the usual `Operation*` events, ending `COMPLETED` with a
+   *   `SearchCompletion` result — counts only, never the matches, which
+   *   already arrived.
+   *
+   * Cancel with `operations.cancel`; there is no `search.cancel`. Matches
+   * already delivered stay delivered, and none arrive afterwards.
+   *
+   * A reload loses the batches that already streamed: the operation snapshot
+   * carries status, not a result stream, so `operations.list()` rehydrates
+   * *that a search is running* and nothing it found. Re-run to see them again.
+   *
+   * Nothing is indexed and nothing is written: `query` reads the tree as it is
+   * now, and there is no replace here.
+   */
+  search: {
+    query(request: SearchQueryRequest): Promise<Operation>;
+  };
   subscribe<N extends EventName>(name: N, handler: (event: EventOf<N>) => void): Unsubscribe;
   subscribeAll(handler: (event: EventEnvelope) => void): Unsubscribe;
   /** Stop listening for events. Commands still work. */
@@ -683,6 +713,9 @@ export function createCoreClient(
     git: {
       status: (request) => command<GitStatusResponse>('git.status', { request }),
       diff: (request) => command<GitDiffResponse>('git.diff', { request }),
+    },
+    search: {
+      query: (request) => command<Operation>('search.query', { request }),
     },
     subscribe: (name, handler) => hub.subscribe(name, handler),
     subscribeAll: (handler) => hub.subscribeAll(handler),

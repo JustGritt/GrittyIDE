@@ -1963,6 +1963,258 @@ fn closing_a_workspace_interrupts_the_runs_inside_it() {
 }
 
 // ---------------------------------------------------------------------------
+// Searching the workspace (PROTO-W3)
+// ---------------------------------------------------------------------------
+
+/// A scratch tree with something to find in it.
+fn searchable(label: &str) -> TempWorkspace {
+    let root = TempWorkspace::new(label);
+    fs::write(root.0.join("src/needle.ts"), "export const needle = 1;\n").unwrap();
+    fs::write(
+        root.0.join("src/main.rs"),
+        "fn main() {\n    // needle\n    println!(\"needle\");\n}\n",
+    )
+    .unwrap();
+    fs::create_dir_all(root.0.join("node_modules/pkg")).unwrap();
+    fs::write(
+        root.0.join("node_modules/pkg/index.js"),
+        "var needle = 2;\n",
+    )
+    .unwrap();
+    root
+}
+
+/// The whole wire for one search: the command name, the operation it always
+/// returns, the batches that stream from it and the summary it ends with.
+#[test]
+fn search_streams_matches_and_completes_with_a_summary() {
+    let root = searchable("search");
+    let h = Harness::new();
+    let workspace = h.open_workspace(&root.0);
+    let workspace_id = workspace["id"].clone();
+
+    let operation = h
+        .session(
+            "search_query",
+            json!({ "workspaceId": workspace_id, "query": "needle" }),
+        )
+        .expect("start the search");
+    assert_eq!(operation["kind"], "search.query");
+    let id = operation["id"]
+        .as_str()
+        .expect("an operation id")
+        .to_owned();
+
+    let finished = h.wait_until(&id, Duration::from_secs(20), |op| {
+        matches!(
+            op["status"].as_str(),
+            Some("COMPLETED" | "FAILED" | "CANCELLED")
+        )
+    });
+    assert_eq!(finished["status"], "COMPLETED", "{finished}");
+
+    let completed = h.last_event("OperationCompleted");
+    let summary = &completed["payload"]["result"]["summary"];
+    assert!(
+        summary["matchesFound"].as_u64().unwrap() >= 4,
+        "{completed}"
+    );
+    assert_eq!(
+        summary["skipped"]["ignoredDirectories"], 1,
+        "node_modules is not walked by default: {completed}"
+    );
+    assert_eq!(completed["payload"]["result"]["truncatedMatches"], 0);
+
+    let batches = h.events_named("SearchMatchesFound");
+    assert!(
+        !batches.is_empty(),
+        "matches must stream: {:?}",
+        h.event_names()
+    );
+    let mut paths: Vec<String> = Vec::new();
+    for batch in &batches {
+        assert_eq!(batch["payload"]["operationId"], id.as_str());
+        assert_eq!(batch["payload"]["truncatedMatches"], 0);
+        for found in batch["payload"]["matches"].as_array().expect("matches") {
+            paths.push(found["path"].as_str().expect("a path").to_owned());
+            if found["kind"] == "content" {
+                assert!(found["line"].as_u64().unwrap() >= 1, "{found}");
+                assert!(found["column"].as_u64().unwrap() >= 1, "{found}");
+            } else {
+                assert!(
+                    found["line"].is_null(),
+                    "a filename match has no line: {found}"
+                );
+            }
+        }
+    }
+    assert!(paths.iter().any(|p| p == "src/main.rs"), "{paths:?}");
+    assert!(paths.iter().any(|p| p == "src/needle.ts"), "{paths:?}");
+    assert!(
+        !paths.iter().any(|p| p.starts_with("node_modules/")),
+        "an ignored directory was searched: {paths:?}"
+    );
+}
+
+/// `options` reaches the walk, and `filenames` really does open nothing.
+#[test]
+fn search_options_travel_over_the_wire() {
+    let root = searchable("search-options");
+    let h = Harness::new();
+    let workspace = h.open_workspace(&root.0);
+    let workspace_id = workspace["id"].clone();
+
+    let operation = h
+        .session(
+            "search_query",
+            json!({
+                "workspaceId": workspace_id,
+                "query": "needle",
+                "options": { "scope": "filenames", "includeIgnored": true },
+            }),
+        )
+        .expect("start the search");
+    let id = operation["id"].as_str().unwrap().to_owned();
+    h.wait_until(&id, Duration::from_secs(20), |op| {
+        op["status"] == "COMPLETED"
+    });
+
+    let result = &h.last_event("OperationCompleted")["payload"]["result"];
+    assert_eq!(
+        result["summary"]["bytesScanned"], 0,
+        "filenames opens nothing"
+    );
+    assert_eq!(
+        result["summary"]["skipped"]["ignoredDirectories"], 0,
+        "includeIgnored was asked for: {result}"
+    );
+    let paths: Vec<String> = h
+        .events_named("SearchMatchesFound")
+        .iter()
+        .flat_map(|batch| batch["payload"]["matches"].as_array().unwrap().clone())
+        .map(|found| found["path"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(paths, vec!["src/needle.ts".to_owned()], "{paths:?}");
+}
+
+/// Fast validation, before anything exists: no operation, no event.
+#[test]
+fn search_validates_before_it_creates_anything() {
+    let root = searchable("search-invalid");
+    let h = Harness::new();
+    let workspace = h.open_workspace(&root.0);
+    let workspace_id = workspace["id"].clone();
+    let before = h.invoke("operations_list", json!({})).expect("list");
+    let before = before.as_array().unwrap().len();
+
+    let empty = h
+        .session(
+            "search_query",
+            json!({ "workspaceId": workspace_id, "query": "   " }),
+        )
+        .expect_err("an empty query is refused");
+    assert_eq!(empty["code"], "InvalidInput");
+    assert_eq!(empty["details"]["field"], "query");
+
+    let bad_regex = h
+        .session(
+            "search_query",
+            json!({
+                "workspaceId": workspace_id,
+                "query": "foo(",
+                "options": { "useRegex": true },
+            }),
+        )
+        .expect_err("an uncompilable pattern is refused");
+    assert_eq!(bad_regex["code"], "InvalidInput");
+
+    let closed = h
+        .session(
+            "search_query",
+            json!({ "workspaceId": "w-gone", "query": "x" }),
+        )
+        .expect_err("a workspace that is not open is refused");
+    assert_eq!(closed["code"], "NotFound");
+
+    let after = h.invoke("operations_list", json!({})).expect("list");
+    assert_eq!(
+        after.as_array().unwrap().len(),
+        before,
+        "invalid input created an operation: {after}"
+    );
+    assert!(
+        !h.event_names()
+            .iter()
+            .any(|name| name == "SearchMatchesFound"),
+        "invalid input emitted an event: {:?}",
+        h.event_names()
+    );
+}
+
+/// Rule 10 through the real IPC: a big search, cancelled by `operations.cancel`,
+/// ends `CANCELLED` with no batch after the cancellation and no completion.
+#[test]
+fn a_large_search_is_cancelled_through_operations_cancel() {
+    let root = TempWorkspace::new("search-cancel");
+    for index in 0..600 {
+        let dir = root.0.join(format!("gen/{:02}", index % 20));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(format!("f{index:04}.txt")), "needle\n".repeat(40)).unwrap();
+    }
+    let h = Harness::new();
+    let workspace = h.open_workspace(&root.0);
+    let workspace_id = workspace["id"].clone();
+
+    let operation = h
+        .session(
+            "search_query",
+            json!({ "workspaceId": workspace_id, "query": "needle" }),
+        )
+        .expect("start the search");
+    let id = operation["id"].as_str().unwrap().to_owned();
+    h.session("operations_cancel", json!({ "operationId": id }))
+        .expect("cancel accepted");
+
+    let ended = h.wait_until(&id, Duration::from_secs(20), |op| {
+        matches!(
+            op["status"].as_str(),
+            Some("COMPLETED" | "FAILED" | "CANCELLED")
+        )
+    });
+    assert_eq!(ended["status"], "CANCELLED", "{ended}");
+
+    let names = h.event_names();
+    let cancelled_at = names
+        .iter()
+        .position(|name| name == "OperationCancelled")
+        .expect("the cancellation is in the log");
+    assert!(
+        !names.contains(&"OperationCompleted".to_owned()),
+        "a cancelled search must not also complete: {names:?}"
+    );
+    assert!(
+        !names[cancelled_at + 1..]
+            .iter()
+            .any(|name| name == "SearchMatchesFound"),
+        "matches arrived after the cancellation: {names:?}"
+    );
+
+    // `seq` stays contiguous across the whole run, which is what
+    // `phase-0-spike.md`'s B3 asks of a cancelled operation.
+    let seqs: Vec<u64> = h
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|event| event["seq"].as_u64().expect("a seq"))
+        .collect();
+    assert!(
+        seqs.windows(2).all(|pair| pair[1] == pair[0] + 1),
+        "sequence gap: {seqs:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Reading the repository (PROTO-W2-GIT)
 // ---------------------------------------------------------------------------
 

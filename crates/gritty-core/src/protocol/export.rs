@@ -39,6 +39,9 @@ use crate::ownership::wire::{
     OwnershipCheck, OwnershipMap, ReleaseOwnershipRequest, ResolveConflictRequest,
 };
 use crate::protocol::error::CoreError;
+use crate::search::wire::{
+    SearchCompletion, SearchMatchesFoundPayload, SearchOptions, SearchQueryRequest,
+};
 use crate::session::wire::{
     CandidatesRequest, DiscardSnapshotRequest, LastSession, RecoverSnapshotRequest,
     RecoveryCandidate, SessionRestoreResponse, UpdateSessionRequest,
@@ -115,6 +118,13 @@ fn export_bindings() {
     GitStatusResponse::export_all(&cfg).expect("export GitStatusResponse");
     GitDiffRequest::export_all(&cfg).expect("export GitDiffRequest");
     GitDiffResponse::export_all(&cfg).expect("export GitDiffResponse");
+    // Search (T080, reaching the shell in PROTO-W3). `SearchMatch`,
+    // `SearchSummary`, `SkipCounts`, `MatchKind` and `SearchScope` live in
+    // `gritty-search` and come along transitively.
+    SearchQueryRequest::export_all(&cfg).expect("export SearchQueryRequest");
+    SearchOptions::export_all(&cfg).expect("export SearchOptions");
+    SearchMatchesFoundPayload::export_all(&cfg).expect("export SearchMatchesFoundPayload");
+    SearchCompletion::export_all(&cfg).expect("export SearchCompletion");
     StartFakeRunRequest::export_all(&cfg).expect("export StartFakeRunRequest");
     CancelRunRequest::export_all(&cfg).expect("export CancelRunRequest");
     ListRunsRequest::export_all(&cfg).expect("export ListRunsRequest");
