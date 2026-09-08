@@ -5022,3 +5022,69 @@ textarea:focus-visible {
 .git__line--removed .git__text {
   color: var(--error-text);
 }
+
+/* T042: an editable tree — selection, the roving focus ring, the drag target,
+   and the inline input a rename or a new name is typed into. */
+
+.tree__row--selected {
+  background: var(--ghost-strong);
+}
+
+.tree__row--selected .tree__name {
+  color: var(--fg);
+}
+
+/* The roving tabIndex lands here, so it needs a focus ring of its own: the row
+   is a `treeitem`, not a button, and gets no default one. */
+.tree__row--focused,
+.tree__row:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* Cut is a promise, not a change: the entry is still there until the paste. */
+.tree__row--cut .tree__name,
+.tree__row--cut .tree__glyph {
+  opacity: 0.5;
+}
+
+.tree__row--drop-target {
+  background: var(--accent-ghost, var(--ghost-strong));
+  outline: 1px dashed var(--accent);
+  outline-offset: -1px;
+}
+
+.tree__row--draft {
+  display: flex;
+  align-items: center;
+}
+
+.tree__input {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  flex: 1;
+  min-width: 0;
+}
+
+.tree__input input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  padding: 0 2px;
+  color: var(--fg);
+  background: var(--surface-control);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+}
+
+.tree__input input[aria-invalid="true"] {
+  border-color: var(--error);
+}
+
+.tree__problem {
+  color: var(--error-text);
+  font-size: var(--text-micro);
+  white-space: nowrap;
+}

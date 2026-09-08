@@ -8,6 +8,7 @@ import type {
   WorkspaceClosedReason,
   WorkspaceId,
 } from '@gritty/protocol';
+import { emptySelection, keepVisible, type Selection } from './explorer-selection';
 
 /**
  * The explorer tree as the UI knows it: one node per workspace-relative path,
@@ -67,6 +68,12 @@ export interface ExplorerState {
    * changes until its page comes back.
    */
   readonly stale: readonly string[];
+  /**
+   * What is picked, where a Shift-range measures from, and which row owns the
+   * roving `tabIndex` (T042). The algebra is `explorer-selection.ts`; the
+   * reducer only holds the result and prunes it when rows disappear.
+   */
+  readonly selection: Selection;
 }
 
 export const initialExplorerState: ExplorerState = {
@@ -76,10 +83,13 @@ export const initialExplorerState: ExplorerState = {
   notice: null,
   unmatched: {},
   stale: [],
+  selection: emptySelection,
 };
 
 /** Operation kind the core uses for a listing that outlived its budget. */
 export const LIST_OPERATION_KIND = 'workspace.list';
+/** Operation kind of a `files.move`/`files.delete` that outlived its budget. */
+export const FILES_OPERATION_KIND = 'files.transfer';
 const UNMATCHED_LIMIT = 20;
 
 export type ExplorerAction =
@@ -92,6 +102,18 @@ export type ExplorerAction =
   | { type: 'setShowHidden'; showHidden: boolean }
   | { type: 'dismissNotice' }
   | { type: 'refreshing'; paths: readonly string[] }
+  /**
+   * The whole selection at once (T042). The reducer does not re-derive it:
+   * `explorer-selection.ts` computed it from the visible rows, which only the
+   * caller has, and a second opinion here would be a second source of truth.
+   */
+  | { type: 'selection'; selection: Selection }
+  /**
+   * Re-list these directories: a `files.*` command said its `changed` (T042).
+   * The watcher would say the same thing a debounce later, but it is
+   * best-effort, so the response is what the tree converges on.
+   */
+  | { type: 'invalidate'; paths: readonly string[] }
   | { type: 'event'; event: EventEnvelope };
 
 export function childPath(parent: string, name: string): string {
@@ -145,6 +167,7 @@ function openWorkspace(state: ExplorerState, workspace: Workspace): ExplorerStat
     notice: null,
     unmatched: {},
     stale: [],
+    selection: emptySelection,
   };
 }
 
@@ -155,7 +178,15 @@ function closeWorkspace(
 ): ExplorerState {
   if (state.workspace === null) return state;
   if (workspaceId !== null && state.workspace.id !== workspaceId) return state;
-  return { ...state, workspace: null, nodes: {}, notice, unmatched: {}, stale: [] };
+  return {
+    ...state,
+    workspace: null,
+    nodes: {},
+    notice,
+    unmatched: {},
+    stale: [],
+    selection: emptySelection,
+  };
 }
 
 function dropSubtree(nodes: Record<string, ExplorerNode>, path: string): void {
@@ -174,13 +205,24 @@ function applyPage(
   const parent = state.nodes[path];
   if (!parent) return state;
   const nodes: Record<string, ExplorerNode> = { ...state.nodes };
+  const surviving = new Set(page.entries.map((entry) => childPath(path, entry.name)));
   if (!append) {
-    for (const child of parent.children ?? []) dropSubtree(nodes, child);
+    // Only what the page no longer lists is dropped. Before T042 every
+    // non-append page dropped the whole subtree, which collapsed everything
+    // the user had expanded; that was tolerable while a re-list was rare and
+    // is not now that every file operation causes one.
+    for (const child of parent.children ?? []) {
+      if (!surviving.has(child)) dropSubtree(nodes, child);
+    }
   }
   const added: string[] = [];
   for (const entry of page.entries) {
     const child = childPath(path, entry.name);
-    nodes[child] = makeNode(child, entry);
+    const existing = nodes[child];
+    // A survivor keeps what the user did to it — expanded, its loaded
+    // children, its cursor — and takes the fresh entry. A directory whose own
+    // contents changed is marked stale separately by the watcher.
+    nodes[child] = existing ? { ...existing, entry } : makeNode(child, entry);
     added.push(child);
   }
   nodes[path] = {
@@ -196,11 +238,26 @@ function applyPage(
   return { ...state, nodes };
 }
 
+/**
+ * Drop selected rows a re-list removed (T042).
+ *
+ * Every file operation causes a re-list, so a rename or a delete would
+ * otherwise leave the selection pointing at paths that no longer exist — and
+ * the next ⌫ would be about them.
+ */
+function pruneSelection(state: ExplorerState): ExplorerState {
+  const visible = selectRows(state)
+    .filter((row) => row.kind === 'entry')
+    .map((row) => row.node.path);
+  const selection = keepVisible(state.selection, visible);
+  return selection === state.selection ? state : { ...state, selection };
+}
+
 function applyOutcome(state: ExplorerState, path: string, outcome: ListingOutcome): ExplorerState {
   const append = state.nodes[path]?.pending?.append ?? false;
   switch (outcome.kind) {
     case 'page':
-      return applyPage(state, path, outcome.page, append);
+      return pruneSelection(applyPage(state, path, outcome.page, append));
     case 'failed':
       return withNode(state, path, (node) => ({
         ...node,
@@ -256,6 +313,13 @@ function onEvent(state: ExplorerState, event: EventEnvelope): ExplorerState {
         reason: event.payload.reason,
       });
     case 'OperationCompleted': {
+      // A transfer or delete that outlived its budget (T042). Its result names
+      // the directories to re-list, the same way the inline arm does.
+      if (event.payload.operation.kind === FILES_OPERATION_KIND) {
+        const result = event.payload.result as { changed?: readonly string[] } | undefined;
+        const stale = staleNodes(state, result?.changed ?? [], false);
+        return stale === state.stale ? state : { ...state, stale };
+      }
       if (event.payload.operation.kind !== LIST_OPERATION_KIND) return state;
       const page = event.payload.result as DirectoryPage | undefined;
       const outcome: ListingOutcome = page
@@ -307,7 +371,15 @@ export function explorerReducer(state: ExplorerState, action: ExplorerAction): E
       return applyOutcome({ ...pending, unmatched }, action.path, outcome);
     }
     case 'pageLoaded':
-      return applyPage(state, action.path, action.page, action.append);
+      return pruneSelection(applyPage(state, action.path, action.page, action.append));
+    case 'selection':
+      return state.selection === action.selection
+        ? state
+        : { ...state, selection: action.selection };
+    case 'invalidate': {
+      const stale = staleNodes(state, action.paths, false);
+      return stale === state.stale ? state : { ...state, stale };
+    }
     case 'listFailed':
       return withNode(state, action.path, (node) => ({
         ...node,

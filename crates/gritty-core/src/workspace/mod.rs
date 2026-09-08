@@ -9,6 +9,8 @@
 //! job continues as a cancellable `workspace.list` operation whose completion
 //! event carries the page. Wire types are exported to TypeScript from here.
 
+pub mod files;
+pub mod journal;
 pub mod recents;
 pub mod watch;
 
@@ -572,6 +574,9 @@ impl From<WorkspaceError> for CoreError {
             }
             WorkspaceError::NotADirectory(message) => Self::invalid_input("path", message),
             WorkspaceError::NotAFile(message) => Self::invalid_input("path", message),
+            // `Conflict`, not `InvalidInput`: the request was well formed and
+            // the disk disagreed, which is the same shape a dirty save takes.
+            WorkspaceError::AlreadyExists(message) => Self::conflict(message),
             WorkspaceError::TooLarge { path, size, limit } => Self::invalid_input(
                 "path",
                 format!("{path} is {size} bytes, above the {limit}-byte document limit"),

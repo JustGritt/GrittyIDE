@@ -32,6 +32,7 @@ requires updating the relevant ADR.
 | [ADR-024](ADR-024-target-dir-retention.md) | One `target/` per checkout, swept by budget and age — not a shared `CARGO_TARGET_DIR` | Proposed |
 | [ADR-025](ADR-025-filesystem-watching.md) | Filesystem watching is one coalesced, bounded, directory-grained signal | Proposed |
 | [ADR-026](ADR-026-agent-console-tab.md) | An agent console is a tab in the editor, and the agent rail is retired | Accepted |
+| [ADR-028](ADR-028-explorer-file-operations.md) | Editing the file tree is a `files.*` command domain, and the Trash is the recovery | Proposed |
 
 Template:
 

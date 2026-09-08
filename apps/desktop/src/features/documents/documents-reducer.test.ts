@@ -496,4 +496,31 @@ describe('documents reducer', () => {
       documentsReducer(state, { type: 'updateFailed', documentId: 'nope' as DocumentId, error }),
     ).toBe(state);
   });
+
+  it('a renamed file carries its tab to the new path without touching the buffer (T042)', () => {
+    let state = opened('a');
+    // Something was typed but not saved.
+    state = documentsReducer(state, { type: 'touched', documentId: A });
+    const before = state.tabs.a;
+    expect(before?.document.path).toBe('a.md');
+
+    // `files.rename` re-keyed the document core-side and announced it. The
+    // generic `DocumentChanged` arm already carries the whole document, so the
+    // tab follows with no special case — this test is what keeps that true.
+    state = documentsReducer(state, {
+      type: 'event',
+      event: event('DocumentChanged', {
+        document: doc('a', { path: 'src/renamed.md', languageId: 'markdown' }),
+        cause: 'MOVED',
+      }),
+    });
+
+    const after = state.tabs.a;
+    expect(after?.document.path).toBe('src/renamed.md');
+    expect(
+      after?.bufferGeneration,
+      'a rename must not push text at Monaco: that would discard the editor undo stack',
+    ).toBe(before?.bufferGeneration);
+    expect(after?.pending, 'and the unsaved edit is still pending').toBe(before?.pending);
+  });
 });

@@ -19,7 +19,7 @@ the workflow below are hand-maintained.
 | [T030](T030-file-io-documents.md) | File I/O + document/buffer contract (Gate B) | 0/1A | T020 | done |
 | [T040](T040-monaco-shell.md) | Monaco shell | 0/1A | T030 | done |
 | [T041](T041-preview-tabs.md) | Preview tabs, and closing more than one at a time | 1A | T020, T030, T040 | review |
-| [T042](T042-explorer-file-operations.md) | Editing the file tree: create, rename, move, delete, undo | 1A | T020, T030, T040, T070 | doing |
+| [T042](T042-explorer-file-operations.md) | Editing the file tree: create, rename, move, delete, undo | 1A | T020, T030, T040, T070 | review |
 | [T045](T045-drag-and-drop.md) | Drag and drop files/folders onto the window | 1A | T030, T040 | review |
 | [T046](T046-resizable-panes.md) | Resizable panes, and a terminal on opening | 1A | T040, T060, T095 | done |
 | [T047](T047-terminal-names.md) | Naming terminal sessions | 1A | T090, T095 | done |
@@ -57,7 +57,7 @@ the workflow below are hand-maintained.
 | T305 | Agent capability model | 4 | T300 | unspec |
 | T310 | First real adapter: a Claude Code run Gritty owns, and can prompt | 4 | T300-WIRE | superseded |
 | T310-A | gritty-agent-claude: the process, the framing, the translation | 4 | T300-WIRE | review |
-| T310-B | CLAUDE_CODE, the run inbox, and runs.start/runs.prompt | 4 | T310-A | todo |
+| T310-B | CLAUDE_CODE, the run inbox, and runs.start/runs.prompt | 4 | T310-A | doing |
 | T315 | Live agent activity | 4 | T310 | superseded by T220/T230/T231/T232 |
 | T310-U | The prompt box, and an owned run in the console | 4 | T310-B | todo |
 | T310-ANSWER | Arm the host permission verdict for an owned run | 4 | T310-B | todo |

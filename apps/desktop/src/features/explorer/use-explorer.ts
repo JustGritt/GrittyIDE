@@ -1,6 +1,11 @@
 import {
   type CoreError,
+  type DeleteMode,
+  type FileOperationResponse,
+  type FileOperationResult,
   type ListDirectoryRequest,
+  type NewEntryKind,
+  type TransferMode,
   toCoreError,
   type Workspace,
   type WorkspaceId,
@@ -13,6 +18,16 @@ import {
   initialExplorerState,
   isExpandable,
 } from './explorer-reducer';
+import type { Selection } from './explorer-selection';
+
+/**
+ * What a cut or copy is holding (T042). `MOVE` empties itself on paste, the way
+ * a cut does everywhere; `COPY` stays, so one copy can be pasted repeatedly.
+ */
+export interface FileClipboard {
+  readonly paths: readonly string[];
+  readonly mode: TransferMode;
+}
 
 export interface ExplorerOptions {
   /** Controlled by the session layout (T060); the local state follows it. */
@@ -218,6 +233,145 @@ export function useExplorer(options: ExplorerOptions = {}) {
   const dismissNotice = useCallback(() => dispatch({ type: 'dismissNotice' }), []);
   const clearError = useCallback(() => setError(null), []);
 
+  // ---- Changing the tree (T042) ----
+
+  const setSelection = useCallback(
+    (selection: Selection) => dispatch({ type: 'selection', selection }),
+    [],
+  );
+
+  /**
+   * What a cut or copy is holding. Renderer state on purpose: the core has no
+   * clipboard, and a pending paste is not a fact about the filesystem.
+   */
+  const [clipboard, setClipboard] = useState<FileClipboard | null>(null);
+
+  /** What ⌘Z would reverse, as the core last reported it. */
+  const [history, setHistory] = useState<{ undo?: string; redo?: string }>({});
+
+  /** Take a command's answer: re-list what it changed, and remember the labels. */
+  const settle = useCallback((result: FileOperationResult | undefined) => {
+    if (!result) return undefined;
+    if (result.changed.length > 0) {
+      dispatch({ type: 'invalidate', paths: result.changed });
+    }
+    setHistory({ undo: result.undo, redo: result.redo });
+    return result;
+  }, []);
+
+  /**
+   * A `move`/`delete` answers `ready` or `pending`. The pending arm is settled
+   * by `OperationCompleted` in the reducer, which carries the same `changed`,
+   * so there is nothing to await here.
+   */
+  const settleResponse = useCallback(
+    (response: FileOperationResponse | undefined) => {
+      if (!response) return undefined;
+      return response.status === 'ready' ? settle(response.result) : undefined;
+    },
+    [settle],
+  );
+
+  const createEntry = useCallback(
+    (path: string, kind: NewEntryKind) =>
+      run(async () => {
+        if (!workspace) return undefined;
+        return settle(await core.files.create({ workspaceId: workspace.id, path, kind }));
+      }),
+    [run, workspace, settle],
+  );
+
+  const renameEntry = useCallback(
+    (path: string, newName: string) =>
+      run(async () => {
+        if (!workspace) return undefined;
+        return settle(await core.files.rename({ workspaceId: workspace.id, path, newName }));
+      }),
+    [run, workspace, settle],
+  );
+
+  const transfer = useCallback(
+    (paths: readonly string[], targetDir: string, mode: TransferMode) =>
+      run(async () => {
+        if (!workspace || paths.length === 0) return undefined;
+        return settleResponse(
+          await core.files.move({
+            workspaceId: workspace.id,
+            paths: [...paths],
+            targetDir,
+            mode,
+          }),
+        );
+      }),
+    [run, workspace, settleResponse],
+  );
+
+  /** The action the dirty-document `Conflict` replays with `force`. */
+  const refusedDelete = useRef<{ paths: readonly string[]; mode: DeleteMode } | null>(null);
+
+  const deleteEntries = useCallback(
+    (paths: readonly string[], mode: DeleteMode, force = false) =>
+      run(async () => {
+        if (!workspace || paths.length === 0) return undefined;
+        refusedDelete.current = { paths, mode };
+        const response = await core.files.delete({
+          workspaceId: workspace.id,
+          paths: [...paths],
+          mode,
+          ...(force ? { force: true } : {}),
+        });
+        refusedDelete.current = null;
+        return settleResponse(response);
+      }),
+    [run, workspace, settleResponse],
+  );
+
+  /** Replay the refused delete with `force`: the user chose to lose the buffer. */
+  const deleteAnyway = useCallback(async () => {
+    const last = refusedDelete.current;
+    if (!last) return;
+    await deleteEntries(last.paths, last.mode, true);
+  }, [deleteEntries]);
+
+  /** Show an entry in the system file manager. Resolved core-side. */
+  const revealInFileManager = useCallback(
+    (path: string) =>
+      run(async () => {
+        if (!workspace) return undefined;
+        await core.shell.revealPath({ workspaceId: workspace.id, path });
+        return undefined;
+      }),
+    [run, workspace],
+  );
+
+  const undo = useCallback(
+    () =>
+      run(async () => {
+        if (!workspace) return undefined;
+        return settle(await core.files.undo(workspace.id));
+      }),
+    [run, workspace, settle],
+  );
+
+  const redo = useCallback(
+    () =>
+      run(async () => {
+        if (!workspace) return undefined;
+        return settle(await core.files.redo(workspace.id));
+      }),
+    [run, workspace, settle],
+  );
+
+  /** Paste what the clipboard holds into `targetDir`. A cut is consumed. */
+  const paste = useCallback(
+    async (targetDir: string) => {
+      if (!clipboard) return;
+      const result = await transfer(clipboard.paths, targetDir, clipboard.mode);
+      if (result && clipboard.mode === 'MOVE') setClipboard(null);
+    },
+    [clipboard, transfer],
+  );
+
   return {
     state,
     error,
@@ -232,5 +386,19 @@ export function useExplorer(options: ExplorerOptions = {}) {
     setShowHidden,
     dismissNotice,
     clearError,
+    // T042
+    setSelection,
+    clipboard,
+    setClipboard,
+    history,
+    createEntry,
+    renameEntry,
+    transfer,
+    deleteEntries,
+    deleteAnyway,
+    revealInFileManager,
+    paste,
+    undo,
+    redo,
   };
 }

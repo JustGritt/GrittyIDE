@@ -161,7 +161,63 @@ describe('pages and rows', () => {
     expect(selectRows(collapsed)).toHaveLength(3);
   });
 
-  it('reloading a directory drops the old subtree; appending keeps it', () => {
+  it('reloading a directory keeps what survived it, expanded and loaded (T042)', () => {
+    let state = opened();
+    state = explorerReducer(state, {
+      type: 'pageLoaded',
+      path: '',
+      page: page('', ROOT_ENTRIES),
+      append: false,
+    });
+    state = explorerReducer(state, { type: 'toggle', path: 'src' });
+    state = explorerReducer(state, {
+      type: 'pageLoaded',
+      path: 'src',
+      page: page('src', [entry('old.rs')]),
+      append: false,
+    });
+    expect(state.nodes.src?.expanded).toBe(true);
+
+    // The kind of re-list every file operation now causes.
+    state = explorerReducer(state, {
+      type: 'pageLoaded',
+      path: '',
+      page: page('', [entry('src', { kind: 'dir' })]),
+      append: false,
+    });
+    expect(state.nodes.src?.expanded, 'a survivor stays open').toBe(true);
+    expect(state.nodes.src?.children, 'and keeps its loaded children').toEqual(['src/old.rs']);
+    expect(state.nodes['src/old.rs']).toBeDefined();
+  });
+
+  it('a re-list drops selected rows that are no longer there (T042)', () => {
+    let state = opened();
+    state = explorerReducer(state, {
+      type: 'pageLoaded',
+      path: '',
+      page: page('', [entry('a.ts'), entry('b.ts'), entry('c.ts')]),
+      append: false,
+    });
+    state = explorerReducer(state, {
+      type: 'selection',
+      selection: { paths: ['a.ts', 'b.ts'], anchor: 'a.ts', focused: 'b.ts' },
+    });
+
+    // `b.ts` was renamed or deleted by someone; the re-list says so.
+    state = explorerReducer(state, {
+      type: 'pageLoaded',
+      path: '',
+      page: page('', [entry('a.ts'), entry('c.ts')]),
+      append: false,
+    });
+    expect(state.selection.paths).toEqual(['a.ts']);
+    expect(
+      state.selection.focused,
+      'the focus moves to a survivor so the keyboard still has somewhere to be',
+    ).toBe('a.ts');
+  });
+
+  it('reloading still drops a subtree whose directory is gone', () => {
     let state = opened();
     state = explorerReducer(state, {
       type: 'pageLoaded',
@@ -178,11 +234,11 @@ describe('pages and rows', () => {
     state = explorerReducer(state, {
       type: 'pageLoaded',
       path: '',
-      page: page('', [entry('src', { kind: 'dir' })]),
+      page: page('', [entry('README.md')]),
       append: false,
     });
+    expect(state.nodes.src).toBeUndefined();
     expect(state.nodes['src/old.rs']).toBeUndefined();
-    expect(state.nodes.src?.children).toBeNull();
   });
 
   it('truncated pages show a "more" row and appended pages extend the children', () => {
