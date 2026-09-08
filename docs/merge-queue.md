@@ -147,6 +147,22 @@ it is a new crate with no command, no event and no type on the wire, and
 `T100-U` claims nothing either, because `PROTO-W2-GIT` already shipped the wire
 it consumes.
 
+**`SCHEMA_VERSION` 5 and migration `0005` are still free, and ADR-021 names
+both.** `docs/decisions/ADR-021-agent-run-persistence.md` (written 2026-09-08,
+`Proposed`) says a persisted run needs `0005_agent_runs.sql` and
+`SCHEMA_VERSION` 5. That is a **name, not a claim**: an ADR at `Proposed` has
+not been decided, so it must not hold a number a decided ticket may need first.
+Whoever writes the migration claims it here, and if that turns out to be some
+other ticket, ADR-021's §8 follows the number rather than the other way round.
+
+**ADR-021 fills the gap at 021**, which had been reserved by name in six
+documents since T300-C and never written. The next free ADR number is unchanged
+at **ADR-027**. While writing it, two rows in `docs/decisions/README.md` were
+found duplicated — ADR-024 and ADR-025 each appeared twice, once with a stale
+title and a wrong `Accepted` status — which is rule 3b's failure mode surviving
+in the index rather than in the filenames. The index now matches the files;
+nothing asserts against this, so it is worth looking for again after a wave.
+
 **ADR-026 is taken** by `T233-C` (`docs/decisions/ADR-026-agent-console-tab.md`,
 in the working tree at the time of writing). Recorded here after the fact rather
 than before, by a different session, which is exactly the hole rule 3b names: the
