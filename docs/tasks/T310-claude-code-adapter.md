@@ -324,3 +324,260 @@ This file stays the spec for all three, as T300's does for its four.
 _To be filled by the implementing session: summary, files changed, tests
 actually executed with results, architectural decisions, known limitations,
 follow-up tasks, remaining risks._
+
+## Completion report — T310-A
+
+_The adapter crate and the translation. T310-B (`AgentRunProvider::CLAUDE_CODE`,
+the inbox, `runs.start`/`runs.prompt`, §8) and T310-U (the prompt box) are not
+in this cut and nothing here anticipates them beyond publishing the mapping they
+bind to._
+
+### Summary
+
+`crates/agent-claude` (`gritty-agent-claude`) exists and does exactly what §1
+describes: it builds the argv, spawns the child, frames JSON lines in and out,
+and owns the child's lifetime. It decides nothing about what an observation
+*means* — it emits `ClaudeObservation` and publishes the intended mapping into
+`AgentRunEvent`/`AgentRunActivityKind`/`AgentRunState` as **strings**, exactly
+as `gritty-agent-fake` does, because it cannot depend on `gritty-core` without a
+Cargo cycle. `agent_run/claude_driver.rs` is therefore still T310-B's file, and
+this crate is what it will bind to.
+
+The crate is split so the **translation is provable without a process**:
+`stream::ClaudeStream` takes `&[u8]` and returns observations with no I/O, no
+clock and no child, and `process::ClaudeProcess` is the only thing that spawns.
+`tests/fixture.rs` drives the pure half against a recording of a real `claude`
+2.1.263 session, so CI needs neither the binary nor an API key.
+
+**No wire change, no command, no event, no `PROTOCOL_VERSION` claimed.**
+
+### Facts established against the real binary
+
+The task asked for two open questions to be settled rather than assumed. Both
+were, against `claude` 2.1.263 on darwin 25.6 on 2026-09-08.
+
+1. **`--permission-mode` contributes nothing** (§1 left this explicitly open).
+   The same prompt was run twice with only that flag differing. With and without
+   `--permission-mode manual`, `system`/`init` reported `permissionMode:
+   "default"`, the `can_use_tool` request arrived identically, and the tool did
+   not run. It is **not passed**: a flag that changes nothing is one a later
+   reader would assume is load-bearing. `--tools` is omitted for the same reason
+   one level up — restricting the tool set is T305's question, not an argv
+   builder's.
+
+2. **An unanswered permission ask holds indefinitely** (§7: "What was not tested
+   is what happens if nobody answers"). A `can_use_tool` was deliberately left
+   unanswered and the process watched for **145 seconds**. It emitted nothing
+   further, stayed alive, and the command never ran. There is no CLI-side
+   timeout, and in particular none that resolves an ask to `allow`. So §7's safe
+   default is available: hold, stay `BLOCKED`, and let a policy answer. This
+   crate contains **no timeout that could resolve an ask at all**.
+
+Two further facts the recording settled, neither of which was in the channel
+table: `system`/`init` arrives **once per turn**, not once per process (so a
+second one is an ordinary `WAITING → RUNNING` boundary, not a duplicate to
+suppress); and the CLI **echoes the `control_response` back on stdout**, which
+is what lets `PermissionAnswered` be observed rather than assumed.
+
+### Files changed
+
+| File | What |
+|---|---|
+| `crates/agent-claude/Cargo.toml` | new crate; no `gritty-core` dependency, by construction |
+| `crates/agent-claude/src/lib.rs` | crate root, the two-halves table, the no-cycle argument |
+| `crates/agent-claude/src/launch.rs` | the fixed argv, uuid validation, the `--permission-mode` finding |
+| `crates/agent-claude/src/message.rs` | private wire shapes; `Value`-first dispatch so an unknown `type` is skipped, not fatal |
+| `crates/agent-claude/src/observation.rs` | `ClaudeObservation` and the published mapping (`run_events`/`run_activity`/`run_state`) |
+| `crates/agent-claude/src/stream.rs` (+`stream/tests.rs`) | framing and translation; pure |
+| `crates/agent-claude/src/request.rs` | the stdin frames, and `ClaudeVerdict` — §7's policy seam |
+| `crates/agent-claude/src/process.rs` | spawn, pipes, process-group termination, cancel-safe `next` |
+| `crates/agent-claude/src/error.rs` | `ClaudeError` + `core_error_code()` |
+| `crates/agent-claude/fixtures/two-turns-denied.jsonl` | the recording |
+| `crates/agent-claude/fixtures/README.md` | its provenance, and exactly what was redacted |
+| `crates/agent-claude/tests/fixture.rs` | the translation against the recording |
+| `crates/agent-claude/tests/process.rs` | real children: force-kill, orphans, failures |
+| `Cargo.toml` (root) | one `[workspace.dependencies]` line for the new path crate — **in the tree, not in this commit**, see below |
+
+### Tests actually executed
+
+All run on macOS (darwin 25.6), 2026-09-08, in this working tree.
+
+| Command | Result |
+|---|---|
+| `cargo test -p gritty-agent-claude` | **ok** — 49 unit + 10 fixture + 15 process + 1 doc = **75 passed, 0 failed** |
+| `cargo clippy -p gritty-agent-claude --all-targets -- -D warnings` | **ok**, no warnings |
+| `cargo fmt -p gritty-agent-claude -- --check` | **ok** |
+| `cargo metadata --no-deps` | **ok** (the root manifest still resolves after the shared edit) |
+
+One test failed on its first run and found a real defect: a `control_response`
+whose verdict body was an unexpected *shape* (`null`, a number) failed to parse,
+which left the ask outstanding and would have parked the run in `BLOCKED`
+forever after it had already been answered. `ControlVerdict::behavior` is now a
+`Value` read loosely — anything that is not literally `"allow"` is a denial, the
+run resumes, and the unsafe direction stays closed.
+
+What the process tests prove, by spawning real `/bin/sh` children:
+
+- a child that **ignores SIGTERM** and has started a `sleep` of its own is
+  force-killed, and **the grandchild dies with it** — asserted with `kill(pid,0)`
+  against the recorded pid, not against a log line (rule 12);
+- **dropping the handle** without calling `terminate` leaves no orphan either;
+- a missing binary, a non-executable binary and a missing working directory are
+  three distinguishable errors, each naming what was wrong;
+- a child that never says `init` gives up with `Timeout` rather than sitting in
+  `STARTING`, and is killed on the way out;
+- a child that dies mid-turn reports `Code(3)`, `unfinished`, a bounded stderr
+  tail, and one counted malformed partial line;
+- a child killed from outside reports `Signal(9)` → `INTERRUPTED`, not `FAILED`;
+- garbage on stdout is counted and survivable;
+- the fixed launch line reaches the child unchanged (asserted from *inside* the
+  process, via its own argv).
+
+**Not run, and deliberately so:**
+
+- `pnpm check` **was not run whole**, and I am not claiming it green. Two other
+  agents have uncommitted work in this same tree (`W-t080` in `crates/search` and
+  `packages/protocol`, `W-t100u` in `apps/desktop/src/features/git`), so its
+  TypeScript and workspace-wide Rust stages cover their work as well as mine, and
+  `check:generated` cannot pass while anyone's generated types are uncommitted.
+  It was decomposed instead: the four commands above are the parts that are
+  actually about this crate, and all four are green.
+- `cargo test --workspace` was not run for the same reason.
+- The task's **manual check in `pnpm dev`** (two turns, then cancel) was not run:
+  it needs T310-B's `runs.start`/`runs.prompt` to reach a driver at all, and
+  neither exists yet. The equivalent evidence available at this cut is the
+  recorded session itself, which *is* two turns in one process with a cancelled
+  tool in the middle.
+
+### Architectural decisions
+
+- **The translation is published as strings, not performed here.** Same
+  arrangement as `FakeAction::run_events`, same mechanical reason: `gritty-core`
+  must depend on this crate, so the reverse edge is a cycle. T310-B writes the
+  typed match in `claude_driver.rs` and the cross-crate agreement test, which can
+  name both sides.
+- **The pure half and the process half are separate types.** `ClaudeStream`
+  takes bytes; `ClaudeProcess` owns the child and feeds it. That is what makes
+  "provable by recorded fixture" true rather than aspirational.
+- **No `AgentAdapter` trait** (§non-goals), and no permission-policy *trait*
+  either. §7's seam is `ClaudeVerdict`, a two-variant enum the adapter
+  serialises without an opinion — the same swap point T310-ANSWER needs, with
+  none of an abstraction's cost. `ClaudeVerdict::Allow { updated_input }` already
+  carries the shape ADR-020's "allow with edits" will want, and a test asserts
+  the wire form now so that ticket finds it proven.
+- **Resource bounds here; meaning bounds in the core.** Nothing in this crate
+  clips or collapses a string, because `AgentRunEvent::bounded` is the one ingest
+  seam (rule 13) and it is on the trusted side. What *is* bounded is what a
+  hostile child could otherwise grow: `MAX_LINE_BYTES` (1 MiB, oversized lines
+  dropped **whole**, never truncated into a half-event), `MAX_OUTSTANDING_TOOLS`
+  (64), `MAX_KIND_BYTES` (64), `MAX_STDERR_TAIL_BYTES` (4 KiB).
+- **Paths and commands are passed through raw.** Whether a path is inside the
+  workspace is the core's question (ADR-010, `AgentRunPath`); an adapter that
+  answered it would be choosing what the renderer may open.
+- **Tool classification is by the names Claude Code ships**, and lives here
+  because it is provider knowledge — the core must never learn that a tool called
+  `Edit` writes a file. An unknown name, or a known name whose input is the wrong
+  shape, is `Other`: never a guess, never an error.
+- **`ClaudeStream` holds no copy of the run's state.** It tracks only what
+  translation needs (the partial line, unclosed calls, outstanding asks). A
+  second answer to "what state is this run in" is one too many.
+- **Process group, three ways.** `process_group(0)` at spawn; `terminate` runs
+  SIGTERM → 500 ms → SIGKILL over the group; `Drop` SIGKILLs it. An orphaned
+  `claude` is the worst outcome available here, so it is guarded at every exit
+  including a panicking driver.
+- **`ClaudeProcess::next` is cancel-safe**, so T310-B can `select!` it against
+  the per-run inbox: the only await is `AsyncReadExt::read` (documented to lose
+  no data when dropped) and the partial line lives on `self`.
+
+### Known limitations
+
+- **Unix only, and said plainly.** `killpg` is `#[cfg(unix)]`, exactly as
+  `gritty-terminal` declares `nix`. On other platforms `terminate` reaches only
+  the direct child, so a grandchild would survive; `tests/process.rs` is
+  `#![cfg(unix)]` and nothing here has been run on Windows (rule 11).
+- **A line over 1 MiB is dropped whole.** A `Write` tool call carrying a very
+  large file would lose its `FILE_WRITE_REQUESTED`. The direction is deliberate —
+  a lost event, never a wrong one — but it is a real gap, and the counter is how
+  it becomes visible.
+- **Thinking blocks and per-tool detail are coarse.** A `thinking` block becomes
+  `Thought` (activity only) and its content is discarded; §6 already predicted
+  this is the thing most worth revisiting, and named ADR-027 for it.
+- **`AskUserQuestion` is not mapped to `DECISION_REQUESTED`.** The protocol has
+  the variant and the CLI plausibly has the tool, but it was not observed in any
+  recording, and mapping it from memory would be exactly the guess this task's
+  channel table exists to avoid.
+- **`PermissionAnswered` depends on the CLI echoing `control_response`.** That is
+  observed, not documented. If a future release stops echoing, the run would
+  stay `BLOCKED` after being answered rather than resuming. Recorded as a risk
+  below; the safe alternative (reporting the resume when *Gritty writes* the
+  answer) is one line in T310-B if it happens.
+- **The two shared manifests are in the tree but not in this commit.** Root
+  `Cargo.toml` and `Cargo.lock` both carry `W-t080`'s concurrent additions
+  (`gritty-search`, the `grep-*`/`ignore` block) in the *same hunk* as mine, and
+  staging another agent's dependency tree under this ticket would be wrong — so
+  this commit is `crates/agent-claude/**` and this task file only. Nothing here
+  needs either file: the crate is a workspace member through the `crates/*` glob,
+  and its own manifest names every dependency. The `[workspace.dependencies]`
+  line matters only when `gritty-core` comes to depend on this crate, which is
+  T310-B. Nothing in CI runs `--locked`, so the lock regenerates. Whoever lands
+  this wave should commit both files once.
+- The recorded fixture used `--model haiku --tools Bash` for cost and
+  determinism. Neither is in the shipped launch line, and
+  `fixtures/README.md` says so.
+
+### New dependencies
+
+**No new third-party crate.** Every dependency is already in
+`[workspace.dependencies]`:
+
+- `serde` / `serde_json` — the wire is newline-delimited JSON and tool inputs are
+  arbitrary JSON objects.
+- `thiserror` — how every other adapter crate here spells a refusal.
+- `tracing` — dropped-line counts and a killed group, logged once by count, never
+  by payload.
+- `tokio` (with `process` + `io-util` added **on this crate's dependency entry**,
+  not widened workspace-wide) — the child and its pipes.
+- `nix`, unix-only — `killpg`, so cancellation reaches the whole group.
+
+### Follow-up tasks (filed, not built)
+
+- **T310-ANSWER** — the verdict behind §7's seam. The channel is verified and the
+  seam (`ClaudeVerdict`) is built and tested; what is missing is the user's
+  answer reaching it. Now known to be safe to wait for: an unanswered ask holds
+  indefinitely and never resolves to `allow`.
+- **T310-RESUME** — `--resume`/`--fork-session` to take over an observed session.
+  `launch.rs` asserts neither flag is present, so this is a deliberate edit when
+  it happens.
+- **ADR-027** — only if §6's coarse feed disappoints. The concrete thing lost is
+  named above.
+- **ADR-021** — persistence for a run.
+- **New:** decide whether `AskUserQuestion` should become `DECISION_REQUESTED`,
+  and record a real session that raises one before mapping it.
+- **New:** `crates/agents`' `provider_of_command` will classify this child as an
+  observed session (§8). Not this cut's, and nothing here works around it — the
+  exclusion set is T310-B's, and this crate already reports the session id back
+  from `init` so it can be named.
+
+### Remaining risks
+
+- **The CLI is a moving target.** Everything above was measured against 2.1.263
+  on one day. The mitigations are structural rather than hopeful: an unknown
+  `type` is recorded and skipped with a counter, every wire field is
+  `#[serde(default)]`, a known kind with an unexpected body fails only itself,
+  and `ClaudeStreamStats::unknown` *rising* is how a format change announces
+  itself. A release that renamed `isReplay` or `can_use_tool` would still be
+  degradation rather than breakage — but it would be silent degradation, and
+  nothing yet watches that counter.
+- **The 145-second hold is evidence, not a guarantee.** It is much longer than
+  any plausible timeout and the CLI emitted nothing at all, but "indefinitely"
+  was inferred from "at least 145 seconds".
+- **The fixture is one conversation.** It covers `init`, replay, thinking, text,
+  a gated `Bash` call, a denial, a tool result, two `result`s and four unmodelled
+  kinds — but not a file write, not a search, not an `error_during_execution`,
+  and not a very long session. Those paths are unit-tested from hand-built lines,
+  which is the weaker evidence and is stated as such.
+- **Nothing has driven this crate end to end from the app.** It compiles, its
+  tests pass, and no `AgentRunManager` has ever called it. T310-B is the first
+  time the two halves meet, and that is where a mismatch in the published mapping
+  would surface — which is why the mapping is published as assertable strings
+  rather than described in prose.

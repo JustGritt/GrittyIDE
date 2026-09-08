@@ -1,0 +1,55 @@
+[package]
+name = "gritty-agent-claude"
+description = "Gritty's Claude Code adapter: the child process, the JSON-line framing, and the translation of its stdout into typed observations"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# Deliberately **no `gritty-core`**, for the same mechanical reason
+# `gritty-agent-fake` has none: `gritty-core` has to depend on this crate for
+# its run manager to drive one, and the reverse edge would be a cycle Cargo
+# refuses. So this crate speaks its own vocabulary (`ClaudeObservation`) and
+# publishes the intended mapping into `AgentRunEvent` as *strings*; the
+# translation into the protocol lives in `agent_run/claude_driver.rs` (T310-B).
+[dependencies]
+# T310-A: the CLI's stdout is newline-delimited JSON and its tool inputs are
+# arbitrary JSON objects, so the wire shapes are derived and the tool payloads
+# stay `Value` until a known tool name gives them a meaning. Both crates are
+# already workspace dependencies; this adds no new third-party crate.
+serde = { workspace = true }
+serde_json = { workspace = true }
+# T310-A: a refusal from the adapter is an error type, spelled the way every
+# other adapter crate in this workspace spells one.
+thiserror = { workspace = true }
+# T310-A: a dropped line and a killed process group are logged once, by kind and
+# count only — never by payload, which is untrusted child output (rule 13).
+tracing = { workspace = true }
+# T310-A: the child, its three pipes and the bounded waits around them.
+# `process` and `io-util` are added on top of the workspace features rather than
+# widened there, so no other crate's build changes for this one.
+tokio = { workspace = true, features = ["process", "io-util"] }
+
+# T310-A: `killpg`, so `runs.cancel` reaches the whole process group rather than
+# just the `claude` process. An orphaned child would keep running and keep
+# costing money, which the task names as the worst outcome available here.
+# Unix-only, exactly as `gritty-terminal` declares it.
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true }
+
+[dev-dependencies]
+# T310-A: `#[tokio::test]` for the process tests, which need a real reactor and
+# a real child. `test-util` is not used: nothing here pauses time, because a
+# force-kill test that advanced a fake clock would prove nothing about a
+# process that ignores SIGTERM.
+tokio = { workspace = true, features = [
+  "rt-multi-thread",
+  "macros",
+  "process",
+  "io-util",
+] }
+
+[lints]
+workspace = true
