@@ -4,7 +4,7 @@
   "identifier": "io.github.justgritt.gritty",
   "build": {
     "beforeDevCommand": "pnpm dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://localhost:1430",
     "beforeBuildCommand": "pnpm sidecar && pnpm build",
     "frontendDist": "../dist"
   },
@@ -32,13 +32,13 @@
         "connect-src": "ipc: http://ipc.localhost"
       },
       "devCsp": {
-        "default-src": "'self' http://localhost:1420",
-        "script-src": "'self' 'unsafe-inline' http://localhost:1420",
-        "style-src": "'self' 'unsafe-inline' http://localhost:1420",
+        "default-src": "'self' http://localhost:1430",
+        "script-src": "'self' 'unsafe-inline' http://localhost:1430",
+        "style-src": "'self' 'unsafe-inline' http://localhost:1430",
         "img-src": "'self' data: blob:",
         "font-src": "'self' data:",
         "worker-src": "'self' blob:",
-        "connect-src": "ipc: http://ipc.localhost http://localhost:1420 ws://localhost:1420"
+        "connect-src": "ipc: http://ipc.localhost http://localhost:1430 ws://localhost:1430"
       }
     }
   },

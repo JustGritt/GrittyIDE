@@ -11,10 +11,10 @@ export default defineConfig({
   clearScreen: false,
   server: {
     // Must match `build.devUrl` in src-tauri/tauri.conf.json.
-    port: 1420,
+    port: 1430,
     strictPort: true,
     host: host || false,
-    hmr: host ? { protocol: 'ws', host, port: 1421 } : undefined,
+    hmr: host ? { protocol: 'ws', host, port: 1431 } : undefined,
     watch: { ignored: ['**/src-tauri/**'] },
   },
   envPrefix: ['VITE_', 'TAURI_ENV_*'],
