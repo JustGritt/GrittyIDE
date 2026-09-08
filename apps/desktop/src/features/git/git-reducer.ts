@@ -1,4 +1,5 @@
 import type {
+  CommitPage,
   CoreErrorShape,
   DiffSummary,
   EventEnvelope,
@@ -27,6 +28,8 @@ import type {
 export const STATUS_OPERATION_KIND = 'git.status';
 /** The same, for `git.diff`. */
 export const DIFF_OPERATION_KIND = 'git.diff';
+/** The same, for `git.log`. */
+export const LOG_OPERATION_KIND = 'git.log';
 
 /**
  * How many operation outcomes may wait for the `pending` response that names
@@ -72,6 +75,17 @@ export interface GitState {
   readonly selected: WorkspacePath | null;
   readonly diff: Read<DiffSummary>;
   /**
+   * The History tab's page of commits.
+   *
+   * A third read rather than a field on the status: it answers a different
+   * question, it pages on its own cursor, and it is asked for only while the
+   * History tab is showing. Keeping it beside the other two is what lets one
+   * `unmatched` map serve all three.
+   */
+  readonly history: Read<CommitPage>;
+  /** A `cursor` page of history is in flight and the page shown is kept. */
+  readonly appendingHistory: boolean;
+  /**
    * Outcomes of operations whose `pending` response has not been applied yet.
    * The command response and the completion event are separate IPC messages
    * and their order is not guaranteed — the explorer learned this first
@@ -86,6 +100,8 @@ export const initialGitState: GitState = {
   appending: false,
   selected: null,
   diff: { kind: 'idle' },
+  history: { kind: 'idle' },
+  appendingHistory: false,
   unmatched: {},
 };
 
@@ -103,6 +119,11 @@ export type GitAction =
   | { type: 'diffReady'; diff: DiffSummary }
   | { type: 'diffNotARepository' }
   | { type: 'diffFailed'; error: CoreErrorShape }
+  | { type: 'logStarted'; append: boolean }
+  | { type: 'logPending'; operationId: OperationId }
+  | { type: 'logReady'; page: CommitPage; append: boolean }
+  | { type: 'logNotARepository' }
+  | { type: 'logFailed'; error: CoreErrorShape }
   | { type: 'event'; event: EventEnvelope };
 
 export function gitReducer(state: GitState, action: GitAction): GitState {
@@ -175,6 +196,43 @@ export function gitReducer(state: GitState, action: GitAction): GitState {
     case 'diffFailed':
       return { ...state, diff: { kind: 'failed', error: action.error } };
 
+    case 'logStarted':
+      return {
+        ...state,
+        appendingHistory: action.append && state.history.kind === 'ready',
+        history:
+          action.append && state.history.kind === 'ready' ? state.history : { kind: 'loading' },
+      };
+
+    case 'logPending':
+      return claim(
+        { ...state, history: { kind: 'pending', operationId: action.operationId } },
+        action.operationId,
+      );
+
+    case 'logReady':
+      return {
+        ...state,
+        appendingHistory: false,
+        history: {
+          kind: 'ready',
+          value:
+            action.append && state.history.kind === 'ready'
+              ? mergeHistory(state.history.value, action.page)
+              : action.page,
+        },
+      };
+
+    case 'logNotARepository':
+      return { ...state, appendingHistory: false, history: { kind: 'notARepository' } };
+
+    case 'logFailed':
+      return {
+        ...state,
+        appendingHistory: false,
+        history: { kind: 'failed', error: action.error },
+      };
+
     case 'event':
       return applyEvent(state, action.event);
   }
@@ -197,6 +255,18 @@ function mergeStatus(shown: RepositoryStatus, page: RepositoryStatus): Repositor
     // shrink a number whose whole purpose is to say nothing was hidden.
     unrepresentable: shown.unrepresentable + page.unrepresentable,
   };
+}
+
+/**
+ * Append a page of history to the one already shown.
+ *
+ * Concatenation, like `mergeStatus`: pages are disjoint because the cursor is
+ * the last id of the previous page, and the walk order is the core's. The
+ * newer page's `truncated`/`cursor` win, because they describe the boundary the
+ * next call continues from.
+ */
+function mergeHistory(shown: CommitPage, page: CommitPage): CommitPage {
+  return { ...page, commits: [...shown.commits, ...page.commits] };
 }
 
 function applyEvent(state: GitState, event: EventEnvelope): GitState {
@@ -238,6 +308,12 @@ function settle(
     }
     return park(state, operationId, outcome);
   }
+  if (kind === LOG_OPERATION_KIND) {
+    if (state.history.kind === 'pending' && state.history.operationId === operationId) {
+      return { ...state, appendingHistory: false, history: applyLogOutcome(outcome) };
+    }
+    return park(state, operationId, outcome);
+  }
   return state;
 }
 
@@ -252,6 +328,9 @@ function claim(state: GitState, operationId: OperationId): GitState {
   }
   if (claimed.diff.kind === 'pending' && claimed.diff.operationId === operationId) {
     return { ...claimed, diff: applyDiffOutcome(outcome) };
+  }
+  if (claimed.history.kind === 'pending' && claimed.history.operationId === operationId) {
+    return { ...claimed, appendingHistory: false, history: applyLogOutcome(outcome) };
   }
   return claimed;
 }
@@ -298,6 +377,19 @@ function applyDiffOutcome(outcome: OperationOutcome): Read<DiffSummary> {
   }
 }
 
+function applyLogOutcome(outcome: OperationOutcome): Read<CommitPage> {
+  switch (outcome.kind) {
+    case 'result':
+      return outcome.result
+        ? { kind: 'ready', value: outcome.result as CommitPage }
+        : { kind: 'failed', error: missingResult('log') };
+    case 'failed':
+      return { kind: 'failed', error: outcome.error };
+    case 'cancelled':
+      return { kind: 'cancelled' };
+  }
+}
+
 function missingResult(what: string): CoreErrorShape {
   return {
     code: 'Internal',
@@ -310,6 +402,13 @@ function missingResult(what: string): CoreErrorShape {
 export function statusCursor(state: GitState): string | null {
   if (state.status.kind !== 'ready') return null;
   const { truncated, cursor } = state.status.value;
+  return truncated && cursor !== undefined ? cursor : null;
+}
+
+/** The next page of history's cursor, or `null` when the walk is complete. */
+export function historyCursor(state: GitState): string | null {
+  if (state.history.kind !== 'ready') return null;
+  const { truncated, cursor } = state.history.value;
   return truncated && cursor !== undefined ? cursor : null;
 }
 

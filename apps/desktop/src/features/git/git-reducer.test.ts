@@ -1,4 +1,5 @@
 import type {
+  CommitPage,
   DiffSummary,
   EventEnvelope,
   FileStatus,
@@ -13,7 +14,9 @@ import {
   DIFF_OPERATION_KIND,
   type GitState,
   gitReducer,
+  historyCursor,
   initialGitState,
+  LOG_OPERATION_KIND,
   STATUS_OPERATION_KIND,
   statusCursor,
 } from './git-reducer';
@@ -350,5 +353,115 @@ describe('the selected file and its diff', () => {
     });
     expect(state.diff).toEqual({ kind: 'ready', value: summary() });
     expect(state.status).toEqual({ kind: 'ready', value: repository() });
+  });
+});
+
+// T101-U: the history read. A third `Read` beside status and diff, sharing the
+// one `unmatched` map — so what needs proving is that an outcome reaches the
+// read it belongs to and never one of the other two.
+describe('the history read', () => {
+  function commitPage(overrides: Partial<CommitPage> = {}): CommitPage {
+    return {
+      start: 'HEAD',
+      resolved: 'a'.repeat(40),
+      commits: [
+        {
+          id: 'a'.repeat(40),
+          shortId: 'aaaaaaa',
+          parents: [],
+          author: { name: 'Ada', email: 'ada@example.com', time: 1, offsetSeconds: 0 },
+          committer: { name: 'Ada', email: 'ada@example.com', time: 1, offsetSeconds: 0 },
+          subject: 'first',
+        },
+      ],
+      truncated: false,
+      ...overrides,
+    };
+  }
+
+  it('is idle until it is asked for, so opening the panel walks no history', () => {
+    expect(opened().history).toEqual({ kind: 'idle' });
+  });
+
+  it('appends a page rather than replacing the one already shown', () => {
+    let state = gitReducer(opened(), { type: 'logStarted', append: false });
+    state = gitReducer(state, {
+      type: 'logReady',
+      page: commitPage({ truncated: true, cursor: 'a'.repeat(40) }),
+      append: false,
+    });
+    expect(historyCursor(state)).toBe('a'.repeat(40));
+
+    const second = commitPage({
+      commits: commitPage().commits.map((only) => ({
+        ...only,
+        id: 'b'.repeat(40),
+        subject: 'second',
+      })),
+    });
+    state = gitReducer(state, { type: 'logStarted', append: true });
+    // The page already shown is kept while the next one is in flight.
+    expect(state.history.kind).toBe('ready');
+    expect(state.appendingHistory).toBe(true);
+
+    state = gitReducer(state, { type: 'logReady', page: second, append: true });
+    expect(state.history.kind === 'ready' && state.history.value.commits).toHaveLength(2);
+    expect(state.appendingHistory).toBe(false);
+    // The newer page's boundary wins: it describes where to continue from.
+    expect(historyCursor(state)).toBeNull();
+  });
+
+  it('routes a completion to the history and not to the status or the diff', () => {
+    let state = gitReducer(opened(), { type: 'logStarted', append: false });
+    state = gitReducer(state, { type: 'logPending', operationId: OP });
+    state = gitReducer(state, {
+      type: 'event',
+      event: event({
+        name: 'OperationCompleted',
+        payload: { operation: operation(LOG_OPERATION_KIND), result: commitPage() },
+      }),
+    });
+    expect(state.history).toEqual({ kind: 'ready', value: commitPage() });
+    expect(state.status).toEqual({ kind: 'idle' });
+    expect(state.diff).toEqual({ kind: 'idle' });
+  });
+
+  it('keeps an outcome that arrives before the pending response, and applies it then', () => {
+    let state = gitReducer(opened(), { type: 'logStarted', append: false });
+    state = gitReducer(state, {
+      type: 'event',
+      event: event({
+        name: 'OperationCompleted',
+        payload: { operation: operation(LOG_OPERATION_KIND), result: commitPage() },
+      }),
+    });
+    expect(state.history).toEqual({ kind: 'loading' });
+    expect(Object.keys(state.unmatched)).toEqual([OP]);
+
+    state = gitReducer(state, { type: 'logPending', operationId: OP });
+    expect(state.history).toEqual({ kind: 'ready', value: commitPage() });
+    expect(state.unmatched).toEqual({});
+  });
+
+  it('reports a completion with no result rather than an empty history', () => {
+    let state = gitReducer(opened(), { type: 'logStarted', append: false });
+    state = gitReducer(state, { type: 'logPending', operationId: OP });
+    state = gitReducer(state, {
+      type: 'event',
+      event: event({
+        name: 'OperationCompleted',
+        payload: { operation: operation(LOG_OPERATION_KIND), result: undefined },
+      }),
+    });
+    // "Partial data shown as complete" is what the failure table forbids: an
+    // empty commit list would read as a repository with no history.
+    expect(state.history.kind).toBe('failed');
+  });
+
+  it('drops the history when the workspace changes', () => {
+    let state = gitReducer(opened(), { type: 'logStarted', append: false });
+    state = gitReducer(state, { type: 'logReady', page: commitPage(), append: false });
+    state = gitReducer(state, { type: 'workspace', workspaceId: OTHER_WS });
+    expect(state.history).toEqual({ kind: 'idle' });
   });
 });

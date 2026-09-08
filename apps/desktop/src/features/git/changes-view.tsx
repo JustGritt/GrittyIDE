@@ -24,6 +24,7 @@ import {
   upstreamLine,
 } from './git-model';
 import type { GitState, Read } from './git-reducer';
+import { HistoryView } from './history-view';
 
 /**
  * Everything the Changes tab draws (T100-U), and nothing that reads anything.
@@ -52,6 +53,10 @@ export function ChangesView({
   onReloadDiff,
   onCancelStatus,
   onCancelDiff,
+  view,
+  onViewChange,
+  onLoadMoreHistory,
+  onCancelHistory,
 }: {
   state: GitState;
   hasWorkspace: boolean;
@@ -61,6 +66,16 @@ export function ChangesView({
   onReloadDiff: () => void;
   onCancelStatus: () => void;
   onCancelDiff: () => void;
+  /**
+   * Which half of the panel is showing. A sub-view inside the Changes tab
+   * rather than a third *sidebar* tab: artboard 9a drew two sections, and the
+   * working tree and its history are one subject — the same question asked of
+   * now and of before.
+   */
+  view: GitView;
+  onViewChange: (view: GitView) => void;
+  onLoadMoreHistory: () => void;
+  onCancelHistory: () => void;
 }) {
   if (!hasWorkspace) {
     return <p className="explorer__empty">No workspace open.</p>;
@@ -101,6 +116,99 @@ export function ChangesView({
         </button>
       </div>
 
+      <GitViewTabs view={view} onViewChange={onViewChange} />
+
+      {view === 'history' ? (
+        <div className="git__list">
+          <HistoryView
+            state={state.history}
+            appending={state.appendingHistory}
+            onLoadMore={onLoadMoreHistory}
+            onRetry={onRefresh}
+            onCancel={onCancelHistory}
+          />
+        </div>
+      ) : (
+        <ChangesBody
+          state={state}
+          selectedEntry={selectedEntry}
+          onSelect={onSelect}
+          onLoadMore={onLoadMore}
+          onRefresh={onRefresh}
+          onReloadDiff={onReloadDiff}
+          onCancelStatus={onCancelStatus}
+          onCancelDiff={onCancelDiff}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Which half of the git panel is showing. */
+export type GitView = 'changes' | 'history';
+
+const GIT_VIEWS: readonly { readonly id: GitView; readonly label: string }[] = [
+  { id: 'changes', label: 'Changes' },
+  { id: 'history', label: 'History' },
+];
+
+/**
+ * Two buttons, not a second `role="tablist"`.
+ *
+ * The sidebar header above is already a tablist (`sidebar-tabs.tsx`), and
+ * nesting one inside its own panel gives a screen reader two overlapping tab
+ * contexts to describe. A group of pressed/unpressed buttons says the same
+ * thing without the ambiguity.
+ */
+function GitViewTabs({
+  view,
+  onViewChange,
+}: {
+  view: GitView;
+  onViewChange: (view: GitView) => void;
+}) {
+  return (
+    // A `fieldset`, which is what `role="group"` means natively, with the
+    // legend carrying the label a screen reader announces. The reset below
+    // strips the border a fieldset draws by default.
+    <fieldset className="git__views">
+      <legend className="git__views-legend">Working tree or history</legend>
+      {GIT_VIEWS.map((candidate) => (
+        <button
+          key={candidate.id}
+          type="button"
+          className={`git__view${candidate.id === view ? ' git__view--selected' : ''}`}
+          aria-pressed={candidate.id === view}
+          onClick={() => onViewChange(candidate.id)}
+        >
+          {candidate.label}
+        </button>
+      ))}
+    </fieldset>
+  );
+}
+
+function ChangesBody({
+  state,
+  selectedEntry,
+  onSelect,
+  onLoadMore,
+  onRefresh,
+  onReloadDiff,
+  onCancelStatus,
+  onCancelDiff,
+}: {
+  state: GitState;
+  selectedEntry: FileStatus | null;
+  onSelect: (path: WorkspacePath | null) => void;
+  onLoadMore: () => void;
+  onRefresh: () => void;
+  onReloadDiff: () => void;
+  onCancelStatus: () => void;
+  onCancelDiff: () => void;
+}) {
+  return (
+    <>
       <div className="git__list">
         <StatusRegion
           status={state.status}
@@ -133,7 +241,7 @@ export function ChangesView({
           />
         </div>
       )}
-    </div>
+    </>
   );
 }
 

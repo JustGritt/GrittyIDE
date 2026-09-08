@@ -10,7 +10,7 @@ import type {
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { ChangesView } from './changes-view';
+import { ChangesView, type GitView } from './changes-view';
 import type { GitState } from './git-reducer';
 import { initialGitState } from './git-reducer';
 
@@ -110,7 +110,11 @@ const refuse = (what: string) => () => {
   throw new Error(`nothing should ${what} while rendering`);
 };
 
-function render(state: Partial<GitState> = {}, hasWorkspace = true): string {
+function render(
+  state: Partial<GitState> = {},
+  hasWorkspace = true,
+  view: GitView = 'changes',
+): string {
   return renderToStaticMarkup(
     createElement(ChangesView, {
       state: { ...initialGitState, ...state },
@@ -121,6 +125,10 @@ function render(state: Partial<GitState> = {}, hasWorkspace = true): string {
       onReloadDiff: refuse('re-read the diff'),
       onCancelStatus: refuse('cancel the status'),
       onCancelDiff: refuse('cancel the diff'),
+      view,
+      onViewChange: refuse('switch view'),
+      onLoadMoreHistory: refuse('page the history'),
+      onCancelHistory: refuse('cancel the history'),
     }),
   );
 }

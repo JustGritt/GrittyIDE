@@ -1,4 +1,5 @@
 import type {
+  CommitSummary,
   DiffChangeKind,
   DiffHunk,
   DiffLineKind,
@@ -280,4 +281,65 @@ export function formatBytes(bytes: number): string {
     unit += 1;
   }
   return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
+}
+
+/**
+ * When a commit was made, in the reader's own timezone.
+ *
+ * The core keeps the two numbers Git stores — epoch seconds, and the offset the
+ * author's machine was at — precisely so this decision is made here. Two rules,
+ * both about not lying:
+ *
+ * - Recent commits get a relative label ("2 hours ago"), which is what a reader
+ *   scanning a history actually wants.
+ * - Anything older than a week gets the date, because "37 days ago" is
+ *   arithmetic the reader has to undo.
+ *
+ * `now` is a parameter so this is testable without freezing the clock.
+ */
+export function commitAge(seconds: number, now: number = Date.now()): string {
+  const elapsed = Math.floor(now / 1000) - seconds;
+  if (elapsed < 60) return 'just now';
+  const minutes = Math.floor(elapsed / 60);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} day${days === 1 ? '' : 's'} ago`;
+  return new Date(seconds * 1000).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+/**
+ * The exact timestamp, for the row's `title`.
+ *
+ * The relative label above is the readable one; this is the one that answers
+ * "when exactly", and a reader should never have to leave the panel for it.
+ */
+export function commitTimestamp(seconds: number): string {
+  return new Date(seconds * 1000).toLocaleString();
+}
+
+/**
+ * How many parents make a commit a merge.
+ *
+ * Derived from `parents.length` rather than carried as a flag, so there is no
+ * second field that could disagree with the list.
+ */
+export function isMerge(commit: CommitSummary): boolean {
+  return commit.parents.length > 1;
+}
+
+/**
+ * The line under a commit's subject: who, and when.
+ *
+ * The *author* rather than the committer, which is what `git log` shows and
+ * what a reader means by "who wrote this". The two differ after a rebase or a
+ * cherry-pick, and showing the committer there would credit the wrong person.
+ */
+export function commitByline(commit: CommitSummary, now: number = Date.now()): string {
+  return `${commit.author.name} · ${commitAge(commit.author.time, now)}`;
 }

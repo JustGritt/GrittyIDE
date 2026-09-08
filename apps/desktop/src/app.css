@@ -5023,6 +5023,101 @@ textarea:focus-visible {
   color: var(--error-text);
 }
 
+/* T101-U: the Changes/History switch, and the commit list behind it. Every
+   value is an ADR-016 token, so the light ramp follows without a second
+   palette — the rule the rest of this block already keeps. */
+
+.git__views {
+  display: flex;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm) var(--gap-md);
+  /* A fieldset draws its own border and margin; only the bottom rule is wanted. */
+  margin: 0;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  min-inline-size: 0;
+}
+
+/* Announced, never drawn: the group needs a name and the two buttons already
+   read as what they are. */
+.git__views-legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.git__view {
+  padding: 2px var(--gap-sm);
+  font-size: var(--text-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--fg-muted);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.git__view:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--surface-control);
+}
+
+.git__view--selected,
+.git__view--selected:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--surface-active);
+}
+
+.git__commits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.git__commit {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--gap-sm) var(--gap-md);
+  border-bottom: 1px solid var(--border);
+}
+
+/* One line, ellipsised: a subject is untrusted repository content of any
+   length, and a wrapping one would push the byline out of alignment down the
+   whole list. The full text is in the `title`. */
+.git__commit-subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+}
+
+.git__commit-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  font-size: var(--text-label);
+  color: var(--fg-muted);
+}
+
+.git__commit-id {
+  font-family: var(--font-mono);
+  color: var(--fg-faint);
+}
+
+.git__commit-byline {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* T042: an editable tree — selection, the roving focus ring, the drag target,
    and the inline input a rename or a new name is typed into. */
 

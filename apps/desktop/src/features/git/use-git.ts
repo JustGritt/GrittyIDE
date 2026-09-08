@@ -1,5 +1,6 @@
 import {
   type GitDiffRequest,
+  type GitLogRequest,
   type GitStatusRequest,
   toCoreError,
   type WorkspaceId,
@@ -7,7 +8,13 @@ import {
 } from '@gritty/protocol';
 import { useCallback, useEffect, useReducer } from 'react';
 import { core } from '../../core/client';
-import { gitReducer, initialGitState, pendingOperation, statusCursor } from './git-reducer';
+import {
+  gitReducer,
+  historyCursor,
+  initialGitState,
+  pendingOperation,
+  statusCursor,
+} from './git-reducer';
 
 /** The Changes tab as its one consumer sees it. */
 export type GitController = ReturnType<typeof useGit>;
@@ -76,6 +83,25 @@ export function useGit(workspaceId: WorkspaceId | null) {
     }
   }, []);
 
+  const loadHistory = useCallback(async (id: WorkspaceId, cursor: string | null) => {
+    const append = cursor !== null;
+    dispatch({ type: 'logStarted', append });
+    try {
+      const request: GitLogRequest = { workspaceId: id };
+      if (cursor !== null) request.cursor = cursor;
+      const response = await core.git.log(request);
+      if (response.status === 'ready') {
+        dispatch({ type: 'logReady', page: response.page, append });
+      } else if (response.status === 'notARepository') {
+        dispatch({ type: 'logNotARepository' });
+      } else {
+        dispatch({ type: 'logPending', operationId: response.operation.id });
+      }
+    } catch (cause: unknown) {
+      dispatch({ type: 'logFailed', error: toCoreError(cause) });
+    }
+  }, []);
+
   // The first read runs itself; a failure stays `failed` (with a Retry beside
   // it) rather than looping, which is the explorer's rule for the same reason.
   const statusKind = state.status.kind;
@@ -91,18 +117,39 @@ export function useGit(workspaceId: WorkspaceId | null) {
     }
   }, [workspaceId, selected, diffKind, loadDiff]);
 
+  /**
+   * History is read on demand, not on mount.
+   *
+   * The Changes list is what the panel opens on, and walking a history nobody
+   * has asked to see would be a second read of every repository on every
+   * workspace change. `showHistory` is the ask.
+   */
+  const historyKind = state.history.kind;
+  const showHistory = useCallback(() => {
+    if (workspaceId !== null && historyKind === 'idle') void loadHistory(workspaceId, null);
+  }, [workspaceId, historyKind, loadHistory]);
+
   /** Read the repository again from the first page, and the open file with it. */
   const refresh = useCallback(() => {
     if (workspaceId === null) return;
     void loadStatus(workspaceId, null);
     if (selected !== null) void loadDiff(workspaceId, selected);
-  }, [workspaceId, selected, loadStatus, loadDiff]);
+    // Only when it has been looked at: a refresh must not start a read the
+    // user never asked for.
+    if (historyKind !== 'idle') void loadHistory(workspaceId, null);
+  }, [workspaceId, selected, historyKind, loadStatus, loadDiff, loadHistory]);
 
   const loadMore = useCallback(() => {
     const cursor = statusCursor(state);
     if (workspaceId === null || cursor === null || state.appending) return;
     void loadStatus(workspaceId, cursor);
   }, [workspaceId, state, loadStatus]);
+
+  const loadMoreHistory = useCallback(() => {
+    const cursor = historyCursor(state);
+    if (workspaceId === null || cursor === null || state.appendingHistory) return;
+    void loadHistory(workspaceId, cursor);
+  }, [workspaceId, state, loadHistory]);
 
   const select = useCallback(
     (path: WorkspacePath | null) => dispatch({ type: 'select', path }),
@@ -135,5 +182,24 @@ export function useGit(workspaceId: WorkspaceId | null) {
       .catch((cause: unknown) => dispatch({ type: 'diffFailed', error: toCoreError(cause) }));
   }, [state.diff]);
 
-  return { state, refresh, loadMore, select, reloadDiff, cancelStatus, cancelDiff };
+  const cancelHistory = useCallback(() => {
+    const operationId = pendingOperation(state.history);
+    if (operationId === null) return;
+    void core.operations
+      .cancel(operationId)
+      .catch((cause: unknown) => dispatch({ type: 'logFailed', error: toCoreError(cause) }));
+  }, [state.history]);
+
+  return {
+    state,
+    refresh,
+    loadMore,
+    select,
+    reloadDiff,
+    cancelStatus,
+    cancelDiff,
+    showHistory,
+    loadMoreHistory,
+    cancelHistory,
+  };
 }
