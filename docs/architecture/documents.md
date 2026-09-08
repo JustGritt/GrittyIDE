@@ -28,7 +28,7 @@ DocumentContent { document, text? }      // text absent for binary documents
 | `documents.list` | – | `Document[]` | rehydration after a renderer reload |
 
 Events: `DocumentOpened { document }`, `DocumentChanged { document, cause: EDIT
-| RELOAD | READ_ONLY_CHANGED }`, `DocumentSaved { document }`,
+| RELOAD | READ_ONLY_CHANGED | MOVED }`, `DocumentSaved { document }`,
 `DocumentExternalChangeDetected { document, previousState }` (actor
 `EXTERNAL`, transitions only), `DocumentClosed { documentId, workspaceId,
 path, reason: USER | WORKSPACE_CLOSED, dirty }`. Events never carry text.
@@ -61,6 +61,31 @@ What each state allows:
 The UI must offer the choice (reload / keep buffer / overwrite) and never pick
 one. Undoing the edits so the buffer is clean again moves `CONFLICTED` back to
 `MODIFIED_EXTERNALLY`.
+
+## A renamed file keeps its document (T042)
+
+Document identity is workspace id plus path (`Table::by_path`), and
+`WorkspaceEntriesChanged` is directory-grained by construction — FSEvents cannot
+say which entry moved, which ADR-025 fixes deliberately. So no event can ever
+report a rename, and left alone a file renamed from inside Gritty would strand
+its tab on a path that no longer exists and report `DELETED_EXTERNALLY` for a
+file nobody deleted.
+
+`files.rename` and `files.move` therefore tell the document layer directly,
+through the `DocumentTreeGuard` seam installed like `WorkspaceCloseGuard`:
+
+- `rehome(from, to)` re-points **every** open document at or under `from` —
+  a directory rename moves all of them — rewriting `path` and re-keying
+  `by_path`. The buffer, `currentVersion`, `savedRevision`, `savedHash` and
+  `dirty` are untouched; only `languageId` is re-derived, because the language
+  comes from the name and `notes.txt` → `notes.md` really is a language change.
+  Each one emits `DocumentChanged { cause: MOVED }`.
+- `dirty_under(paths)` is what makes `files.delete` refuse (`Conflict`,
+  `details.dirtyDocuments`) unless forced. A **move** is never refused: the
+  buffer goes with the file, so there is nothing to lose.
+
+A file deleted through `files.delete` is not special-cased: the document becomes
+`DELETED_EXTERNALLY` through the existing check, with the existing banner.
 
 ## Versions
 

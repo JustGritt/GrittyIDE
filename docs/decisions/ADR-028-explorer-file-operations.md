@@ -91,10 +91,26 @@ the command that did it.
   amendment to ADR-011 named above: a document's path is mutable by exactly one
   command, and the change is announced.
 
-- **Deleting or moving something with a dirty document under it is `Conflict`
-  unless forced.** The same shape `workspace.close` and a replacing
-  `workspace.open` already use, with `details.dirtyDocuments`. The UI offers the
-  choice and never picks one.
+- **Deleting something with a dirty document under it is `Conflict` unless
+  forced. Moving one is not.** The same shape `workspace.close` and a replacing
+  `workspace.open` already use, with `details.dirtyDocuments`; the UI offers the
+  choice and never picks one. The asymmetry is the point: a move is safe because
+  `rehome` carries the buffer to the new path, so refusing it would be a prompt
+  with no danger behind it. A delete is the one operation here that can lose
+  unsaved work, because nothing carries it anywhere.
+
+- **A copy invents a free name; a move never does.** Dropping `a.ts` where an
+  `a.ts` already lives copies it as `a copy.ts`, the way every file manager
+  does. A *move* onto a taken name is `Conflict` instead: silently landing as
+  `a copy.ts` would be a rename nobody asked for, and — found while building
+  this — dragging a file onto the folder it already lives in would have done
+  exactly that. That case is now `InvalidInput`.
+
+- **Undo's `Remove` step tolerates an entry that is already gone.** Undoing a
+  create whose file something else deleted is that step's goal already reached,
+  not a failure. This is not a hole in the rule above: removing nothing
+  overwrites nothing, so it cannot lose work. Every other step still refuses
+  when its precondition moved.
 
 - **A recursive copy or delete that outlives its budget becomes a cancellable
   operation** — the hand-over `workspace.list` already makes (rule 10).
