@@ -22,8 +22,7 @@ const FORBIDDEN = ['/', '\\', '\0'];
  * refusing would make a repository unusable on the platform it targets, and
  * the filesystem here will happily create `aux.ts`.
  */
-const WINDOWS_RESERVED =
-  /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i;
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i;
 
 /**
  * Check one path segment — what a rename or a "New Folder" produces.

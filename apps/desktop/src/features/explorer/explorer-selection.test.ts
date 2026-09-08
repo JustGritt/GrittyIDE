@@ -5,9 +5,9 @@ import {
   focusIndex,
   keepVisible,
   moveFocus,
+  type Selection,
   selectAll,
   selectOn,
-  type Selection,
   typeahead,
 } from './explorer-selection';
 

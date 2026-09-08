@@ -140,7 +140,8 @@ export function moveFocus(
 export function keepVisible(selection: Selection, visible: readonly string[]): Selection {
   const present = new Set(visible);
   const paths = selection.paths.filter((path) => present.has(path));
-  const anchor = selection.anchor !== null && present.has(selection.anchor) ? selection.anchor : null;
+  const anchor =
+    selection.anchor !== null && present.has(selection.anchor) ? selection.anchor : null;
   let focused = selection.focused;
   if (focused !== null && !present.has(focused)) {
     focused = paths[0] ?? visible[0] ?? null;
