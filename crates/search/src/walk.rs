@@ -36,7 +36,7 @@ use ignore::WalkBuilder;
 
 use crate::error::SearchError;
 use crate::model::{MatchKind, SearchMatch, SearchSummary, column_of, snippet_of};
-use crate::query::CompiledQuery;
+use crate::query::{CompiledQuery, IgnorePredicate};
 
 /// Bytes searched between two cancellation checks inside one file.
 ///
@@ -97,46 +97,8 @@ pub fn search(
         ));
     }
 
-    let ignored_directories = Arc::new(AtomicU64::new(0));
-    let mut builder = WalkBuilder::new(root.path());
-    builder
-        // ADR-022 decision 2: `ignore` is taken for its walker with every
-        // gitignore source turned off. What Gritty means by "ignored" is
-        // T070's `is_ignored`, and it must stay one thing across the explorer,
-        // the watcher and search.
-        .git_ignore(false)
-        .git_global(false)
-        .git_exclude(false)
-        .ignore(false)
-        .parents(false)
-        .hidden(false)
-        .require_git(false)
-        // Never walk into a symlinked directory (see the module header).
-        .follow_links(false)
-        // Deterministic order, so a test can assert on results and a user sees
-        // a stable list rather than filesystem order.
-        .sort_by_file_name(|a, b| a.cmp(b));
-    if !query.include_ignored() {
-        let root_path = root.path().to_path_buf();
-        let predicate = Arc::clone(query.ignored());
-        let counter = Arc::clone(&ignored_directories);
-        builder.filter_entry(move |entry| {
-            // The root is the search, not a candidate for pruning.
-            if entry.depth() == 0 {
-                return true;
-            }
-            let Some(path) = relative(&root_path, entry.path()) else {
-                return true;
-            };
-            if !predicate(&path) {
-                return true;
-            }
-            if entry.file_type().is_some_and(|kind| kind.is_dir()) {
-                counter.fetch_add(1, Ordering::Relaxed);
-            }
-            false
-        });
-    }
+    let (builder, ignored_directories) =
+        build_walker(root, (!query.include_ignored()).then(|| query.ignored()));
 
     let mut searcher = build_searcher();
     let mut considered = 0u64;
@@ -243,6 +205,92 @@ pub fn search(
     );
     Ok(summary)
 }
+
+/// The one `WalkBuilder` configuration every tree walk in this crate shares,
+/// plus the counter of directories the ignore predicate pruned.
+///
+/// Extracted so [`search`] and [`crate::rank::rank_files`] cannot drift: ADR-022
+/// decision 2 says "ignored" means the same thing in the explorer, the watcher
+/// and search, and a second copy of these switches is exactly how that stops
+/// being true. `ignored` is `None` when the caller wants ignored directories
+/// walked anyway.
+pub(crate) fn build_walker(
+    root: &WorkspaceRoot,
+    ignored: Option<&IgnorePredicate>,
+) -> (WalkBuilder, Arc<AtomicU64>) {
+    let ignored_directories = Arc::new(AtomicU64::new(0));
+    let mut builder = WalkBuilder::new(root.path());
+    builder
+        // ADR-022 decision 2: `ignore` is taken for its walker with every
+        // gitignore source turned off. What Gritty means by "ignored" is
+        // T070's `is_ignored`, and it must stay one thing across the explorer,
+        // the watcher and search.
+        .git_ignore(false)
+        .git_global(false)
+        .git_exclude(false)
+        .ignore(false)
+        .parents(false)
+        .hidden(false)
+        .require_git(false)
+        // Never walk into a symlinked directory (see the module header).
+        .follow_links(false)
+        // Deterministic order, so a test can assert on results and a user sees
+        // a stable list rather than filesystem order.
+        .sort_by_file_name(|a, b| a.cmp(b));
+    if let Some(predicate) = ignored {
+        let root_path = root.path().to_path_buf();
+        let predicate = Arc::clone(predicate);
+        let counter = Arc::clone(&ignored_directories);
+        builder.filter_entry(move |entry| {
+            // The root is the search, not a candidate for pruning.
+            if entry.depth() == 0 {
+                return true;
+            }
+            let Some(path) = relative(&root_path, entry.path()) else {
+                return true;
+            };
+            if !predicate(&path) {
+                return true;
+            }
+            if entry.file_type().is_some_and(|kind| kind.is_dir()) {
+                counter.fetch_add(1, Ordering::Relaxed);
+            }
+            false
+        });
+    }
+    (builder, ignored_directories)
+}
+
+/// The workspace-relative path of a walked entry, or `None` when it is not a
+/// readable file inside the root.
+///
+/// Shared with [`crate::rank`] for the same reason [`build_walker`] is: a
+/// symlink is followed only when `WorkspaceRoot::resolve` says it lands inside
+/// the root, and that decision must have one implementation.
+pub(crate) fn entry_path(
+    root: &WorkspaceRoot,
+    entry: &ignore::DirEntry,
+) -> Result<Option<WorkspacePath>, OutsideRoot> {
+    let Some(path) = relative(root.path(), entry.path()) else {
+        return Err(OutsideRoot);
+    };
+    if entry.path_is_symlink() {
+        return match root.resolve(&path) {
+            Ok(resolved) if resolved.canonical().is_file() => Ok(Some(path)),
+            Ok(_) => Ok(None),
+            Err(_) => Err(OutsideRoot),
+        };
+    }
+    if entry.file_type().is_some_and(|kind| kind.is_file()) {
+        Ok(Some(path))
+    } else {
+        // Sockets, devices, pipes: nothing to read.
+        Ok(None)
+    }
+}
+
+/// A walked entry that could not be represented under the root.
+pub(crate) struct OutsideRoot;
 
 enum Flow {
     Continue { matched: bool },

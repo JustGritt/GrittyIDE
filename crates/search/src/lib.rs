@@ -26,16 +26,27 @@
 //!
 //! ## What this is not
 //!
-//! Not an index: nothing is stored and nothing is remembered between calls.
-//! Not a replace: [`search`] reads and returns matches, and there is no
-//! mutating variant here. Not a ranked quick-open: `SearchScope::Filenames` is
-//! plain substring or regex matching against the corpus already walked.
+//! Not an index: nothing is stored and nothing is remembered between calls —
+//! and that stayed true when ranking arrived. Not a replace: [`search`] reads
+//! and returns matches, and there is no mutating variant here.
+//!
+//! ## Two questions, two entry points
+//!
+//! [`search`] answers "which files *contain* this text". `SearchScope::Filenames`
+//! is part of that answer and is still plain substring or regex matching against
+//! the corpus already walked, in walk order, unranked.
+//!
+//! [`rank_files`] (T130-R) answers the different question a quick-open asks —
+//! "which files *look like* this" — by subsequence, scored, best first, with the
+//! matched positions. It shares this crate's walker configuration rather than
+//! copying it, so ADR-022 decision 2 keeps holding: "ignored" means one thing.
 //!
 //! [`Sink`]: grep_searcher::Sink
 
 pub mod error;
 pub mod model;
 pub mod query;
+pub mod rank;
 pub mod walk;
 
 pub use error::SearchError;
@@ -45,5 +56,9 @@ pub use model::{
 pub use query::{
     CompiledQuery, IgnorePredicate, MAX_FILE_BYTES, MAX_QUERY_CHARS, Query, SearchScope,
     default_ignore_predicate,
+};
+pub use rank::{
+    DEFAULT_FIND_LIMIT, MAX_FIND_LIMIT, PathScore, RankedFiles, RankedPath, Scorer, rank_files,
+    rank_workspace_files, score_path,
 };
 pub use walk::{SCAN_CHUNK_BYTES, SearchSink, search};

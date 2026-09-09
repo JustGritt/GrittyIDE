@@ -80,6 +80,7 @@ the workflow below are hand-maintained.
 | ADR-023 | Git library: gix, git2, or porcelain | 2 | – | review |
 | ADR-029 | Git writes run through the git binary, not gix | 2 | – | unspec |
 | ADR-031 | Settings are a core-owned settings.json, user scope only | 2 | – | review |
+| ADR-032 | Record the UI framework decision (React 19) | 0 | – | review |
 | CI-COST | CI: self-hosted macOS runner, and stop burning metered minutes |  | – | review |
 | CI-LINUX-DARK | Linux CI is dark until the minute allowance resets (1 Oct) or a spending limit is set |  | – | blocked |
 | [CI-RUNNER-GC](CI-RUNNER-GC-disk-retention.md) | Self-hosted runner never cleans up: target/ and stale bundles grow unbounded on the dev Mac |  | – | review |
@@ -99,17 +100,22 @@ the workflow below are hand-maintained.
 | T080-U | The search panel | 2 | PROTO-W3, T080 | todo |
 | T100-U | Git status and diff, in the shell | 2 | PROTO-W2, T100 | review |
 | T101-C | The read contract: git.log and git.show | 2 | T100 | review |
-| T101-D | The diff as an editor tab (Monaco diff editor) on git.show | 2 | T101-R | blocked |
+| T101-D | The diff as an editor tab (Monaco diff editor) on git.show | 2 | T101-R | todo |
 | T101-R | gix: a paged commit walk, and a blob at a revision | 2 | T101-C | review |
 | T101-U | History in the git panel, on git.log | 2 | T101-R | review |
 | T102-C | The write contract: stage, unstage, discard, commit | 2 | ADR-029 | doing |
 | T102-R | gritty-git-write: the subprocess adapter and the git probe | 2 | T102-C | doing |
 | T102-U | Staging, discard and the commit box in the Changes panel | 2 | T102-R | blocked |
 | T120-C | The settings contract: settings.* and SettingsChanged | 2 | ADR-031 | todo |
-| T120-M | Mount the settings tab, and the comma chord | 2 | T120-U | blocked |
+| T120-M | Mount the settings tab, and the comma chord | 2 | T120-U | todo |
 | T120-R | gritty-settings: the registry, the file, and the failure policy | 2 | T120-C | doing |
 | T120-T | A theme the user picks: system, light or dark | 2 | T120-C | todo |
 | T120-U | The settings page, and retiring the three popovers | 2 | T120-C | todo |
+| T130-C | The quick-open contract: workspace.findFiles and ranked paths | 2 | T080 | blocked |
+| T130-M | Mount the bar in the app bar, and the quick-open chord | 2 | T130-U, T310-U | todo |
+| T130-R | A fuzzy path scorer, and the walk that ranks with it | 2 | T080 | review |
+| T130-S | @ symbols: a regex outline, honestly named | 2 | T130-U | todo |
+| T130-U | The quick-open bar, and its four modes | 2 | T130-C, T130-R | todo |
 | T222-CODEX | Codex, as one provider file | 3 | T222-SEAM | todo |
 | T222-SEAM | A provider registry, so providers stop being serial | 3 | T220 | unspec |
 | [T233](T233-agents-sidebar.md) | Agents in the left sidebar (design artboard 12a) | 3 | – | unspec |
