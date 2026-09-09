@@ -138,7 +138,7 @@ spent on the way and the resolved line took the highest. `SCHEMA_VERSION` is
 still **4** and migration **`0005` is free** — T326 needed neither.
 
 **The next free values are `PROTOCOL_VERSION` 2.26.0, `SCHEMA_VERSION` 5 and
-migration `0005`; the next free ADR number is 032.** (2.23.0–2.25.0 and
+migration `0005`; the next free ADR number is 033.** (2.23.0–2.25.0 and
 ADR-030/031 were taken on 2026-09-09 — see the two blocks at the end of this
 section.) ADR-027 is not free:
 `HANDOFF.md:102` reserves it for T310's "the feed comes from the run event ring,
@@ -186,8 +186,16 @@ makes the ordering below a courtesy rather than a hazard.
 
 | Claim | Ticket | For |
 |---|---|---|
-| `PROTOCOL_VERSION` **2.25.0** | `T120-C` | `settings.describe`, `settings.get`, `settings.set`, `settings.reset`, and one new `CoreEvent::SettingsChanged`. Additive: four commands, their request/response types, one event variant. |
+| `PROTOCOL_VERSION` ~~2.25.0~~ | `T120-C` | `settings.describe`, `settings.get`, `settings.set`, `settings.reset`, `settings.reveal`, and one new `CoreEvent::SettingsChanged`. **Spent 2026-09-09** (`75d27b5`). Additive: five commands — `reveal` was added during the build, because `shell.revealPath` resolves a `WorkspacePath` against the workspace root and the settings file is outside every workspace — thirteen generated types, one event variant. No `SCHEMA_VERSION`, no migration: settings live in a file, which is the whole of ADR-031. |
 | ADR **031** | — | Settings are a core-owned `settings.json` in the app data dir, user scope only. Draws the boundary against ADR-004 ("SQLite for application metadata"): that rule governs state the app keeps about itself, and user configuration is a different category. |
+
+**The seams `T120-C` held are released as of `75d27b5`**, and `pnpm check` is
+exit 0 on it: `crates/gritty-core/src/protocol/**`,
+`packages/protocol/src/**`, `event/mod.rs` and `session/tap.rs` are free.
+Whoever takes 2.26.0 rebases onto a `tap.rs` and an `event/mod.rs` that now
+carry a `SettingsChanged` arm — the pair that merges cleanly and wrongly if two
+branches add a variant in different places, with only the `tap.rs` half caught
+by the compiler.
 
 `T120` spends **no `SCHEMA_VERSION` and no migration** — deliberately, and that
 is the whole point of the ADR. Settings go in a file precisely so they are
