@@ -138,9 +138,9 @@ spent on the way and the resolved line took the highest. `SCHEMA_VERSION` is
 still **4** and migration **`0005` is free** — T326 needed neither.
 
 **The next free values are `PROTOCOL_VERSION` 2.27.0, `SCHEMA_VERSION` 5 and
-migration `0005`; the next free ADR number is 033.** (2.23.0–2.26.0 and
-ADR-030/031 were taken on 2026-09-09 — see the three blocks at the end of this
-section.) ADR-027 is not free:
+migration `0005`; the next free ADR number is 034.** (2.23.0–2.26.0 and
+ADR-030/031/032/033 were taken on 2026-09-09 — see the blocks at the end of
+this section.) ADR-027 is not free:
 `HANDOFF.md:102` reserves it for T310's "the feed comes from the run event ring,
 not the transcript" decision. That reservation was never written here, which is
 rule 2's failure mode again — it is written here now.
@@ -196,6 +196,33 @@ Whoever takes 2.26.0 rebases onto a `tap.rs` and an `event/mod.rs` that now
 carry a `SettingsChanged` arm — the pair that merges cleanly and wrongly if two
 branches add a variant in different places, with only the `tap.rs` half caught
 by the compiler.
+
+**Claimed by the build-cache work on 2026-09-09, before any of it is spent.**
+
+| Claim | Ticket | For |
+|---|---|---|
+| ADR **033** | `T140-PROFILE` | What `[profile.dev]` should be: debuginfo, and `split-debuginfo` on macOS. **Spends no `PROTOCOL_VERSION`** — it changes no command, event or type, only how every crate is compiled. |
+
+Why a new ADR rather than an amendment to ADR-024: that ADR's three rejection
+arguments are all about *sharing* a `CARGO_TARGET_DIR` across concurrent
+builders, and none of them touches *shrinking* what a build produces. Nothing
+in this repository has ever evaluated `[profile.dev]`, `split-debuginfo`,
+`sccache` or a linker choice — the root `Cargo.toml` has no `[profile.dev]`
+section at all, so `debug = true` and macOS's `split-debuginfo = "unpacked"`
+are defaults nobody chose. Measured on 2026-09-09: **52.0 GB of the 81.6 GB in
+`target/debug/deps` is `.rcgu.o` codegen-unit objects**, which is what those
+two defaults produce.
+
+Its seams are unusual and worth naming: root `Cargo.toml` `[profile.dev]`
+touches **every** build on this machine — the self-hosted macOS CI job, which
+shares this checkout's `target/`; the hosted Linux job, whose
+`Swatinem/rust-cache@v2` key changes and pays one cold rebuild; and
+`scripts/runner-gc.py`'s `--cache-budget-gb 12` / `--floor-gb 25` defaults,
+which were derived from measurements of the *current* profile and need
+re-deriving once it moves.
+
+`T140-SWEEP` claims nothing: it wires the existing sweeper to a local trigger
+and adds no command, event, type or number.
 
 `T120` spends **no `SCHEMA_VERSION` and no migration** — deliberately, and that
 is the whole point of the ADR. Settings go in a file precisely so they are

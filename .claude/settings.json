@@ -8,6 +8,12 @@
           {
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/agent-board.py\" list --compact"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/runner-gc.py\" guard --floor-gb 25 2>&1 || true",
+            "timeout": 30,
+            "statusMessage": "Checking disk"
           }
         ]
       }
@@ -34,6 +40,12 @@
           {
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/agent-board.py\" session-end"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/runner-gc.py\" sweep --apply 2>&1 || true",
+            "timeout": 300,
+            "statusMessage": "Sweeping build cache"
           }
         ]
       }
