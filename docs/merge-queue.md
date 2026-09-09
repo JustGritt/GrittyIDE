@@ -137,9 +137,9 @@ rule below. `PROTOCOL_VERSION` **2.15.0** is on `main`; 2.13.0 and 2.14.0 were
 spent on the way and the resolved line took the highest. `SCHEMA_VERSION` is
 still **4** and migration **`0005` is free** — T326 needed neither.
 
-**The next free values are `PROTOCOL_VERSION` 2.26.0, `SCHEMA_VERSION` 5 and
-migration `0005`; the next free ADR number is 033.** (2.23.0–2.25.0 and
-ADR-030/031 were taken on 2026-09-09 — see the two blocks at the end of this
+**The next free values are `PROTOCOL_VERSION` 2.27.0, `SCHEMA_VERSION` 5 and
+migration `0005`; the next free ADR number is 033.** (2.23.0–2.26.0 and
+ADR-030/031 were taken on 2026-09-09 — see the three blocks at the end of this
 section.) ADR-027 is not free:
 `HANDOFF.md:102` reserves it for T310's "the feed comes from the run event ring,
 not the transcript" decision. That reservation was never written here, which is
@@ -211,6 +211,30 @@ source-control session goes first by agreement. Note the asymmetry `PROTO-W3`
 recorded: two branches adding a `CoreEvent` variant in different places merge
 **cleanly and wrongly** in `export.rs` and the generated directory, and only
 the `tap.rs` half is caught by the compiler.
+
+**Claimed by `T130` (quick open) on 2026-09-09, before any of it is spent.**
+Written the moment `T120-C` released the seams, rather than when the ticket
+starts — rule 2 — because the number is the thing two branches collide on and
+`T130-C` had been waiting on the lease with the number unrecorded.
+
+| Claim | Ticket | For |
+|---|---|---|
+| `PROTOCOL_VERSION` **2.26.0** | `T130-C` | `workspace.findFiles` — a query in, the best-ranked workspace paths out, each carrying the char-index spans that matched so the UI highlights without re-running the matcher. Additive: one command, its request type, and a `ready`/`pending` response union mirroring `ListDirectoryResponse`'s. No `SCHEMA_VERSION` and no migration: nothing about a query is persisted. |
+
+**Deliberately no `CoreEvent` variant**, which is what keeps this off the two
+seams `T120-C` has just spent and that this file warns merge *cleanly and
+wrongly*: `crates/gritty-core/src/event/mod.rs` and the exhaustive match in
+`crates/gritty-core/src/session/tap.rs`. A bounded top-N response does not need
+one. The `pending` arm carries an `Operation` and completes through the existing
+`Operation*` events, the way `workspace.list` and `git.log` already do, and
+cancellation is `operations.cancel` — one cancellation surface, already built.
+
+Its seams are therefore the other four — `protocol/mod.rs`, `protocol/export.rs`,
+`packages/protocol/src/{commands,client,types}.ts` and the generated directory —
+plus `apps/desktop/src-tauri/src/{commands,lib}.rs`, and a domain half in
+`crates/gritty-core/src/workspace/**` that no other lane wants. **`lib.rs` is the
+one to watch**: `T120-R` holds it for the focus re-read as this is written, and
+this ticket needs a single `invoke_handler` row in it.
 
 **Claimed by the 2026-09-08 wave.** `PROTO-W3` takes **2.18.0** for `search.query`
 and the one `CoreEvent` variant T080 adds; it spends no `SCHEMA_VERSION` and no
