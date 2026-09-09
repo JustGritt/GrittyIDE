@@ -90,15 +90,15 @@ the workflow below are hand-maintained.
 | MAIN-RED-T102C | main does not typecheck: git-write-client.test.ts TS2339 (2 lines) |  | – | todo |
 | MARKDOWN-BENCH | A markdown benchmark with a recorded baseline, if a perf gate is wanted | 3 | MARKDOWN-BUDGET-FLAKE | unspec |
 | MARKDOWN-BUDGET-FLAKE | render.test.ts 2000ms wall-clock budget fails under concurrent-build load | 3 | – | review |
-| [MONACO-BARREL](MONACO-BARREL-startup-chunk.md) | packages/editor imports monaco whole; the main chunk is 4.6 MB |  | – | doing |
-| [MONACO-DEFER](MONACO-DEFER-startup-import.md) | Load Monaco on first editor tab, not at startup (~87% of the chunk) |  | MONACO-BARREL | todo |
+| [MONACO-BARREL](MONACO-BARREL-startup-chunk.md) | packages/editor imports monaco whole; the main chunk is 4.6 MB |  | – | superseded |
+| [MONACO-DEFER](MONACO-DEFER-startup-import.md) | Load Monaco on demand, not at startup (measured: -80.8% of the chunk) |  | MONACO-BARREL | review |
 | MONACO-JSDOM-FLAKE | model-eol.dom.test.ts times out its 10s beforeAll under load | 3 | JSDOM-VITEST | review |
 | MONACO-PREBUNDLE | Pre-bundle monaco-editor so the 9s transform is not paid every run | 3 | MONACO-JSDOM-FLAKE | unspec |
 | PLAN-FANOUT | Split the remaining work into fan-out-sized tickets, and the lanes to run them in |  | – | review |
 | PROTO-W2 | Wave 2 wire, in one PR: watcher, git, terminal blocks, diagnostics, violations | 2 | ADR-001, ADR-017, ADR-023 | todo |
 | PROTO-W2-GIT | The git wire: git.status and git.diff reach the shell | 2 | T100,ADR-023 | review |
 | PROTO-W3 | Wave 3 wire, in one PR: search | 2 | ADR-022 | review |
-| RUNS-EVENT-FILTER | use-runs.ts subscribes to every event of every kind |  | – | todo |
+| [RUNS-EVENT-FILTER](RUNS-EVENT-FILTER-subscription.md) | use-runs.ts subscribes to every event of every kind |  | – | todo |
 | SIDECAR-BUNDLE-CONFIG | Move externalBin to a bundle-time config so a compile never needs a staged binary | 3 | SIDECAR-FRESH-CHECKOUT | unspec |
 | SIDECAR-FRESH-CHECKOUT | A fresh clone or worktree cannot build gritty-desktop until T225's sidecar is staged by hand | 3 | T225 | review |
 | T080-U | The search panel | 2 | PROTO-W3, T080 | todo |
@@ -112,10 +112,10 @@ the workflow below are hand-maintained.
 | [T102-U](T102-U-git-write-ui.md) | Staging, discard and the commit box in the Changes panel | 2 | T102-R | todo |
 | [T120-C](T120-C-settings-contract.md) | The settings contract: settings.* and SettingsChanged | 2 | ADR-031 | review |
 | [T120-M](T120-M-settings-mount.md) | Mount the settings tab, and the comma chord | 2 | T120-U | todo |
-| [T120-R](T120-R-settings-service.md) | gritty-settings: the registry, the file, and the failure policy | 2 | T120-C | doing |
+| [T120-R](T120-R-settings-service.md) | gritty-settings: the registry, the file, and the failure policy | 2 | T120-C | review |
 | [T120-T](T120-T-theme.md) | A theme the user picks: system, light or dark | 2 | T120-C | todo |
 | [T120-U](T120-U-settings-page.md) | The settings page, and retiring the three popovers | 2 | T120-C | todo |
-| [T130-C](T130-C-quick-open-contract.md) | The quick-open contract: workspace.findFiles and ranked paths | 2 | T080 | blocked |
+| [T130-C](T130-C-quick-open-contract.md) | The quick-open contract: workspace.findFiles and ranked paths | 2 | T080 | doing |
 | [T130-M](T130-M-quick-open-mount.md) | Mount the bar in the app bar, and the quick-open chord | 2 | T130-U, T310-U | todo |
 | [T130-R](T130-R-path-ranking.md) | A fuzzy path scorer, and the walk that ranks with it | 2 | T080 | review |
 | [T130-S](T130-S-symbol-outline.md) | @ symbols: a regex outline, honestly named | 2 | T130-U | review |
@@ -131,7 +131,7 @@ the workflow below are hand-maintained.
 | T300-PANEL | A run belongs on its workstream's island row, not a fourth roster | 4 | T300-WIRE | unspec |
 | T300-WIRE | Connect the three Gate D halves: fake driver, manager, runs.* adapters | 4 | T300-CORE | review |
 | T400-R | Worktree create and remove | 5 | T100 | unspec |
-| WATCH-FLAKE | Two load-sensitive tests fail in the full-workspace run, pass alone |  | – | todo |
+| [WATCH-FLAKE](WATCH-FLAKE-load-sensitive.md) | Two load-sensitive tests fail in the full-workspace run, pass alone |  | – | todo |
 | T233-M | The roster row model: owned runs and observed sessions in one list | 3 | T300-C | review |
 | T233-S | The Agents section in the left sidebar, and the sidebar tab strip (12a) | 3 | T233-M | review |
 | T233-C | The full-height agent console, and retiring the right rail (12a) | 3 | T233-S,T232 | review |

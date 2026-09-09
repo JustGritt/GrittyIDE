@@ -30,11 +30,11 @@ import { RunConsole } from '../runs/run-console';
 import type { RunsController } from '../runs/use-runs';
 import { RecoveryPrompt } from '../session/recovery-prompt';
 import type { SessionController } from '../session/use-session';
-import { workerStatus } from './monaco-setup';
 import { OrphansPanel } from './orphans-panel';
 import { PreferencesPopover } from './preferences-popover';
 import { TabStrip } from './tab-strip';
 import type { EditorBinding } from './use-editor-binding';
+import { workerStatus } from './worker-status';
 
 const EXTERNAL_MESSAGES: Record<PendingExternalState, string> = {
   MODIFIED_EXTERNALLY: 'This file changed on disk. Your buffer has no unsaved edits.',
@@ -301,6 +301,12 @@ export function EditorPane({
           {state.order.length === 0
             ? 'No document open. Click a file in the explorer.'
             : 'Select a tab.'}
+        </p>
+      )}
+      {!showConsole && active && !active.document.binary && editor.engineStatus === 'failed' && (
+        <p className="editor__placeholder">
+          The editor failed to load. The file is safe and unmodified — reopen the window to try
+          again. The explorer, terminal and source control are unaffected.
         </p>
       )}
       {!showConsole && active?.document.binary && (

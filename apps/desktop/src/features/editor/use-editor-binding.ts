@@ -7,17 +7,11 @@ import {
   INITIAL_VIEW_STATE,
   isEditableEol,
 } from '@gritty/editor';
-import {
-  type CursorPosition,
-  createEditorHost,
-  type EditorHost,
-  type ScrollState,
-  watchColorScheme,
-} from '@gritty/editor/monaco';
+import type { CursorPosition, EditorHost, ScrollState } from '@gritty/editor/monaco';
 import type { DocumentId } from '@gritty/protocol';
 import { type RefObject, useCallback, useEffect, useRef, useState } from 'react';
 import type { DocumentsController } from '../documents/use-documents';
-import { type MonacoModel, setupMonaco } from './monaco-setup';
+import type { MonacoModel } from './monaco-setup';
 
 interface Engine {
   readonly host: EditorHost;
@@ -58,7 +52,16 @@ export interface EditorBinding {
   /** Fires after any cursor, selection or scroll change of the active document. */
   subscribeViewChange(listener: () => void): () => void;
   focus(): void;
+  /**
+   * Monaco is fetched on demand rather than at startup (MONACO-DEFER), so the
+   * pane has three states to render, not two: still arriving, usable, or a
+   * module that never loaded.
+   */
+  readonly engineStatus: EngineStatus;
 }
+
+/** `loading` until the Monaco chunk resolves; `failed` if it never does. */
+export type EngineStatus = 'loading' | 'ready' | 'failed';
 
 function sameEols(a: Record<string, Eol>, b: Record<string, Eol>): boolean {
   const keys = Object.keys(a);
@@ -86,6 +89,7 @@ export function useEditorBinding(
    */
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const [engine, setEngine] = useState<Engine | null>(null);
+  const [engineStatus, setEngineStatus] = useState<EngineStatus>('loading');
   const [eols, setEols] = useState<Record<string, Eol>>({});
   const applied = useRef(new Map<DocumentId, number>());
   const detachers = useRef(new Map<DocumentId, () => void>());
@@ -124,33 +128,69 @@ export function useEditorBinding(
     const surface = document.createElement('div');
     surface.className = 'editor__monaco-surface';
     surfaceRef.current = surface;
-    const registry = new DocumentModelRegistry(setupMonaco());
-    const host = createEditorHost(surface);
-    host.onSave(() => {
-      const activeId = documentsRef.current.state.activeId;
-      if (activeId !== null) void documentsRef.current.save(activeId);
-    });
-    const unsubscribeCursor = host.onCursorChange((position) => {
-      for (const listener of [...cursorListeners.current]) listener(position);
-    });
-    const unsubscribeScroll = host.onScrollChange((state) => {
-      for (const listener of [...scrollListeners.current]) listener(state);
-      trackView((previous) => ({ ...previous, scrollLine: state.topLine }));
-    });
-    const unsubscribeSelection = host.onSelectionChange((selection) => {
-      trackView((previous) => ({
-        ...previous,
-        cursor: { line: selection.cursor.lineNumber, column: selection.cursor.column },
-        anchor: { line: selection.anchor.lineNumber, column: selection.anchor.column },
-      }));
-    });
-    const unwatchTheme = watchColorScheme();
-    setEngine({ host, registry });
+    // Monaco is ~4.2 MB and the app boots with no document open, so it is
+    // fetched here rather than linked into the startup chunk (MONACO-DEFER).
+    // The pane may unmount before the import settles: `disposeEngine` stays
+    // null until there is something to dispose, and `cancelled` stops a late
+    // arrival from building an editor into a surface already removed.
+    let cancelled = false;
+    let disposeEngine: (() => void) | null = null;
+
+    void (async () => {
+      let monaco: typeof import('@gritty/editor/monaco');
+      let setup: typeof import('./monaco-setup');
+      try {
+        [monaco, setup] = await Promise.all([
+          import('@gritty/editor/monaco'),
+          import('./monaco-setup'),
+        ]);
+      } catch (error) {
+        // A corrupt or missing chunk. The pane says so; the rest of the app —
+        // explorer, terminal, git — is untouched by this failure.
+        if (!cancelled) {
+          console.error('the editor failed to load', error);
+          setEngineStatus('failed');
+        }
+        return;
+      }
+      if (cancelled) return;
+      const { createEditorHost, watchColorScheme } = monaco;
+      const registry = new DocumentModelRegistry(setup.setupMonaco());
+      const host = createEditorHost(surface);
+      host.onSave(() => {
+        const activeId = documentsRef.current.state.activeId;
+        if (activeId !== null) void documentsRef.current.save(activeId);
+      });
+      const unsubscribeCursor = host.onCursorChange((position) => {
+        for (const listener of [...cursorListeners.current]) listener(position);
+      });
+      const unsubscribeScroll = host.onScrollChange((state) => {
+        for (const listener of [...scrollListeners.current]) listener(state);
+        trackView((previous) => ({ ...previous, scrollLine: state.topLine }));
+      });
+      const unsubscribeSelection = host.onSelectionChange((selection) => {
+        trackView((previous) => ({
+          ...previous,
+          cursor: { line: selection.cursor.lineNumber, column: selection.cursor.column },
+          anchor: { line: selection.anchor.lineNumber, column: selection.anchor.column },
+        }));
+      });
+      const unwatchTheme = watchColorScheme();
+      disposeEngine = () => {
+        unwatchTheme();
+        unsubscribeCursor();
+        unsubscribeScroll();
+        unsubscribeSelection();
+        host.dispose();
+        registry.disposeAll();
+      };
+      setEngine({ host, registry });
+      setEngineStatus('ready');
+    })();
+
     return () => {
-      unwatchTheme();
-      unsubscribeCursor();
-      unsubscribeScroll();
-      unsubscribeSelection();
+      cancelled = true;
+      disposeEngine?.();
       for (const detach of detachers.current.values()) detach();
       detachers.current.clear();
       for (const subscription of contentSubscriptions.current.values()) subscription.dispose();
@@ -158,11 +198,10 @@ export function useEditorBinding(
       applied.current.clear();
       viewStates.current.clear();
       pendingViews.current.clear();
-      host.dispose();
-      registry.disposeAll();
       surface.remove();
       surfaceRef.current = null;
       setEngine(null);
+      setEngineStatus('loading');
     };
   }, [trackView]);
 
@@ -333,5 +372,6 @@ export function useEditorBinding(
     restoreView,
     subscribeViewChange,
     focus,
+    engineStatus,
   };
 }

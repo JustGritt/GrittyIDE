@@ -1,7 +1,7 @@
 # Task MONACO-BARREL — packages/editor imports Monaco whole
 
 - **Phase:** maintenance (found by the ADR-032 gate)
-- **Status:** doing
+- **Status:** superseded
 - **Depends on:** T040 (the Monaco shell)
 
 > **Respecified after measurement.** The ticket as originally filed rests on two

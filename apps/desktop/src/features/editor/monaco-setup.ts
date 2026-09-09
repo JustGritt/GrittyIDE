@@ -1,4 +1,3 @@
-import { WorkerStatus } from '@gritty/editor';
 import { createMonacoModelFactory, installMonacoEnvironment } from '@gritty/editor/monaco';
 // Vite bundles each worker as its own chunk, served from the app origin
 // (`worker-src 'self'` in the CSP). The editor package takes them as factories.
@@ -7,9 +6,12 @@ import CssWorker from 'monaco-editor/language/css/css.worker?worker';
 import HtmlWorker from 'monaco-editor/language/html/html.worker?worker';
 import JsonWorker from 'monaco-editor/language/json/json.worker?worker';
 import TsWorker from 'monaco-editor/language/typescript/ts.worker?worker';
+import { workerStatus } from './worker-status';
 
-/** Why Monaco's workers did not start, if they did not; shown by the editor pane. */
-export const workerStatus = new WorkerStatus({ violationTarget: document });
+// This module pulls Monaco, so nothing may import it statically: it is reached
+// only through `import('./monaco-setup')` in `use-editor-binding`. See
+// `docs/tasks/MONACO-DEFER-startup-import.md`. `workerStatus` is exported from
+// `./worker-status` for the same reason.
 
 export type MonacoModelFactory = ReturnType<typeof createMonacoModelFactory>;
 export type MonacoModel = ReturnType<MonacoModelFactory['create']>;
