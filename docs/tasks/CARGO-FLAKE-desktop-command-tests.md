@@ -55,11 +55,41 @@ have been absorbed by the existing flake family without ever being tested,
 which is the failure mode this section exists to prevent: an untested
 explanation inherited as fact is worse than an open question.
 
+## The confound was much larger than "three cargo runs" (2026-09-09, later)
+
+Both sightings happened while **16 orphaned processes were saturating every
+core**, and had been for two days.
+
+They were `zsh` busy-loops — `for i in $(seq 1 $((NCPU * 2))); do (while :; do
+:; done) & done` — spawned by a dead session deliberately generating load to
+reproduce `MARKDOWN-BUDGET-FLAKE`. The script's own `kill $LOADPIDS` cleanup
+line never ran, so the loops were reparented to init and kept running.
+`ps` showed each at 40–65% CPU with an elapsed time of `02-00:12`, and
+**load average was 66**. Killing them dropped the one-minute average to 17
+within five minutes.
+
+So the earlier note is right that the diagnosis was untested, and understates
+the problem: the load was neither "three sessions running cargo" nor disk
+pressure, but a **deliberate load generator nobody turned off**. Any timing- or
+scheduler-sensitive test run on this machine between 2026-09-07 and 2026-09-09
+was measured against a machine with 16 spinning cores, and that includes both
+sightings here — and very likely some of the sightings behind
+`MONACO-JSDOM-FLAKE`, `MARKDOWN-BUDGET-FLAKE` and `PTY-FLAKE`, since the
+generator was created to feed exactly that investigation.
+
+`SIGTERM` does not stop a tight `while :; do :; done` promptly — the loop never
+reaches a signal check between iterations. It took roughly two minutes to die.
+
+**This does not prove the three tests are sound.** It removes the confound that
+made the evidence unreadable, which is what the section below now asks for.
+
 ## What would settle it
 
-1. Reproduce with **disk pressure removed** — run the full workspace suite
-   while two other cargo builds run, on a machine with tens of GB free. If the
-   three fail again, it is load, and they join the existing family.
+1. Reproduce on a **quiet machine with space** — no load generators, load
+   average near idle, tens of GB free. As of 2026-09-09 16:15 that is finally
+   possible: the loops are dead and a sweep took free space from 18 GiB to
+   76 GiB. If the three pass repeatedly there, this ticket closes as "the
+   machine was lying", and the note above is the finding.
 2. If they do not, reproduce with **space pressure only** — a single
    `cargo test --workspace` against a nearly-full volume.
 3. Only then read the tests. All three touch workspace teardown
