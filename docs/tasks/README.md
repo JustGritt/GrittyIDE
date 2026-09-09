@@ -89,12 +89,14 @@ the workflow below are hand-maintained.
 | [EXPLORER-FORCE-REPLAY](EXPLORER-FORCE-REPLAY-dirty-document-replay.md) | deleteAnyway is dead code and the notice replays the wrong action | 2 | – | review |
 | MARKDOWN-BENCH | A markdown benchmark with a recorded baseline, if a perf gate is wanted | 3 | MARKDOWN-BUDGET-FLAKE | unspec |
 | MARKDOWN-BUDGET-FLAKE | render.test.ts 2000ms wall-clock budget fails under concurrent-build load | 3 | – | review |
+| MONACO-BARREL | packages/editor imports monaco whole; the main chunk is 4.6 MB |  | – | todo |
 | MONACO-JSDOM-FLAKE | model-eol.dom.test.ts times out its 10s beforeAll under load | 3 | JSDOM-VITEST | review |
 | MONACO-PREBUNDLE | Pre-bundle monaco-editor so the 9s transform is not paid every run | 3 | MONACO-JSDOM-FLAKE | unspec |
 | PLAN-FANOUT | Split the remaining work into fan-out-sized tickets, and the lanes to run them in |  | – | review |
 | PROTO-W2 | Wave 2 wire, in one PR: watcher, git, terminal blocks, diagnostics, violations | 2 | ADR-001, ADR-017, ADR-023 | todo |
 | PROTO-W2-GIT | The git wire: git.status and git.diff reach the shell | 2 | T100,ADR-023 | review |
 | PROTO-W3 | Wave 3 wire, in one PR: search | 2 | ADR-022 | review |
+| RUNS-EVENT-FILTER | use-runs.ts subscribes to every event of every kind |  | – | todo |
 | SIDECAR-BUNDLE-CONFIG | Move externalBin to a bundle-time config so a compile never needs a staged binary | 3 | SIDECAR-FRESH-CHECKOUT | unspec |
 | SIDECAR-FRESH-CHECKOUT | A fresh clone or worktree cannot build gritty-desktop until T225's sidecar is staged by hand | 3 | T225 | review |
 | T080-U | The search panel | 2 | PROTO-W3, T080 | todo |
@@ -103,9 +105,9 @@ the workflow below are hand-maintained.
 | T101-D | The diff as an editor tab (Monaco diff editor) on git.show | 2 | T101-R | todo |
 | T101-R | gix: a paged commit walk, and a blob at a revision | 2 | T101-C | review |
 | T101-U | History in the git panel, on git.log | 2 | T101-R | review |
-| T102-C | The write contract: stage, unstage, discard, commit | 2 | ADR-029 | doing |
-| T102-R | gritty-git-write: the subprocess adapter and the git probe | 2 | T102-C | doing |
-| T102-U | Staging, discard and the commit box in the Changes panel | 2 | T102-R | blocked |
+| T102-C | The write contract: stage, unstage, discard, commit | 2 | ADR-029 | review |
+| T102-R | gritty-git-write: the subprocess adapter and the git probe | 2 | T102-C | review |
+| T102-U | Staging, discard and the commit box in the Changes panel | 2 | T102-R | todo |
 | T120-C | The settings contract: settings.* and SettingsChanged | 2 | ADR-031 | todo |
 | T120-M | Mount the settings tab, and the comma chord | 2 | T120-U | todo |
 | T120-R | gritty-settings: the registry, the file, and the failure policy | 2 | T120-C | doing |
@@ -114,8 +116,8 @@ the workflow below are hand-maintained.
 | T130-C | The quick-open contract: workspace.findFiles and ranked paths | 2 | T080 | blocked |
 | T130-M | Mount the bar in the app bar, and the quick-open chord | 2 | T130-U, T310-U | todo |
 | T130-R | A fuzzy path scorer, and the walk that ranks with it | 2 | T080 | review |
-| T130-S | @ symbols: a regex outline, honestly named | 2 | T130-U | todo |
-| T130-U | The quick-open bar, and its four modes | 2 | T130-C, T130-R | todo |
+| T130-S | @ symbols: a regex outline, honestly named | 2 | T130-U | doing |
+| T130-U | The quick-open bar, and its four modes | 2 | T130-C, T130-R | doing |
 | T222-CODEX | Codex, as one provider file | 3 | T222-SEAM | todo |
 | T222-SEAM | A provider registry, so providers stop being serial | 3 | T220 | unspec |
 | [T233](T233-agents-sidebar.md) | Agents in the left sidebar (design artboard 12a) | 3 | – | unspec |
@@ -127,6 +129,7 @@ the workflow below are hand-maintained.
 | T300-PANEL | A run belongs on its workstream's island row, not a fourth roster | 4 | T300-WIRE | unspec |
 | T300-WIRE | Connect the three Gate D halves: fake driver, manager, runs.* adapters | 4 | T300-CORE | review |
 | T400-R | Worktree create and remove | 5 | T100 | unspec |
+| WATCH-FLAKE | watch.rs::a_directory_created_after_the_watch_started_is_followed is load-sensitive |  | – | todo |
 | T233-M | The roster row model: owned runs and observed sessions in one list | 3 | T300-C | review |
 | T233-S | The Agents section in the left sidebar, and the sidebar tab strip (12a) | 3 | T233-M | review |
 | T233-C | The full-height agent console, and retiring the right rail (12a) | 3 | T233-S,T232 | review |

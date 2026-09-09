@@ -113,4 +113,65 @@ pnpm check
 
 ## Completion report
 
-_Blocked; not started._
+**Summary.** The four commands on the wire at `PROTOCOL_VERSION` 2.22.0, and
+`crates/gritty-core/src/git/write.rs` — the module that composes `gritty-git`
+and `gritty-git-write`, which ADR-029 decision 2 keeps from knowing about each
+other. Landed together with T102-R, as the ticket required.
+
+**Files changed.** `crates/gritty-core/src/git/{wire,mod,write}.rs`,
+`crates/gritty-core/src/protocol/{mod,export}.rs`, `crates/gritty-core/Cargo.toml`,
+`apps/desktop/src-tauri/src/{commands,lib,core}.rs`,
+`packages/protocol/src/{commands,client,types}.ts`, the generated directory
+(8 new types, 2 changed), `packages/protocol/src/git-write-client.test.ts`,
+`Cargo.lock`, `docs/merge-queue.md`.
+
+**Tests actually executed.** `cargo test -p gritty-core` — 499 passed.
+`cargo test --workspace` green. `cargo clippy --workspace --all-targets -D
+warnings` clean. `pnpm test` — 97 files, 958 tests. `pnpm typecheck` clean.
+`pnpm check:generated` exit 0 after committing. 8 new protocol-client tests
+cover the four names, the request shapes, the `Conflict`-then-`force` replay,
+the `pending` arm and a hook's stderr reaching the caller.
+
+**Architectural decisions.**
+
+- *One `GitWriteResponse` for all four*, and *one `OperationKind`, `git.write`*
+  (requirement 5) — a UI matching on the kind should not need to know the verb.
+- *The response carries the re-read `RepositoryStatus`.* That is the concrete
+  form of requirement 3: the panel converges on the response instead of issuing
+  a `git.status` behind every click.
+- *A discard splits its paths by tracking.* `git stash` will not take untracked
+  files without `-u`, and `-u` would stash every untracked file rather than the
+  named ones — the wholesale write decision 3 forbids. Tracked work is stashed;
+  untracked goes to the Trash.
+- *Whether a stash happened is read from `refs/stash` before and after*, not
+  from git's "No local changes to save". A ref that moved is a fact; a message
+  is a translation.
+
+**Two additions the ticket did not specify.**
+
+1. **`GitStatusResponse::Ready` gains `write: GitWriteAvailability`.** T102-U
+   requires the affordances be disabled *with the reason*, and nothing carried
+   the probe verdict — the panel would have learned on the first failed click.
+   It is on the wire type, not on `RepositoryStatus`, because that type belongs
+   to `gritty-git`.
+2. **`GitService` takes the `DocumentTreeGuard`**, installed in `core.rs`
+   exactly as `FileService`'s is, so a discard can refuse over a dirty buffer.
+
+**Known limitations.**
+
+- `git.commit` is the first operation in the tree to own a child process. It
+  composes `registry.start` with the adapter's kill ladder; the composition is
+  tested at the adapter level, and the operation-level cancellation path is not
+  yet exercised end to end through the IPC.
+- The integration test through the real IPC against a real repository
+  (acceptance criterion 1) is **not** written. The four commands are registered
+  and the protocol client is covered, but `apps/desktop/src-tauri/tests/commands.rs`
+  has no git-write case yet. That is the honest gap in this ticket.
+
+**Follow-up tasks.** The IPC integration test above. T102-U consumes this.
+
+**Remaining risks.** `commands.rs`'s
+`root_removed_while_open_fails_with_not_found_and_closes_the_workspace` failed
+once under concurrent `cargo` load from another session in this shared
+checkout, then passed 55/55 across three runs. Its assertion is on exact event
+ordering, so it is timing-sensitive; recorded rather than hidden.
