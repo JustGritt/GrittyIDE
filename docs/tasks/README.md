@@ -90,7 +90,8 @@ the workflow below are hand-maintained.
 | MAIN-RED-T102C | main does not typecheck: git-write-client.test.ts TS2339 (2 lines) |  | – | todo |
 | MARKDOWN-BENCH | A markdown benchmark with a recorded baseline, if a perf gate is wanted | 3 | MARKDOWN-BUDGET-FLAKE | unspec |
 | MARKDOWN-BUDGET-FLAKE | render.test.ts 2000ms wall-clock budget fails under concurrent-build load | 3 | – | review |
-| MONACO-BARREL | packages/editor imports monaco whole; the main chunk is 4.6 MB |  | – | todo |
+| [MONACO-BARREL](MONACO-BARREL-startup-chunk.md) | packages/editor imports monaco whole; the main chunk is 4.6 MB |  | – | doing |
+| [MONACO-DEFER](MONACO-DEFER-startup-import.md) | Load Monaco on first editor tab, not at startup (~87% of the chunk) |  | MONACO-BARREL | todo |
 | MONACO-JSDOM-FLAKE | model-eol.dom.test.ts times out its 10s beforeAll under load | 3 | JSDOM-VITEST | review |
 | MONACO-PREBUNDLE | Pre-bundle monaco-editor so the 9s transform is not paid every run | 3 | MONACO-JSDOM-FLAKE | unspec |
 | PLAN-FANOUT | Split the remaining work into fan-out-sized tickets, and the lanes to run them in |  | – | review |
@@ -109,7 +110,7 @@ the workflow below are hand-maintained.
 | [T102-C](T102-C-git-write-contract.md) | The write contract: stage, unstage, discard, commit | 2 | ADR-029 | review |
 | [T102-R](T102-R-git-write-adapter.md) | gritty-git-write: the subprocess adapter and the git probe | 2 | T102-C | review |
 | [T102-U](T102-U-git-write-ui.md) | Staging, discard and the commit box in the Changes panel | 2 | T102-R | todo |
-| [T120-C](T120-C-settings-contract.md) | The settings contract: settings.* and SettingsChanged | 2 | ADR-031 | doing |
+| [T120-C](T120-C-settings-contract.md) | The settings contract: settings.* and SettingsChanged | 2 | ADR-031 | review |
 | [T120-M](T120-M-settings-mount.md) | Mount the settings tab, and the comma chord | 2 | T120-U | todo |
 | [T120-R](T120-R-settings-service.md) | gritty-settings: the registry, the file, and the failure policy | 2 | T120-C | doing |
 | [T120-T](T120-T-theme.md) | A theme the user picks: system, light or dark | 2 | T120-C | todo |
