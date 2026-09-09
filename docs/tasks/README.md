@@ -122,6 +122,7 @@ the workflow below are hand-maintained.
 | [T130-R](T130-R-path-ranking.md) | A fuzzy path scorer, and the walk that ranks with it | 2 | T080 | review |
 | [T130-S](T130-S-symbol-outline.md) | @ symbols: a regex outline, honestly named | 2 | T130-U | review |
 | [T130-U](T130-U-quick-open-bar.md) | The quick-open bar, and its four modes | 2 | T130-C, T130-R | review |
+| [T130-V](docs/tasks/T130-V-quick-open-component.md) | The quick-open component, its controller, and the two test tiers | 2 | T130-C, T130-U | review |
 | T222-CODEX | Codex, as one provider file | 3 | T222-SEAM | todo |
 | T222-SEAM | A provider registry, so providers stop being serial | 3 | T220 | unspec |
 | [T233](T233-agents-sidebar.md) | Agents in the left sidebar (design artboard 12a) | 3 | – | unspec |
