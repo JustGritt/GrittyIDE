@@ -1,0 +1,22 @@
+[package]
+name = "gritty-settings"
+description = "Gritty settings (T120, ADR-031): the schema registry, the settings.json document and its atomic, never-destructive writer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The atomic write is `gritty-workspace`'s, not a second one: it takes a plain
+# absolute path, is already used for a file outside any workspace by
+# `gritty-agents`, and is already crash-tested (AGENTS.md hard rule 2).
+gritty-workspace = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true
