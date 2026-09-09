@@ -293,6 +293,25 @@ fn on_focus_event<R: tauri::Runtime>(window: &tauri::Window<R>, event: &tauri::W
     let app = window.app_handle();
     if let Some(core) = app.try_state::<core::Core>() {
         core.agents.set_window_focused(*focused);
+        if *focused {
+            // Regaining focus is when an edit made in another editor should
+            // show up (T120-R, ADR-031 §6). This is deliberately *not* a
+            // watcher: the application data directory holds
+            // `gritty.sqlite-wal`, which the snapshot writer touches every one
+            // to two seconds while any buffer is dirty, so watching it would
+            // reproduce exactly the noise ADR-025 exists to filter — plus an
+            // echo loop on Gritty's own writes.
+            //
+            // Spawned rather than awaited: this handler runs on the event loop
+            // and must not block it (hard rule 10). The store's `(size, mtime)`
+            // guard makes the common case one `stat`, and it emits only when
+            // the effective values actually differ, so an ordinary alt-tab
+            // costs a stat and raises nothing.
+            let settings = core.settings.clone();
+            tauri::async_runtime::spawn(async move {
+                settings.reload_on_focus().await;
+            });
+        }
     }
 }
 
