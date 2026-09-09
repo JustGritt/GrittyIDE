@@ -81,6 +81,7 @@ the workflow below are hand-maintained.
 | ADR-029 | Git writes run through the git binary, not gix | 2 | – | unspec |
 | ADR-031 | Settings are a core-owned settings.json, user scope only | 2 | – | review |
 | ADR-032 | Record the UI framework decision (React 19) | 0 | – | review |
+| ADR-033 | What [profile.dev] should be: debuginfo and split-debuginfo on macOS | 2 | – | todo |
 | BOARD-STALE-REASON | A block reason outlives its block, and show prints it as present tense | tools | – | todo |
 | [CARGO-FLAKE](CARGO-FLAKE-desktop-command-tests.md) | Three desktop command tests fail under a loaded machine | 2 | – | todo |
 | CI-COST | CI: self-hosted macOS runner, and stop burning metered minutes |  | – | review |
@@ -118,11 +119,13 @@ the workflow below are hand-maintained.
 | [T120-T](T120-T-theme.md) | A theme the user picks: system, light or dark | 2 | T120-C | todo |
 | [T120-U](T120-U-settings-page.md) | The settings page, and retiring the three popovers | 2 | T120-C | todo |
 | [T130-C](T130-C-quick-open-contract.md) | The quick-open contract: workspace.findFiles and ranked paths | 2 | T080 | review |
-| [T130-M](T130-M-quick-open-mount.md) | Mount the bar in the app bar, and the quick-open chord | 2 | T130-U, T310-U | todo |
+| [T130-M](T130-M-quick-open-mount.md) | Mount the bar in the app bar, and the quick-open chord | 2 | T130-U, T310-U | review |
 | [T130-R](T130-R-path-ranking.md) | A fuzzy path scorer, and the walk that ranks with it | 2 | T080 | review |
 | [T130-S](T130-S-symbol-outline.md) | @ symbols: a regex outline, honestly named | 2 | T130-U | review |
 | [T130-U](T130-U-quick-open-bar.md) | The quick-open bar, and its four modes | 2 | T130-C, T130-R | review |
 | [T130-V](docs/tasks/T130-V-quick-open-component.md) | The quick-open component, its controller, and the two test tiers | 2 | T130-C, T130-U | review |
+| [T140-PROFILE](T140-PROFILE-dev-profile-debuginfo.md) | Measure, then set the dev profile debuginfo | 2 | ADR-033 | todo |
+| [T140-SWEEP](T140-SWEEP-local-gc-trigger.md) | Fire the build-cache sweeper where the growth is | 2 | – | review |
 | T222-CODEX | Codex, as one provider file | 3 | T222-SEAM | todo |
 | T222-SEAM | A provider registry, so providers stop being serial | 3 | T220 | unspec |
 | [T233](T233-agents-sidebar.md) | Agents in the left sidebar (design artboard 12a) | 3 | – | unspec |

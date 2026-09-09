@@ -1,7 +1,7 @@
 # Task T130-M — Mount the bar in the app bar, and the quick-open chord
 
 - **Phase:** 2
-- **Status:** todo
+- **Status:** review
 - **Depends on:** T130-U, T310-U (landing, not building)
 
 ## Objective
