@@ -157,6 +157,27 @@ cargo test -p gritty-core
 pnpm check
 ```
 
+## Progress
+
+**The crate is built and committed (`84ea4d2`); the wiring is not.**
+
+Done: `crates/settings/` — the schema registry (ten settings), the document
+(defaults overlay, per-key validation, preserved unknown keys, diagnostics),
+the file layer (bounded read, the four file states, atomic write through
+`gritty_workspace::write_file_atomic`), and the store (one lock across each
+read-modify-write, all-or-nothing patches, `reload_if_changed` for the focus
+path). 36 tests; `cargo clippy -p gritty-settings --all-targets -- -D warnings`
+and `cargo fmt --check` both clean.
+
+Not done, and blocked on `T120-C`: the handlers behind the wire, the
+composition-root wiring, the focus-gain call site, `arm_notifications`, and
+marking T223 decision 6 superseded. The crate is inert until then — nothing
+depends on it, so it adds no command, event or type and spends no version.
+
+The contract itself is waiting on the source-control session, which holds
+2.22.0–2.24.0 and shares three of the four protocol seams; by agreement they
+land first and this follows.
+
 ## Completion report
 
 *(filled on completion)*
