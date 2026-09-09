@@ -1,7 +1,7 @@
 # Task T130-C — The quick-open contract: `workspace.findFiles`
 
 - **Phase:** 2
-- **Status:** doing
+- **Status:** review
 - **Depends on:** T080, T130-R (land the contract *with* something behind it)
 
 ## Objective

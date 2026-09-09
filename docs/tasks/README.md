@@ -117,7 +117,7 @@ the workflow below are hand-maintained.
 | [T120-R](T120-R-settings-service.md) | gritty-settings: the registry, the file, and the failure policy | 2 | T120-C | review |
 | [T120-T](T120-T-theme.md) | A theme the user picks: system, light or dark | 2 | T120-C | todo |
 | [T120-U](T120-U-settings-page.md) | The settings page, and retiring the three popovers | 2 | T120-C | todo |
-| [T130-C](T130-C-quick-open-contract.md) | The quick-open contract: workspace.findFiles and ranked paths | 2 | T080 | doing |
+| [T130-C](T130-C-quick-open-contract.md) | The quick-open contract: workspace.findFiles and ranked paths | 2 | T080 | review |
 | [T130-M](T130-M-quick-open-mount.md) | Mount the bar in the app bar, and the quick-open chord | 2 | T130-U, T310-U | todo |
 | [T130-R](T130-R-path-ranking.md) | A fuzzy path scorer, and the walk that ranks with it | 2 | T080 | review |
 | [T130-S](T130-S-symbol-outline.md) | @ symbols: a regex outline, honestly named | 2 | T130-U | review |
