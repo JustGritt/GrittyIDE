@@ -18,6 +18,11 @@ Use Tauri 2 with a Rust core and a React + Monaco frontend. Prove it in Phase 0
 typed protocol, PTY, Markdown, persistence, failure containment, Linux build,
 performance baseline.
 
+The frontend half of that sentence is not decided here, and on review was
+never argued here either: ADR-032 records why React, and why Monaco being
+framework-agnostic means the two choices were always separable. The
+go/no-go below is about the runtime alone.
+
 Kill criteria (any one triggers an Electron evaluation while keeping the core
 protocol):
 
