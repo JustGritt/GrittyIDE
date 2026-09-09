@@ -290,27 +290,22 @@ function AgentRow({
         row.owned ? ' agents-section__row--owned' : ''
       }${row.elsewhere ? ' agents-section__row--elsewhere' : ''}`}
     >
-      {/* Only a row with somewhere to go is a button.
-          An observed session has a timeline, so its row opens a console. A run
-          Gritty owns carries an `AgentRunEventLog`, which is a different shape
-          the console does not draw — so it gets its Cancel and nothing else
-          until there is a real provider to build that view for (T310). */}
-      {row.sessionId !== null ? (
-        <button
-          type="button"
-          className="agents-section__pick"
-          aria-current={selected ? 'true' : undefined}
-          onClick={() => onSelect(row)}
-          onDoubleClick={() => onKeep(row)}
-          title={hint}
-        >
-          {face}
-        </button>
-      ) : (
-        <span className="agents-section__pick agents-section__pick--static" title={hint}>
-          {face}
-        </span>
-      )}
+      {/* Every row opens a console now (T310-U). Both lanes have a feed to
+          draw — an observed session a timeline the core follows, a run Gritty
+          owns the event ring it recorded — and `row.key` is the console key for
+          whichever it is, so this row model is the only thing either side
+          needs. A run's console additionally has a prompt box; that difference
+          lives in the console, not in the row. */}
+      <button
+        type="button"
+        className="agents-section__pick"
+        aria-current={selected ? 'true' : undefined}
+        onClick={() => onSelect(row)}
+        onDoubleClick={() => onKeep(row)}
+        title={hint}
+      >
+        {face}
+      </button>
 
       {/* The roster is machine-wide, so a row from somewhere else says so in
           words as well as by the edge the class draws down its left. */}

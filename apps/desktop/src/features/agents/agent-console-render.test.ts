@@ -1,8 +1,18 @@
-import type { AgentActivitySource, AgentSession } from '@gritty/protocol';
+import type {
+  AgentActivitySource,
+  AgentRoster,
+  AgentRun,
+  AgentRunId,
+  AgentSession,
+  Workstream,
+  WorkstreamId,
+} from '@gritty/protocol';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { AgentConsole, agentTabItems } from './agent-console';
+import { parseConsoleKey } from './agent-tabs-reducer';
+import { rosterRows } from './roster-model';
 import type { AgentConsoleController } from './use-agent-console';
 import type { AgentsController } from './use-agents';
 
@@ -58,9 +68,10 @@ const refuse = (what: string) => () => {
 };
 
 const controller: AgentConsoleController = {
-  openTabs: ['session-1'],
+  openTabs: ['session:session-1'],
   previewId: null,
-  activeId: 'session-1',
+  activeId: 'session:session-1',
+  activeTarget: { kind: 'session', sessionId: 'session-1' },
   pendingId: null,
   timeline: null,
   openingPath: null,
@@ -168,32 +179,127 @@ describe('agent text is text', () => {
   });
 });
 
+describe('the console has no prompt box (T310-U §9)', () => {
+  it('draws no way to speak to a session another terminal owns', () => {
+    // "No prompt box **and no disabled one either**": there is nothing to
+    // enable, and a greyed-out control implies a permission the user could
+    // acquire. Speaking to an agent is `RunConsole`'s, in the other lane.
+    const markup = render();
+    expect(markup).not.toContain('<textarea');
+    expect(markup).not.toContain('agent-prompt');
+  });
+});
+
+/**
+ * The tab strip is handed rows, not sessions (T310-U).
+ *
+ * `rosterRows` is what builds them — the same call `App` makes — rather than
+ * hand-written literals, because the assertion that actually matters is that
+ * the key a row carries and the key a tab is opened with are one string. A
+ * fixture spelling `run:…` itself would pass while the two drifted apart.
+ */
+function rows(runs: readonly AgentRun[], sessions: readonly AgentSession[]) {
+  const roster: AgentRoster = { sessions: [...sessions], needsYou: 0, processEvidence: true };
+  const workstreams: readonly Workstream[] = [
+    {
+      id: 'w1' as WorkstreamId,
+      workspaceId: 'ws1' as Workstream['workspaceId'],
+      title: 'Ship the ring',
+      state: 'IN_PROGRESS',
+      allowedTransitions: [],
+      openDecisions: 0,
+      createdAt: 0,
+      updatedAt: 0,
+    },
+  ];
+  return rosterRows(runs, roster, workstreams);
+}
+
+function run(overrides: Partial<AgentRun> = {}): AgentRun {
+  return {
+    id: 'run-1' as AgentRunId,
+    workstreamId: 'w1' as WorkstreamId,
+    workspaceId: 'ws1' as AgentRun['workspaceId'],
+    provider: 'CLAUDE_CODE',
+    state: 'RUNNING',
+    startedAt: 0,
+    updatedAt: 0,
+    cancellationRequested: false,
+    correlationId: 'c1' as AgentRun['correlationId'],
+    ...overrides,
+  };
+}
+
+describe('the row a user clicks and the tab it opens are one identity', () => {
+  it('mints keys the console can read back, for both lanes', () => {
+    // The two modules spell the key in two places — `rosterRows` builds it,
+    // `parseConsoleKey` takes it apart — and nothing else would notice if they
+    // drifted. This is what notices.
+    const built = rows([run()], [session()]);
+    expect(built.map((row) => parseConsoleKey(row.key))).toEqual(
+      expect.arrayContaining([
+        { kind: 'run', runId: 'run-1' },
+        { kind: 'session', sessionId: 'session-1' },
+      ]),
+    );
+  });
+});
+
 describe('the tabs the strip is handed', () => {
   it('labels a console by its folder, not by its id', () => {
-    const items = agentTabItems(['session-1'], null, [session()]);
+    const items = agentTabItems(['session:session-1'], null, rows([], [session()]));
     expect(items).toHaveLength(1);
     expect(items[0]?.label).toBe('gritty');
     expect(items[0]?.tone).toBe('working');
   });
 
   it('falls back to a short id when the directory was never seen', () => {
-    const items = agentTabItems(['session-1'], null, [session({ rootName: undefined })]);
+    const items = agentTabItems(
+      ['session:session-1'],
+      null,
+      rows([], [session({ rootName: undefined })]),
+    );
     expect(items[0]?.label).toBe('session');
   });
 
+  it('gives a run Gritty owns a tab too, keyed in its own lane', () => {
+    // The two lanes cannot collide: a run is deliberately absent from the
+    // observed roster (T310-B §8), so its key is the only thing that can name
+    // it here.
+    const items = agentTabItems(['run:run-1'], null, rows([run()], [session()]));
+    expect(items).toHaveLength(1);
+    expect(items[0]?.id).toBe('run:run-1');
+    expect(items[0]?.label).toBe('run-1');
+    expect(items[0]?.tone).toBe('working');
+  });
+
   it('marks the preview, so the strip can italicise it', () => {
-    const items = agentTabItems(['session-1'], 'session-1', [session()]);
+    const items = agentTabItems(['session:session-1'], 'session:session-1', rows([], [session()]));
     expect(items[0]?.preview).toBe(true);
   });
 
   it('drops a tab whose session has left the roster', () => {
     // A tab that could only be drawn as a bare id is worse than one that is
     // gone; the reducer removes it on the same roster publish.
-    expect(agentTabItems(['session-1'], null, [])).toEqual([]);
+    expect(agentTabItems(['session:session-1'], null, [])).toEqual([]);
+  });
+
+  it('drops a run tab the same way when its workspace closed', () => {
+    expect(agentTabItems(['run:run-1'], null, rows([], [session()]))).toEqual([]);
   });
 
   it('carries the status into the tab title, since the tab has no room for it', () => {
-    const items = agentTabItems(['session-1'], null, [session({ activity: 'BLOCKED' })]);
+    const items = agentTabItems(
+      ['session:session-1'],
+      null,
+      rows([], [session({ activity: 'BLOCKED' })]),
+    );
     expect(items[0]?.hint).toContain('Pending validation');
+  });
+
+  it('says a run is blocked in the run vocabulary, not the session one', () => {
+    const items = agentTabItems(['run:run-1'], null, rows([run({ state: 'BLOCKED' })], []));
+    expect(items[0]?.hint).toContain('Blocked');
+    expect(items[0]?.tone).toBe('blocked');
   });
 });

@@ -3175,6 +3175,75 @@ textarea:focus-visible {
   color: var(--fg-faint);
 }
 
+/* ---------------------------------------------------------------------------
+   The prompt box (T310-U §9)
+
+   The one control in the app that speaks *to* an agent. Below the feed, inside
+   the console, and drawn only where there is a channel behind it — never on an
+   observed session, and not on a scripted run either.
+
+   It sits on the console's own surface rather than in a raised card: it is part
+   of the conversation above it, not a dialog over it. The reason line is the
+   load-bearing piece — a disabled box that says nothing is indistinguishable
+   from a broken one — so it takes the warn colour the rest of the app uses for
+   "this is why you cannot".
+
+   Every colour is an ADR-016 token (there is no literal here).
+   --------------------------------------------------------------------------- */
+
+.agent-prompt {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  padding: var(--gap-sm) var(--gap-md) var(--gap-md);
+  border-top: 1px solid var(--border);
+}
+
+/* Named for a screen reader, invisible to everyone else: the placeholder and
+   the surrounding console already say what the box is for. */
+.agent-prompt__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.agent-prompt__input {
+  width: 100%;
+  min-height: 3.5rem;
+  /* Grows with the draft, and stops before it eats the feed above it. */
+  max-height: 40vh;
+  resize: vertical;
+  line-height: 1.45;
+  font-size: var(--text-code);
+}
+
+.agent-prompt__input:disabled {
+  color: var(--fg-faint);
+  cursor: not-allowed;
+}
+
+.agent-prompt__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+.agent-prompt__reason {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--text-micro);
+  color: var(--warn-text);
+}
+
+.agent-prompt__hint {
+  font-size: var(--text-meta);
+  color: var(--fg-faint);
+}
+
 /* The files the session wrote (T232 §9). Above the feed rather than below it:
    this is the list you act on, and a conversation that never stops growing must
    not be able to push it out of reach. */
@@ -4505,12 +4574,6 @@ textarea:focus-visible {
   text-align: left;
   cursor: pointer;
   color: inherit;
-}
-
-/* A run Gritty owns has no console to open yet, so its row is not a button.
-   It keeps the same box so the two kinds of row line up. */
-.agents-section__pick--static {
-  cursor: default;
 }
 
 /* Identity, not status: which agent this is. The status mark beside it says

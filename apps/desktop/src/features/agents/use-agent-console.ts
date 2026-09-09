@@ -1,4 +1,6 @@
 import {
+  type AgentRun,
+  type AgentRunId,
   type AgentTimeline,
   type CoreError,
   toCoreError,
@@ -10,15 +12,44 @@ import { core } from '../../core/client';
 import {
   type AgentTabsState,
   agentTabsReducer,
+  type ConsoleKey,
+  type ConsoleTarget,
   followedSession,
   initialAgentTabsState,
+  parseConsoleKey,
+  runConsoleKey,
+  sessionConsoleKey,
 } from './agent-tabs-reducer';
 import { openTouchedFile, type TouchedFileDocuments } from './open-touched-file';
 import type { AgentsController } from './use-agents';
 
+/**
+ * The runs half of the console, narrowed to the two things it may use.
+ *
+ * A narrowed interface rather than `RunsController` itself, exactly as
+ * `TouchedFileDocuments` narrows the document store: this hook has no business
+ * starting, prompting or cancelling a run, and a type that let it could.
+ */
+export interface ConsoleRuns {
+  /** The runs of the open workspace, so a tab whose run is gone is dropped. */
+  readonly runs: readonly AgentRun[];
+  /**
+   * Fetch one run's events once, so an opened console starts from the ring
+   * rather than from whatever arrived after the click. Resolves `true` when the
+   * log landed; the refusal itself is the controller's to show.
+   */
+  openEvents(runId: AgentRunId): Promise<boolean>;
+}
+
 export interface AgentConsoleOptions {
   /** The one roster the section, the island and the console share. */
   readonly agents: AgentsController;
+  /**
+   * The runs Gritty owns, from the one controller `App` holds. A run's console
+   * reads its feed straight out of that controller; this hook only opens the
+   * tab and asks for the ring once (T310-U §6).
+   */
+  readonly runs: ConsoleRuns;
   /**
    * How a file the agent touched reaches the editor (T232). The document store,
    * narrowed to the two calls the console is allowed to make.
@@ -33,12 +64,19 @@ export interface AgentConsoleOptions {
 }
 
 export interface AgentConsoleController {
-  /** Session ids with a tab, in the order they were opened. */
-  readonly openTabs: readonly string[];
-  readonly previewId: string | null;
+  /** Console keys with a tab, in the order they were opened. */
+  readonly openTabs: readonly ConsoleKey[];
+  readonly previewId: ConsoleKey | null;
   /** The console showing now, or `null` when a document is showing. */
-  readonly activeId: string | null;
-  readonly pendingId: string | null;
+  readonly activeId: ConsoleKey | null;
+  /**
+   * Which lane the console on screen belongs to, already parsed. `null` when a
+   * document is showing, or when the key names a lane this build has no console
+   * for — the caller draws nothing rather than guessing.
+   */
+  readonly activeTarget: ConsoleTarget | null;
+  readonly pendingId: ConsoleKey | null;
+  /** A session's timeline. Always `null` for a run: its feed is the ring. */
   readonly timeline: AgentTimeline | null;
   /** The touched file being opened right now, so its row can say so. */
   readonly openingPath: string | null;
@@ -52,10 +90,10 @@ export interface AgentConsoleController {
    * strip it merely activates one — the same call, because a tab that already
    * exists is not made a preview by being clicked.
    */
-  show(sessionId: string): void;
+  show(key: ConsoleKey): void;
   /** Keep a preview tab, so the next single click no longer replaces it. */
-  keep(sessionId: string): void;
-  close(sessionId: string): void;
+  keep(key: ConsoleKey): void;
+  close(key: ConsoleKey): void;
   /** A document tab was activated; the console stops being on screen. */
   showDocuments(): void;
   /** Open a file the agent touched, in the editor it is sitting in. */
@@ -79,9 +117,18 @@ export interface AgentConsoleController {
  * - **Late answers are dropped**, by `pendingId`, in the reducer.
  * - **The asynchronous paths read `latest.current`**, never the state they
  *   closed over, or a rapid switch would act on a roster that has moved.
+ *
+ * A tab is a *console key* rather than a session id (T310-U): a run Gritty owns
+ * opens a console here too, and it is deliberately not in the observed roster
+ * (T310-B §8) so it could never have arrived as one. The two kinds share the
+ * tab strip, the preview rule and the "one feed at a time" rule, and share
+ * nothing else — a session has a follower the core opens and closes, a run has
+ * a ring `useRuns` already holds. The asymmetry is why `followedSession`
+ * returns `null` for a run rather than a run id.
  */
 export function useAgentConsole({
   agents,
+  runs,
   documents,
   workspaceId,
 }: AgentConsoleOptions): AgentConsoleController {
@@ -91,6 +138,11 @@ export function useAgentConsole({
   // they run rather than as it was when they were created.
   const latest = useRef<AgentTabsState>(state);
   latest.current = state;
+  // `show` is created once, and the controller it calls is rebuilt on every
+  // render of `App`. The ref is what stops the callback from closing over a
+  // stale `openEvents`.
+  const runsRef = useRef(runs);
+  runsRef.current = runs;
 
   // The timeline arrives as deltas, never as a snapshot: a timeline grows
   // without bound, so the core appends rather than resending (rule 8). The
@@ -114,36 +166,48 @@ export function useAgentConsole({
   }, []);
 
   const show = useCallback(
-    (sessionId: string) => {
+    (key: ConsoleKey) => {
+      const target = parseConsoleKey(key);
+      // A key naming a lane this build has no console for opens nothing. It
+      // cannot come from this build's own roster, so there is nothing to say
+      // about it beyond not acting on it.
+      if (target === null) return;
       const current = latest.current;
       // Already the console on screen, with a feed or one on the way. Clicking
-      // its tab again is not a request to restart the follower.
-      if (
-        current.activeId === sessionId &&
-        (current.timeline !== null || current.pendingId === sessionId)
-      ) {
+      // its tab again is not a request to fetch it a second time.
+      if (current.activeId === key && (current.loadedId === key || current.pendingId === key)) {
         return;
       }
       stopFollowing(followedSession(current));
-      dispatch({ type: 'open', sessionId, preview: true });
-      core.agents.openTimeline({ sessionId }).then(
-        (timeline) => dispatch({ type: 'opened', sessionId, timeline }),
-        // `NotFound` is the ordinary case here: a session can leave the roster
-        // between the click and this call.
-        (cause: unknown) => dispatch({ type: 'failed', sessionId, error: toCoreError(cause) }),
-      );
+      dispatch({ type: 'open', key, preview: true });
+      if (target.kind === 'session') {
+        core.agents.openTimeline({ sessionId: target.sessionId }).then(
+          (timeline) => dispatch({ type: 'opened', key, timeline }),
+          // `NotFound` is the ordinary case here: a session can leave the
+          // roster between the click and this call.
+          (cause: unknown) => dispatch({ type: 'failed', key, error: toCoreError(cause) }),
+        );
+        return;
+      }
+      // A run has no follower to open: its events arrive on the machine-wide
+      // `AgentRunEventAppended` that `useRuns` is already subscribed to. All
+      // that is needed is the ring as it stands, once (§6).
+      void runsRef.current
+        .openEvents(target.runId)
+        .then((loaded) => dispatch({ type: 'openedRun', key, loaded }));
     },
     [stopFollowing],
   );
 
-  const keep = useCallback((sessionId: string) => {
-    dispatch({ type: 'keep', sessionId });
+  const keep = useCallback((key: ConsoleKey) => {
+    dispatch({ type: 'keep', key });
   }, []);
 
   const close = useCallback(
-    (sessionId: string) => {
-      if (followedSession(latest.current) === sessionId) stopFollowing(sessionId);
-      dispatch({ type: 'close', sessionId });
+    (key: ConsoleKey) => {
+      const following = followedSession(latest.current);
+      if (following !== null && sessionConsoleKey(following) === key) stopFollowing(following);
+      dispatch({ type: 'close', key });
     },
     [stopFollowing],
   );
@@ -155,17 +219,22 @@ export function useAgentConsole({
     dispatch({ type: 'documents' });
   }, [stopFollowing]);
 
-  // A tab whose session left the roster has nothing left to be about. A
-  // session that merely *ended* is still listed, so its tab stays: the feed
+  // A tab whose session left the roster, or whose run left the workspace, has
+  // nothing left to be about. A session that merely *ended* is still listed and
+  // a run that merely finished is still listed, so those tabs stay: the feed
   // stops growing, which is what happened, and the tab does not vanish under
   // the pointer.
   const { roster } = agents;
+  const runList = runs.runs;
   useEffect(() => {
-    const ids = roster.sessions.map((session) => session.id);
+    const keys = [
+      ...runList.map((run) => runConsoleKey(run.id)),
+      ...roster.sessions.map((session) => sessionConsoleKey(session.id)),
+    ];
     const following = followedSession(latest.current);
-    if (following && !ids.includes(following)) stopFollowing(following);
-    dispatch({ type: 'roster', ids });
-  }, [roster, stopFollowing]);
+    if (following && !keys.includes(sessionConsoleKey(following))) stopFollowing(following);
+    dispatch({ type: 'roster', keys });
+  }, [roster, runList, stopFollowing]);
 
   // The shell going away takes the follower with it, for the same reason
   // closing the tab does.
@@ -210,6 +279,7 @@ export function useAgentConsole({
     openTabs: state.open,
     previewId: state.previewId,
     activeId: state.activeId,
+    activeTarget: state.activeId === null ? null : parseConsoleKey(state.activeId),
     pendingId: state.pendingId,
     timeline: state.timeline,
     openingPath: state.openingPath,

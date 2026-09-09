@@ -11,6 +11,7 @@ import { type Dispatch, useCallback, useEffect, useRef, useState } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
 import { core } from '../../core/client';
 import { AgentConsole, agentTabItems } from '../agents/agent-console';
+import type { RosterRow } from '../agents/roster-model';
 import type { AgentConsoleController } from '../agents/use-agent-console';
 import type { AgentsController } from '../agents/use-agents';
 import {
@@ -25,6 +26,8 @@ import { MarkdownPreview } from '../markdown/markdown-preview';
 import { MarkdownToolbar } from '../markdown/markdown-toolbar';
 import type { PreviewLinkAction } from '../markdown/preview-links';
 import { type ViewModes, type ViewModesAction, viewModeFor } from '../markdown/view-modes';
+import { RunConsole } from '../runs/run-console';
+import type { RunsController } from '../runs/use-runs';
 import { RecoveryPrompt } from '../session/recovery-prompt';
 import type { SessionController } from '../session/use-session';
 import { workerStatus } from './monaco-setup';
@@ -52,6 +55,11 @@ const EXTERNAL_MESSAGES: Record<PendingExternalState, string> = {
  * DOM is a detached element the binding appends into whichever container
  * appears, so hiding the container costs nothing and disposes no model — unlike
  * the attention queue, which unmounts this pane wholesale.
+ *
+ * There are **two** consoles, one per lane (T310-U): `AgentConsole` for a
+ * session another terminal owns, `RunConsole` for a run Gritty started and can
+ * speak to. Which one is on screen is decided by the console key alone, and
+ * this pane is the only place that has to know both exist.
  */
 export function EditorPane({
   documents,
@@ -64,6 +72,8 @@ export function EditorPane({
   onRequestClose,
   onRequestCloseMany,
   agents,
+  runs,
+  rows,
   console: consoleController,
 }: {
   documents: DocumentsController;
@@ -77,6 +87,13 @@ export function EditorPane({
   onRequestCloseMany: (documentIds: readonly DocumentId[]) => void;
   /** The one shared roster; absent with no workspace open. */
   agents?: AgentsController;
+  /** The runs Gritty owns, so a run's console has a feed and a prompt box. */
+  runs?: RunsController;
+  /**
+   * The one row list the sidebar draws, reused for the tab strip's labels. It
+   * is where a console tab's name and status come from, for both lanes.
+   */
+  rows?: readonly RosterRow[];
   console?: AgentConsoleController;
 }) {
   const { state } = documents;
@@ -86,22 +103,24 @@ export function EditorPane({
   const active = activeTab(state);
   const activeEol = active ? (editor.eols[active.document.id] ?? null) : null;
 
-  // The console showing now, resolved against the one shared roster. A tab
-  // whose session has left the roster resolves to null and the reducer drops
-  // the tab on the same publish, so this is the instant in between.
+  // The console showing now, resolved against the source its own lane keeps. A
+  // tab whose session left the roster, or whose run left the workspace,
+  // resolves to null and the reducer drops the tab on the same publish, so this
+  // is the instant in between.
+  const target = consoleController?.activeTarget ?? null;
   const consoleSession =
-    consoleController?.activeId == null || agents === undefined
-      ? null
-      : (agents.roster.sessions.find((s) => s.id === consoleController.activeId) ?? null);
-  const showConsole = consoleSession !== null;
-  const agentTabs =
-    consoleController && agents
-      ? agentTabItems(
-          consoleController.openTabs,
-          consoleController.previewId,
-          agents.roster.sessions,
-        )
-      : [];
+    target?.kind === 'session' && agents !== undefined
+      ? (agents.roster.sessions.find((session) => session.id === target.sessionId) ?? null)
+      : null;
+  const consoleRun =
+    target?.kind === 'run' && runs !== undefined
+      ? (runs.runs.find((run) => run.id === target.runId) ?? null)
+      : null;
+  const showConsole = consoleSession !== null || consoleRun !== null;
+  const consoleRows = rows ?? [];
+  const agentTabs = consoleController
+    ? agentTabItems(consoleController.openTabs, consoleController.previewId, consoleRows)
+    : [];
 
   // Markdown: link outcomes and notices; the view modes come from `App`.
   const [brokenTargets, setBrokenTargets] = useState<ReadonlySet<string>>(() => new Set());
@@ -250,8 +269,18 @@ export function EditorPane({
           hidden={!showEditor}
           aria-label={active ? `Contents of ${active.document.path}` : 'Editor'}
         />
-        {showConsole && consoleSession && agents && consoleController && (
+        {consoleSession && agents && consoleController && (
           <AgentConsole session={consoleSession} controller={consoleController} agents={agents} />
+        )}
+        {consoleRun && runs && consoleController && (
+          <RunConsole
+            run={consoleRun}
+            // The workstream is the work: a run brings no task model of its
+            // own, and the row already carries the title the sidebar draws.
+            title={consoleRows.find((row) => row.key === consoleController.activeId)?.title ?? null}
+            controller={runs}
+            pending={consoleController.pendingId === consoleController.activeId}
+          />
         )}
         {showPreview && active && (
           <MarkdownPreview

@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import { Splitter } from './components/splitter';
 import { boundsWithin } from './components/splitter-geometry';
 import { core } from './core/client';
-import { agentStatus } from './features/agents/agent-status';
 import { SidebarAgents } from './features/agents/agents-section';
 import {
   askingSessions,
@@ -114,6 +113,9 @@ export function App() {
   // be wrong and why none of this needs the migration T231 priced it on.
   const agentConsole = useAgentConsole({
     agents,
+    // The runs half of the console. One controller, shared with the sidebar's
+    // rows and the editor pane, so a run cannot be in two states at once.
+    runs,
     // How a file the agent touched reaches the editor (T232). The console is
     // given the document store rather than its own way in, so opening from the
     // timeline is the same `documents.status` / `documents.open` pair the
@@ -126,21 +128,19 @@ export function App() {
   // needs-you first. Sessions are filtered to this workspace inside the model;
   // the island above stays machine-wide, which is the split that lets both
   // exist without being two rosters of the same thing.
-  // What the status bar says while a console is showing. Resolved here because
-  // `App` already holds the roster; `null` whenever a document has the pane.
-  const consoleFacts = useMemo(() => {
-    if (agentConsole.activeId === null) return null;
-    const session = agents.roster.sessions.find((item) => item.id === agentConsole.activeId);
-    if (!session) return null;
-    return {
-      label: session.rootName ?? session.id.slice(0, 7),
-      status: agentStatus(session.activity).label,
-    };
-  }, [agentConsole.activeId, agents.roster.sessions]);
   const agentRows = useMemo(
     () => rosterRows(runs.runs, agents.roster, workstreams.workstreams),
     [runs.runs, agents.roster, workstreams.workstreams],
   );
+  // What the status bar says while a console is showing, for either lane.
+  // Read off the same row the sidebar draws, so the bar and the list cannot
+  // call one agent two names; `null` whenever a document has the pane.
+  const consoleFacts = useMemo(() => {
+    const key = agentConsole.activeId;
+    if (key === null) return null;
+    const row = agentRows.find((item) => item.key === key);
+    return row ? { label: row.id, status: row.status.label } : null;
+  }, [agentConsole.activeId, agentRows]);
   // What the previous window had open, for the launcher's resume rail (T051).
   // Asked for whenever no workspace is open, which is exactly when the
   // launcher is on screen — including after the user closes one mid-run.
@@ -334,17 +334,11 @@ export function App() {
               // A row opens its console as an editor tab, exactly as a file
               // opens as one: a single click is a preview the next click
               // replaces, a double click keeps it (T041's rule, not a second).
-              selectedKey={
-                agentConsole.activeId === null ? null : `session:${agentConsole.activeId}`
-              }
-              onSelect={(row) => {
-                if (row.sessionId === null) return;
-                agentConsole.show(row.sessionId);
-              }}
-              onKeep={(row) => {
-                if (row.sessionId === null) return;
-                agentConsole.keep(row.sessionId);
-              }}
+              // The row's own key *is* the console key, for both lanes, so
+              // nothing here has to know which one a row came from (T310-U).
+              selectedKey={agentConsole.activeId}
+              onSelect={(row) => agentConsole.show(row.key)}
+              onKeep={(row) => agentConsole.keep(row.key)}
               onCancel={(runId) => void runs.cancel(runId)}
               onRescan={() => void agents.refresh()}
               busy={agents.busy}
@@ -393,6 +387,8 @@ export function App() {
             onRequestClose={closeFlow.request}
             onRequestCloseMany={closeFlow.requestMany}
             agents={agents}
+            runs={runs}
+            rows={agentRows}
             console={agentConsole}
           />
         </div>

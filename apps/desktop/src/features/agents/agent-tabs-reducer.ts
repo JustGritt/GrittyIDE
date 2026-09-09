@@ -1,4 +1,9 @@
-import type { AgentTimeline, AgentTimelineAppendedPayload, CoreError } from '@gritty/protocol';
+import type {
+  AgentRunId,
+  AgentTimeline,
+  AgentTimelineAppendedPayload,
+  CoreError,
+} from '@gritty/protocol';
 import { MAX_TIMELINE_ENTRIES } from './agent-timeline-model';
 
 /**
@@ -23,33 +28,103 @@ import { MAX_TIMELINE_ENTRIES } from './agent-timeline-model';
  *
  * Pure, so opening, previewing, switching, closing and the "the session
  * vanished" case are tested without React, a core or a DOM.
+ *
+ * **A tab is keyed on a console key, not a session id** (T310-U). A run Gritty
+ * owns is deliberately absent from the observed roster (T310-B §8), so it can
+ * never arrive here as a session and the two lanes cannot share an id space.
+ * The key says which lane the tab belongs to, and it is the same string
+ * `roster-model.ts` already mints for the sidebar row — so the row a user
+ * clicks and the tab it opens are the same identity rather than two spellings
+ * of one.
  */
+
+/**
+ * A console tab's identity: `run:<id>` or `session:<id>`.
+ *
+ * A plain string rather than a branded type, because it is a *display*
+ * identity assembled from two domains that never meet. `parseConsoleKey` is
+ * what turns it back into whichever id the caller actually needs, and it is
+ * the only thing that may.
+ */
+export type ConsoleKey = string;
+
+/** Which lane a console key names, and the id inside it. */
+export type ConsoleTarget =
+  | { readonly kind: 'run'; readonly runId: AgentRunId }
+  | { readonly kind: 'session'; readonly sessionId: string };
+
+/** The key for a run Gritty owns. Agrees with `rosterRows`, which is asserted. */
+export function runConsoleKey(runId: AgentRunId): ConsoleKey {
+  return `run:${runId}`;
+}
+
+/** The key for a session Gritty merely observes. */
+export function sessionConsoleKey(sessionId: string): ConsoleKey {
+  return `session:${sessionId}`;
+}
+
+/**
+ * The lane and id a key names, or `null` for one this build cannot read.
+ *
+ * Split on the *first* colon only, so an id containing one survives verbatim.
+ * `null` rather than a throw: a key comes from a row, and a row from a newer
+ * build could carry a prefix this one has no console for — nothing should open,
+ * and nothing should crash.
+ */
+export function parseConsoleKey(key: ConsoleKey): ConsoleTarget | null {
+  const colon = key.indexOf(':');
+  if (colon <= 0) return null;
+  const id = key.slice(colon + 1);
+  if (id === '') return null;
+  const prefix = key.slice(0, colon);
+  if (prefix === 'run') return { kind: 'run', runId: id as AgentRunId };
+  if (prefix === 'session') return { kind: 'session', sessionId: id };
+  return null;
+}
+
 export interface AgentTabsState {
-  /** Session ids with a tab, in the order they were opened. */
-  readonly open: readonly string[];
+  /** Console keys with a tab, in the order they were opened. */
+  readonly open: readonly ConsoleKey[];
   /**
    * The one tab opened for a look rather than to keep: at most one exists, and
    * opening another preview replaces it. `null` when every open tab is kept.
    * Exactly `DocumentsState.previewId`'s rule, for exactly its reason (T041).
    */
-  readonly previewId: string | null;
+  readonly previewId: ConsoleKey | null;
   /**
    * The tab showing now, or `null` when a document is showing instead.
    *
    * This one *is* applied on the click, unlike the rail's `selectedId`. A tab
    * is a control the user operates and it has to answer immediately; what must
-   * not be faked is the *timeline*, which stays `null` until the core answers.
-   * The console says "Opening…" in between rather than drawing a feed it does
-   * not have.
+   * not be faked is the *feed*, which stays absent until the core answers. The
+   * console says "Opening…" in between rather than drawing one it does not have.
    */
-  readonly activeId: string | null;
-  /** The session `openTimeline` is in flight for. */
-  readonly pendingId: string | null;
+  readonly activeId: ConsoleKey | null;
+  /**
+   * The console whose feed is being fetched: `agents.timeline` for a session,
+   * `runs.events` for a run. One at a time, because only the tab on screen has
+   * a feed at all.
+   */
+  readonly pendingId: ConsoleKey | null;
+  /**
+   * The console whose feed request has landed.
+   *
+   * It exists because "is this console's feed already here" cannot be read off
+   * `timeline` for both kinds: a run's events live in `useRuns`, not here, so a
+   * run tab would otherwise re-fetch its ring on every click of a tab that is
+   * already open. It is also what makes a *retry* work — a refusal clears it,
+   * so clicking the tab again asks again.
+   */
+  readonly loadedId: ConsoleKey | null;
   /**
    * The timeline as it stands: what `openTimeline` returned, plus every
    * `AgentTimelineAppended` delta since (T232). Never a snapshot the core
    * resent. Only the active tab has one — an inactive console is not followed,
    * because an invisible follower is waste.
+   *
+   * Always `null` for a run's tab: a run has no timeline, its feed is the
+   * event ring `useRuns` holds, and inventing one here would be the second
+   * source of truth §6 rejects.
    */
   readonly timeline: AgentTimeline | null;
   /**
@@ -66,6 +141,7 @@ export const initialAgentTabsState: AgentTabsState = {
   previewId: null,
   activeId: null,
   pendingId: null,
+  loadedId: null,
   timeline: null,
   openingPath: null,
   error: null,
@@ -76,27 +152,34 @@ export type AgentTabsAction =
    * Open a console, or activate one that is already open. `preview` is the
    * single click; a deliberate open keeps the tab.
    */
-  | { readonly type: 'open'; readonly sessionId: string; readonly preview: boolean }
+  | { readonly type: 'open'; readonly key: ConsoleKey; readonly preview: boolean }
   /** Keep a preview tab, so the next single click no longer replaces it. */
-  | { readonly type: 'keep'; readonly sessionId: string }
-  | { readonly type: 'close'; readonly sessionId: string }
+  | { readonly type: 'keep'; readonly key: ConsoleKey }
+  | { readonly type: 'close'; readonly key: ConsoleKey }
   /** A document tab was activated, so no console is showing any more. */
   | { readonly type: 'documents' }
-  | { readonly type: 'opened'; readonly sessionId: string; readonly timeline: AgentTimeline }
-  | { readonly type: 'failed'; readonly sessionId: string; readonly error: CoreError }
+  /** A session's `agents.timeline` landed. */
+  | { readonly type: 'opened'; readonly key: ConsoleKey; readonly timeline: AgentTimeline }
+  /**
+   * A run's `runs.events` call came back. It carries no feed — the log went to
+   * `useRuns`' own reducer — only whether there is one to draw, so a refusal
+   * leaves the tab retryable instead of looking loaded and empty.
+   */
+  | { readonly type: 'openedRun'; readonly key: ConsoleKey; readonly loaded: boolean }
+  | { readonly type: 'failed'; readonly key: ConsoleKey; readonly error: CoreError }
   /** An `AgentTimelineAppended` delta for whichever session it names. */
   | { readonly type: 'appended'; readonly payload: AgentTimelineAppendedPayload }
   /** A touched file was clicked: `documents.status` then `documents.open`. */
   | { readonly type: 'openingFile'; readonly path: string }
   | { readonly type: 'openedFile'; readonly path: string }
   | { readonly type: 'openFileFailed'; readonly path: string; readonly error: CoreError }
-  /** The ids the roster now carries, so a tab that left it is dropped. */
-  | { readonly type: 'roster'; readonly ids: readonly string[] }
+  /** Every console key that still has something behind it, so a stale tab goes. */
+  | { readonly type: 'roster'; readonly keys: readonly ConsoleKey[] }
   | { readonly type: 'clearError' };
 
 /** Nothing followed, nothing pending, nothing to show for it. */
 function unfollowed(state: AgentTabsState): AgentTabsState {
-  return { ...state, pendingId: null, timeline: null, openingPath: null };
+  return { ...state, pendingId: null, loadedId: null, timeline: null, openingPath: null };
 }
 
 /**
@@ -158,9 +241,9 @@ export function applyAppended(
 export function agentTabsReducer(state: AgentTabsState, action: AgentTabsAction): AgentTabsState {
   switch (action.type) {
     case 'open': {
-      const { sessionId, preview } = action;
-      const existing = state.open.includes(sessionId);
-      let open = existing ? state.open : [...state.open, sessionId];
+      const { key, preview } = action;
+      const existing = state.open.includes(key);
+      let open = existing ? state.open : [...state.open, key];
       let previewId = state.previewId;
       if (preview) {
         // Only a *new* tab can become the preview, and a deliberate open keeps
@@ -170,24 +253,25 @@ export function agentTabsReducer(state: AgentTabsState, action: AgentTabsAction)
           // A look replaces a look. Closed here rather than asynchronously the
           // way `use-documents` does it, because a console has no unsaved
           // state to protect and nothing to await.
-          if (previewId !== null && previewId !== sessionId) {
+          if (previewId !== null && previewId !== key) {
             open = open.filter((id) => id !== previewId);
           }
-          previewId = sessionId;
+          previewId = key;
         }
-      } else if (previewId === sessionId) {
+      } else if (previewId === key) {
         previewId = null;
       }
       // Activating a different console drops the previous timeline now rather
       // than when the new one lands: its follower is being closed, so keeping
       // it on screen would be a claim about a feed that has stopped.
-      const switching = state.activeId !== sessionId;
+      const switching = state.activeId !== key;
       return {
         ...state,
         open,
         previewId,
-        activeId: sessionId,
-        pendingId: sessionId,
+        activeId: key,
+        pendingId: key,
+        loadedId: switching ? null : state.loadedId,
         timeline: switching ? null : state.timeline,
         openingPath: switching ? null : state.openingPath,
         error: null,
@@ -195,13 +279,13 @@ export function agentTabsReducer(state: AgentTabsState, action: AgentTabsAction)
     }
 
     case 'keep':
-      return state.previewId === action.sessionId ? { ...state, previewId: null } : state;
+      return state.previewId === action.key ? { ...state, previewId: null } : state;
 
     case 'close': {
-      const open = state.open.filter((id) => id !== action.sessionId);
+      const open = state.open.filter((id) => id !== action.key);
       if (open.length === state.open.length) return state;
-      const previewId = state.previewId === action.sessionId ? null : state.previewId;
-      if (state.activeId !== action.sessionId) return { ...state, open, previewId };
+      const previewId = state.previewId === action.key ? null : state.previewId;
+      if (state.activeId !== action.key) return { ...state, open, previewId };
       // Closing the tab you are looking at hands the area back to the
       // documents rather than guessing at another console. The follower goes
       // with it — the hook closes it, this drops what it produced.
@@ -216,14 +300,27 @@ export function agentTabsReducer(state: AgentTabsState, action: AgentTabsAction)
     case 'opened':
       // A late answer for a tab that has already moved on is dropped;
       // `pendingId` is what says which request is still the current one.
-      if (state.pendingId !== action.sessionId) return state;
-      return { ...state, pendingId: null, timeline: action.timeline, error: null };
+      if (state.pendingId !== action.key) return state;
+      return {
+        ...state,
+        pendingId: null,
+        loadedId: action.key,
+        timeline: action.timeline,
+        error: null,
+      };
+
+    case 'openedRun':
+      if (state.pendingId !== action.key) return state;
+      // No timeline is set: a run's feed is the ring `useRuns` holds, and this
+      // only records that the console stopped waiting for it. A call that was
+      // refused leaves `loadedId` null so the next click asks again.
+      return { ...state, pendingId: null, loadedId: action.loaded ? action.key : null };
 
     case 'failed':
-      if (state.pendingId !== action.sessionId) return state;
+      if (state.pendingId !== action.key) return state;
       // The tab stays — the user opened it and it is theirs to close — but
-      // there is no timeline to pretend otherwise about.
-      return { ...state, pendingId: null, error: action.error };
+      // there is no feed to pretend otherwise about.
+      return { ...state, pendingId: null, loadedId: null, error: action.error };
 
     case 'appended': {
       // A delta for a session this console is not showing: the subscription is
@@ -250,11 +347,13 @@ export function agentTabsReducer(state: AgentTabsState, action: AgentTabsAction)
       return { ...state, openingPath: null, error: action.error };
 
     case 'roster': {
-      // A session that merely *ended* is still on the roster, so its tab stays
-      // and its feed simply stops growing — closing a tab under the pointer is
-      // worse. This is the other case: the session left the roster entirely,
-      // so there is nothing left for the tab to be about.
-      const open = state.open.filter((id) => action.ids.includes(id));
+      // A session that merely *ended* is still on the roster, and a run that
+      // merely finished is still listed, so either tab stays and its feed
+      // simply stops growing — closing a tab under the pointer is worse. This
+      // is the other case: the thing left its list entirely (a session no
+      // longer discoverable, a run whose workspace closed), so there is
+      // nothing left for the tab to be about.
+      const open = state.open.filter((id) => action.keys.includes(id));
       if (open.length === state.open.length) return state;
       const previewId =
         state.previewId !== null && open.includes(state.previewId) ? state.previewId : null;
@@ -277,7 +376,16 @@ export function agentTabsReducer(state: AgentTabsState, action: AgentTabsAction)
  *
  * The pending request wins, which is what makes "close the previous one before
  * opening the next" correct while a request is still in flight.
+ *
+ * A *run* tab follows nothing — its events arrive on the machine-wide
+ * `AgentRunEventAppended`, with no per-run subscription to open or close — so a
+ * pending run returns `null` and the caller closes whatever was open without
+ * opening anything in its place.
  */
 export function followedSession(state: AgentTabsState): string | null {
-  return state.pendingId ?? state.timeline?.sessionId ?? null;
+  if (state.pendingId !== null) {
+    const target = parseConsoleKey(state.pendingId);
+    return target?.kind === 'session' ? target.sessionId : null;
+  }
+  return state.timeline?.sessionId ?? null;
 }

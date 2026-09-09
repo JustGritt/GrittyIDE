@@ -15,9 +15,10 @@ import { type RunsController, useRuns } from './use-runs';
  * row — `RUNNING · Editing src/auth/session.ts` — feeding the same "needs you"
  * count the island already keeps, not a fourth roster beside the island, the
  * agent rail and the attention queue. That is a designed change and it has no
- * ticket yet; building it here would be taking scope rather than recording it
- * (rule 14), so this panel exists to make the manual test possible and for
- * nothing else. It sits beside `OperationsPanel` for the same reason that one
+ * ticket yet (`T300-PANEL` records it); building it here would be taking scope
+ * rather than recording it (rule 14), so this panel exists to make the manual
+ * test possible and for nothing else. Reading a run and speaking to it are no
+ * longer here at all: that is the console the sidebar opens (T310-U). It sits beside `OperationsPanel` for the same reason that one
  * does: a debug affordance earns a collapsed row, not a panel.
  *
  * Every string it draws is text the core already bounded and collapsed. None
@@ -161,46 +162,6 @@ function StartClaudeForm({
   );
 }
 
-/**
- * Say something to a run that is already running.
- *
- * The textarea clears on submit and **nothing appears in the feed** until
- * `PROMPT_STARTED` arrives — the run confirming the text, which is what
- * `--replay-user-messages` is passed for. A refusal surfaces as the panel's
- * error envelope, naming the state that is in the way.
- *
- * This is the throwaway version. The prompt box the product deserves is in the
- * agent console, below the feed, and it is T310-U's.
- */
-function PromptForm({ run, controller }: { run: AgentRun; controller: RunsController }) {
-  const [text, setText] = useState('');
-
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    setText('');
-    void controller.prompt(run.id, trimmed);
-  }
-
-  return (
-    <form className="panel__form" onSubmit={onSubmit}>
-      <label>
-        say
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="another turn…"
-          spellCheck={false}
-        />
-      </label>
-      <button type="submit" disabled={controller.busy || !text.trim()}>
-        Send
-      </button>
-    </form>
-  );
-}
-
 function RunRow({ run, controller }: { run: AgentRun; controller: RunsController }) {
   const terminal = isTerminalRun(run.state);
   const log = controller.logFor(run.id);
@@ -228,9 +189,11 @@ function RunRow({ run, controller }: { run: AgentRun; controller: RunsController
           {run.error.code}: {run.error.message}
         </p>
       )}
-      {/* Only a run with a process behind it can be spoken to. A greyed-out
-          box on a fake would imply a channel that does not exist. */}
-      {!terminal && run.provider !== 'FAKE' && <PromptForm run={run} controller={controller} />}
+      {/* Speaking to a run is the console's (T310-U) — click the run's row in
+          the sidebar's Agents section. The throwaway box that used to sit here
+          is gone rather than kept beside it: two prompt surfaces with different
+          rules about what may be sent is exactly the confusion a dev panel
+          should not add. */}
       <RunEvents runId={run.id} log={log} onOpen={controller.openEvents} />
       <p className="ops__meta">
         started {formatTime(run.startedAt)}
@@ -251,7 +214,7 @@ function RunEvents({
 }: {
   runId: AgentRunId;
   log: RunLog;
-  onOpen: (runId: AgentRunId) => Promise<void>;
+  onOpen: (runId: AgentRunId) => Promise<unknown>;
 }) {
   const [opened, setOpened] = useState(false);
   return (

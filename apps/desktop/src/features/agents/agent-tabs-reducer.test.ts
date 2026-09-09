@@ -1,4 +1,5 @@
 import {
+  type AgentRunId,
   type AgentTimeline,
   type AgentTimelineAppendedPayload,
   type AgentTimelineEntry,
@@ -12,6 +13,9 @@ import {
   applyAppended,
   followedSession,
   initialAgentTabsState,
+  parseConsoleKey,
+  runConsoleKey,
+  sessionConsoleKey,
 } from './agent-tabs-reducer';
 import { MAX_TIMELINE_ENTRIES } from './agent-timeline-model';
 
@@ -59,10 +63,17 @@ function run(...actions: readonly AgentTabsAction[]): AgentTabsState {
 
 /** Open one console and let its timeline land — the ordinary path. */
 function showing(sessionId: string, preview = true): AgentTabsState {
+  const key = sessionConsoleKey(sessionId);
   return run(
-    { type: 'open', sessionId, preview },
-    { type: 'opened', sessionId, timeline: timeline(sessionId) },
+    { type: 'open', key, preview },
+    { type: 'opened', key, timeline: timeline(sessionId) },
   );
+}
+
+/** Open a run's console and let its `runs.events` call land. */
+function showingRun(runId: string, preview = true): AgentTabsState {
+  const key = runConsoleKey(runId as AgentRunId);
+  return run({ type: 'open', key, preview }, { type: 'openedRun', key, loaded: true });
 }
 
 describe('agent console tabs', () => {
@@ -75,15 +86,15 @@ describe('agent console tabs', () => {
   it('activates the tab on the click but shows no feed until the core answers', () => {
     // A tab is a control and has to answer at once; the timeline is the thing
     // that must not be faked.
-    const opening = run({ type: 'open', sessionId: 's1', preview: true });
-    expect(opening.activeId).toBe('s1');
-    expect(opening.open).toEqual(['s1']);
-    expect(opening.pendingId).toBe('s1');
+    const opening = run({ type: 'open', key: sessionConsoleKey('s1'), preview: true });
+    expect(opening.activeId).toBe(sessionConsoleKey('s1'));
+    expect(opening.open).toEqual([sessionConsoleKey('s1')]);
+    expect(opening.pendingId).toBe(sessionConsoleKey('s1'));
     expect(opening.timeline).toBeNull();
 
     const open = agentTabsReducer(opening, {
       type: 'opened',
-      sessionId: 's1',
+      key: sessionConsoleKey('s1'),
       timeline: timeline('s1'),
     });
     expect(open.timeline?.sessionId).toBe('s1');
@@ -93,34 +104,34 @@ describe('agent console tabs', () => {
   describe("preview semantics, exactly a file's (T041)", () => {
     it('replaces the previous preview rather than accumulating tabs', () => {
       const state = run(
-        { type: 'open', sessionId: 's1', preview: true },
-        { type: 'open', sessionId: 's2', preview: true },
+        { type: 'open', key: sessionConsoleKey('s1'), preview: true },
+        { type: 'open', key: sessionConsoleKey('s2'), preview: true },
       );
-      expect(state.open).toEqual(['s2']);
-      expect(state.previewId).toBe('s2');
+      expect(state.open).toEqual([sessionConsoleKey('s2')]);
+      expect(state.previewId).toBe(sessionConsoleKey('s2'));
     });
 
     it('keeps a tab on the second, deliberate open', () => {
       // The double click fires its single click first, so this is the order
       // that actually arrives.
       const state = run(
-        { type: 'open', sessionId: 's1', preview: true },
-        { type: 'keep', sessionId: 's1' },
-        { type: 'open', sessionId: 's2', preview: true },
+        { type: 'open', key: sessionConsoleKey('s1'), preview: true },
+        { type: 'keep', key: sessionConsoleKey('s1') },
+        { type: 'open', key: sessionConsoleKey('s2'), preview: true },
       );
-      expect(state.open).toEqual(['s1', 's2']);
-      expect(state.previewId).toBe('s2');
+      expect(state.open).toEqual([sessionConsoleKey('s1'), sessionConsoleKey('s2')]);
+      expect(state.previewId).toBe(sessionConsoleKey('s2'));
     });
 
     it('does not make an open tab a preview by clicking it again', () => {
       const state = run(
-        { type: 'open', sessionId: 's1', preview: true },
-        { type: 'keep', sessionId: 's1' },
-        { type: 'open', sessionId: 's2', preview: true },
-        { type: 'open', sessionId: 's1', preview: true },
+        { type: 'open', key: sessionConsoleKey('s1'), preview: true },
+        { type: 'keep', key: sessionConsoleKey('s1') },
+        { type: 'open', key: sessionConsoleKey('s2'), preview: true },
+        { type: 'open', key: sessionConsoleKey('s1'), preview: true },
       );
-      expect(state.previewId).toBe('s2');
-      expect(state.open).toEqual(['s1', 's2']);
+      expect(state.previewId).toBe(sessionConsoleKey('s2'));
+      expect(state.open).toEqual([sessionConsoleKey('s1'), sessionConsoleKey('s2')]);
     });
   });
 
@@ -129,33 +140,33 @@ describe('agent console tabs', () => {
     // about a feed that has stopped.
     const state = agentTabsReducer(showing('s1', false), {
       type: 'open',
-      sessionId: 's2',
+      key: sessionConsoleKey('s2'),
       preview: true,
     });
-    expect(state.activeId).toBe('s2');
+    expect(state.activeId).toBe(sessionConsoleKey('s2'));
     expect(state.timeline).toBeNull();
-    expect(state.pendingId).toBe('s2');
+    expect(state.pendingId).toBe(sessionConsoleKey('s2'));
   });
 
   it('ignores an answer for a console that has already moved on', () => {
     const state = run(
-      { type: 'open', sessionId: 's1', preview: false },
-      { type: 'open', sessionId: 's2', preview: false },
-      { type: 'opened', sessionId: 's1', timeline: timeline('s1') },
+      { type: 'open', key: sessionConsoleKey('s1'), preview: false },
+      { type: 'open', key: sessionConsoleKey('s2'), preview: false },
+      { type: 'opened', key: sessionConsoleKey('s1'), timeline: timeline('s1') },
     );
     expect(state.timeline).toBeNull();
-    expect(state.pendingId).toBe('s2');
+    expect(state.pendingId).toBe(sessionConsoleKey('s2'));
   });
 
   it('keeps the tab but shows no feed when the core refuses', () => {
     const state = run(
-      { type: 'open', sessionId: 's1', preview: true },
-      { type: 'failed', sessionId: 's1', error: refusal },
+      { type: 'open', key: sessionConsoleKey('s1'), preview: true },
+      { type: 'failed', key: sessionConsoleKey('s1'), error: refusal },
     );
     // The user opened the tab and it is theirs to close; what is absent is the
     // feed, not the tab.
-    expect(state.open).toEqual(['s1']);
-    expect(state.activeId).toBe('s1');
+    expect(state.open).toEqual([sessionConsoleKey('s1')]);
+    expect(state.activeId).toBe(sessionConsoleKey('s1'));
     expect(state.timeline).toBeNull();
     expect(state.error?.code).toBe('NotFound');
   });
@@ -166,11 +177,14 @@ describe('agent console tabs', () => {
       expect(state.activeId).toBeNull();
       expect(state.timeline).toBeNull();
       // The tab stays open: it was not closed, it is just not on screen.
-      expect(state.open).toEqual(['s1']);
+      expect(state.open).toEqual([sessionConsoleKey('s1')]);
     });
 
     it('shows the documents again when the active console is closed', () => {
-      const state = agentTabsReducer(showing('s1'), { type: 'close', sessionId: 's1' });
+      const state = agentTabsReducer(showing('s1'), {
+        type: 'close',
+        key: sessionConsoleKey('s1'),
+      });
       expect(state.open).toEqual([]);
       expect(state.activeId).toBeNull();
       expect(state.timeline).toBeNull();
@@ -178,20 +192,23 @@ describe('agent console tabs', () => {
 
     it('leaves the shown console alone when another tab is closed', () => {
       const state = run(
-        { type: 'open', sessionId: 's1', preview: false },
-        { type: 'open', sessionId: 's2', preview: false },
-        { type: 'opened', sessionId: 's2', timeline: timeline('s2') },
-        { type: 'close', sessionId: 's1' },
+        { type: 'open', key: sessionConsoleKey('s1'), preview: false },
+        { type: 'open', key: sessionConsoleKey('s2'), preview: false },
+        { type: 'opened', key: sessionConsoleKey('s2'), timeline: timeline('s2') },
+        { type: 'close', key: sessionConsoleKey('s1') },
       );
-      expect(state.open).toEqual(['s2']);
-      expect(state.activeId).toBe('s2');
+      expect(state.open).toEqual([sessionConsoleKey('s2')]);
+      expect(state.activeId).toBe(sessionConsoleKey('s2'));
       expect(state.timeline?.sessionId).toBe('s2');
     });
   });
 
   describe('a session leaving the roster', () => {
     it('closes its tab', () => {
-      const state = agentTabsReducer(showing('s1'), { type: 'roster', ids: ['s2'] });
+      const state = agentTabsReducer(showing('s1'), {
+        type: 'roster',
+        keys: [sessionConsoleKey('s2')],
+      });
       expect(state.open).toEqual([]);
       expect(state.activeId).toBeNull();
       expect(state.timeline).toBeNull();
@@ -200,26 +217,126 @@ describe('agent console tabs', () => {
     it('keeps a session that merely ended, because it is still listed', () => {
       // Its feed stops growing, which is what happened. Closing the tab under
       // the pointer would be worse.
-      const state = agentTabsReducer(showing('s1'), { type: 'roster', ids: ['s1'] });
-      expect(state.open).toEqual(['s1']);
+      const state = agentTabsReducer(showing('s1'), {
+        type: 'roster',
+        keys: [sessionConsoleKey('s1')],
+      });
+      expect(state.open).toEqual([sessionConsoleKey('s1')]);
       expect(state.timeline?.sessionId).toBe('s1');
     });
 
     it('leaves an unrelated tab showing', () => {
       const state = run(
-        { type: 'open', sessionId: 's1', preview: false },
-        { type: 'open', sessionId: 's2', preview: false },
-        { type: 'opened', sessionId: 's2', timeline: timeline('s2') },
-        { type: 'roster', ids: ['s2'] },
+        { type: 'open', key: sessionConsoleKey('s1'), preview: false },
+        { type: 'open', key: sessionConsoleKey('s2'), preview: false },
+        { type: 'opened', key: sessionConsoleKey('s2'), timeline: timeline('s2') },
+        { type: 'roster', keys: [sessionConsoleKey('s2')] },
       );
-      expect(state.open).toEqual(['s2']);
-      expect(state.activeId).toBe('s2');
+      expect(state.open).toEqual([sessionConsoleKey('s2')]);
+      expect(state.activeId).toBe(sessionConsoleKey('s2'));
+    });
+  });
+
+  describe('a run Gritty owns is a tab here too (T310-U)', () => {
+    it('mints a key the two lanes cannot collide in', () => {
+      expect(parseConsoleKey(runConsoleKey('run-1' as AgentRunId))).toEqual({
+        kind: 'run',
+        runId: 'run-1',
+      });
+      expect(parseConsoleKey(sessionConsoleKey('run-1'))).toEqual({
+        kind: 'session',
+        sessionId: 'run-1',
+      });
+      // A uuid with a colon in it is not a thing, but an id is opaque and the
+      // split must not eat one: everything after the first colon is the id.
+      expect(parseConsoleKey('session:a:b')).toEqual({ kind: 'session', sessionId: 'a:b' });
+    });
+
+    it('reads nothing out of a key from a lane this build has no console for', () => {
+      // `null`, never a throw: the row it came from was drawn by a newer build,
+      // and nothing should open rather than something crashing.
+      expect(parseConsoleKey('worktree:w1')).toBeNull();
+      expect(parseConsoleKey('session:')).toBeNull();
+      expect(parseConsoleKey('nocolon')).toBeNull();
+      expect(parseConsoleKey(':orphan')).toBeNull();
+    });
+
+    it('opens without a timeline, because a run has none', () => {
+      const state = showingRun('r1');
+      expect(state.activeId).toBe(runConsoleKey('r1' as AgentRunId));
+      // Its feed is the ring `useRuns` holds. A timeline here would be the
+      // second source of truth §6 rejects.
+      expect(state.timeline).toBeNull();
+      expect(state.pendingId).toBeNull();
+      expect(state.loadedId).toBe(runConsoleKey('r1' as AgentRunId));
+    });
+
+    it('follows no session while a run console is opening', () => {
+      // There is no per-run follower to open or close: the events arrive on the
+      // machine-wide `AgentRunEventAppended` the runs controller subscribes to.
+      const opening = run({ type: 'open', key: runConsoleKey('r1' as AgentRunId), preview: true });
+      expect(followedSession(opening)).toBeNull();
+    });
+
+    it('leaves a refused open retryable rather than loaded and empty', () => {
+      const key = runConsoleKey('r1' as AgentRunId);
+      const state = run(
+        { type: 'open', key, preview: true },
+        { type: 'openedRun', key, loaded: false },
+      );
+      expect(state.pendingId).toBeNull();
+      // `loadedId` is what `show` checks before deciding a second click is a
+      // no-op, so a refusal has to leave it clear.
+      expect(state.loadedId).toBeNull();
+    });
+
+    it('shares one pane with the sessions: opening a run closes the session feed', () => {
+      const state = agentTabsReducer(showing('s1', false), {
+        type: 'open',
+        key: runConsoleKey('r1' as AgentRunId),
+        preview: true,
+      });
+      expect(state.timeline).toBeNull();
+      expect(state.loadedId).toBeNull();
+      expect(state.open).toEqual([sessionConsoleKey('s1'), runConsoleKey('r1' as AgentRunId)]);
+    });
+
+    it('replaces a session preview, because a preview is a preview', () => {
+      const state = run(
+        { type: 'open', key: sessionConsoleKey('s1'), preview: true },
+        { type: 'open', key: runConsoleKey('r1' as AgentRunId), preview: true },
+      );
+      expect(state.open).toEqual([runConsoleKey('r1' as AgentRunId)]);
+    });
+
+    it('closes its tab when the run leaves the list, and keeps it when it merely ended', () => {
+      const key = runConsoleKey('r1' as AgentRunId);
+      // A finished run is still listed, so the tab stays and the feed simply
+      // stops growing.
+      expect(agentTabsReducer(showingRun('r1'), { type: 'roster', keys: [key] }).open).toEqual([
+        key,
+      ]);
+      // The workspace closed: `useRuns` empties, and there is nothing left for
+      // the tab to be about.
+      const gone = agentTabsReducer(showingRun('r1'), { type: 'roster', keys: [] });
+      expect(gone.open).toEqual([]);
+      expect(gone.activeId).toBeNull();
+      expect(gone.loadedId).toBeNull();
+    });
+
+    it('ignores a timeline delta while a run is showing', () => {
+      const base = showingRun('r1');
+      expect(
+        agentTabsReducer(base, { type: 'appended', payload: batch('s1', [said(1, 'x')]) }),
+      ).toBe(base);
     });
   });
 
   it('names the session the core is following, pending or settled', () => {
     expect(followedSession(initialAgentTabsState)).toBeNull();
-    expect(followedSession(run({ type: 'open', sessionId: 's1', preview: true }))).toBe('s1');
+    expect(
+      followedSession(run({ type: 'open', key: sessionConsoleKey('s1'), preview: true })),
+    ).toBe('s1');
     expect(followedSession(showing('s1'))).toBe('s1');
     expect(followedSession(agentTabsReducer(showing('s1'), { type: 'documents' }))).toBeNull();
   });
@@ -263,8 +380,8 @@ describe('agent console tabs', () => {
 
   it('leaves a newer open alone when an older one finally answers', () => {
     const state = run(
-      { type: 'open', sessionId: 's1', preview: false },
-      { type: 'opened', sessionId: 's1', timeline: timeline('s1') },
+      { type: 'open', key: sessionConsoleKey('s1'), preview: false },
+      { type: 'opened', key: sessionConsoleKey('s1'), timeline: timeline('s1') },
       { type: 'openingFile', path: 'src/a.ts' },
       { type: 'openingFile', path: 'src/b.ts' },
       { type: 'openedFile', path: 'src/a.ts' },
@@ -275,9 +392,9 @@ describe('agent console tabs', () => {
   it('returns the same state for a no-op, so React does not re-render', () => {
     const base = showing('s1');
     expect(agentTabsReducer(base, { type: 'clearError' })).toBe(base);
-    expect(agentTabsReducer(base, { type: 'close', sessionId: 'nobody' })).toBe(base);
-    expect(agentTabsReducer(base, { type: 'keep', sessionId: 'nobody' })).toBe(base);
-    expect(agentTabsReducer(base, { type: 'roster', ids: ['s1'] })).toBe(base);
+    expect(agentTabsReducer(base, { type: 'close', key: sessionConsoleKey('nobody') })).toBe(base);
+    expect(agentTabsReducer(base, { type: 'keep', key: sessionConsoleKey('nobody') })).toBe(base);
+    expect(agentTabsReducer(base, { type: 'roster', keys: [sessionConsoleKey('s1')] })).toBe(base);
   });
 });
 

@@ -32,8 +32,14 @@ export interface RunsController {
    */
   prompt(runId: AgentRunId, text: string): Promise<void>;
   cancel(runId: AgentRunId): Promise<void>;
-  /** Fetch one run's events once, so an expanded row starts from the ring. */
-  openEvents(runId: AgentRunId): Promise<void>;
+  /**
+   * Fetch one run's events once, so an opened console starts from the ring.
+   *
+   * Resolves `true` when the log landed. The console needs the answer rather
+   * than the log: a refusal must leave its tab retryable instead of looking
+   * loaded and empty, and the refusal itself is already on `error`.
+   */
+  openEvents(runId: AgentRunId): Promise<boolean>;
   logFor(runId: AgentRunId): RunLog;
 }
 
@@ -155,7 +161,9 @@ export function useRuns(workspace: Workspace | null): RunsController {
   const openEvents = useCallback(
     async (runId: AgentRunId) => {
       const log = await run(() => core.runs.events({ runId }));
-      if (log) dispatch({ type: 'log', log });
+      if (!log) return false;
+      dispatch({ type: 'log', log });
+      return true;
     },
     [run],
   );

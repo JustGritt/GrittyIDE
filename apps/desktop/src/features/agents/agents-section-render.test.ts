@@ -138,12 +138,11 @@ describe('the section draws both kinds of agent', () => {
     expect(render([], [session()])).not.toContain('agents-section__cancel');
   });
 
-  it('makes an observed row a button and an owned row not, for now', () => {
-    // A session has a timeline to open; a run has no console until T233-C, and
-    // a row that looks clickable and does nothing is worse than one that does
-    // not look clickable.
+  it('makes every row a button, because both lanes now open a console', () => {
+    // T310-U: a session has a timeline to open and a run has its event ring, so
+    // there is no longer a row that looks like a list item and does nothing.
     expect(render([], [session()])).toContain('<button type="button" class="agents-section__pick"');
-    expect(render([run()], [])).toContain('agents-section__pick--static');
+    expect(render([run()], [])).toContain('<button type="button" class="agents-section__pick"');
   });
 
   it('says the status in words, not only in a colour', () => {

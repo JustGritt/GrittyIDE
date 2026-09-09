@@ -229,9 +229,11 @@ count is what lets a client tell a real gap from a delivery failure.
 
 ### The panel is the throwaway version
 
-`apps/desktop/src/features/runs/` is a DEV-only collapsed row beside the
-operations panel: start a scripted run, watch its state and activity, cancel
-it, read its events. It exists to make the manual test possible.
+`runs-panel.tsx` is a DEV-only collapsed row beside the operations panel:
+start a scripted run or a real one, watch its state and activity, cancel it,
+read its events. It exists to make the manual test possible. Reading a run
+properly, and speaking to it, are no longer there at all — that is the console
+below (T310-U), reached by clicking the run's row in the sidebar.
 
 The surface an owned run actually deserves is **a second line on its
 workstream's island row** — `RUNNING · Editing src/auth/session.ts` — feeding
@@ -240,3 +242,43 @@ workstream, so a fourth roster beside the island, the agent rail and the
 attention queue would break the one-roster-one-count rule those three already
 follow, and would give T410 two queues to aggregate instead of one. That is a
 designed change with no ticket yet; it is recorded rather than taken.
+
+## The console, and the one thing that crosses (T310-U)
+
+An owned run is drawn in the editor area, beside the consoles for the sessions
+Gritty merely watches, and it is the only place in the app where a user speaks
+*to* an agent.
+
+Everything about the boundary above survives that, because exactly one string
+crosses it: a **console key**, `run:<id>` or `session:<id>`, which
+`roster-model.ts` already minted for the sidebar row and which the tab reducer
+takes apart again. It is a display identity, not a domain one. Nothing merges:
+`agent_run` and `agent_session` still never import each other in the core, the
+two consoles are two components, and each reads only its own lane's source —
+`AgentConsole` a timeline the core follows, `RunConsole` the event ring the core
+recorded. The key is what lets one tab strip, one preview rule and one "at most
+one feed is open" rule serve both without either lane learning the other exists.
+
+Three asymmetries are deliberate and are the reason it is two components:
+
+- **A session has a follower; a run does not.** `agents.openTimeline` /
+  `closeTimeline` open and close a per-session tail. A run's events arrive on
+  the machine-wide `AgentRunEventAppended` a client is already subscribed to, so
+  opening its console fetches `runs.events` once and closes nothing.
+- **The feed is the ring, never the transcript.** The child writes an ordinary
+  transcript and repointing the session follower at it would give a richer feed
+  for free. Rejected: the console and the run's own state could then disagree,
+  which is the inspectability failure the run machine exists to prevent. What is
+  lost — thinking blocks, per-tool detail — is the price, and changing it is an
+  ADR rather than a quiet re-wiring.
+- **Only a run gets a prompt box.** An observed session's console has none and
+  no disabled one either: there is nothing to enable, and a greyed-out control
+  implies a permission the user could acquire. A scripted run gets none for the
+  same reason — `runs.prompt` refuses it, and no waiting opens a channel that
+  does not exist.
+
+The box disables against `AgentRunState::accepts_input` (`RUNNING` and
+`WAITING`), mirroring the six edges `AgentRunManager::prompt` refuses at, and it
+is **never optimistic**: what was typed reaches the feed when `PROMPT_STARTED`
+arrives, which is the run confirming it, and is why the adapter passes
+`--replay-user-messages`.

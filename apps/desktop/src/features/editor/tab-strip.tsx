@@ -60,14 +60,18 @@ export function TabStrip({
   /** Close a list of documents in order, asking about each unsaved one. */
   onCloseMany: (documentIds: readonly DocumentId[]) => void;
   onReorder: (documentId: DocumentId, toIndex: number) => void;
-  /** The open agent consoles. Absent with no workspace, and then there are none. */
+  /**
+   * The open agent consoles — sessions Gritty watches and runs it owns alike.
+   * Absent with no workspace, and then there are none. The strip is handed
+   * opaque console keys and never learns which lane one belongs to.
+   */
   agents?: {
     readonly items: readonly AgentTabItem[];
     /** Non-null while a console is showing, which is what deactivates the documents. */
     readonly activeId: string | null;
-    onActivate: (sessionId: string) => void;
-    onPromote: (sessionId: string) => void;
-    onClose: (sessionId: string) => void;
+    onActivate: (key: string) => void;
+    onPromote: (key: string) => void;
+    onClose: (key: string) => void;
   };
 }) {
   const [dragging, setDragging] = useState<DocumentId | null>(null);
@@ -184,10 +188,10 @@ export function TabStrip({
         );
       })}
       {agentItems.map((item) => {
-        const isActive = item.sessionId === agents?.activeId;
+        const isActive = item.id === agents?.activeId;
         return (
           <div
-            key={`agent:${item.sessionId}`}
+            key={item.id}
             role="presentation"
             className={`tabs__item tabs__item--agent${isActive ? ' tabs__item--active' : ''}`}
           >
@@ -201,10 +205,10 @@ export function TabStrip({
                   ? `${item.label} — ${item.hint} — preview, double-click to keep`
                   : `${item.label} — ${item.hint}`
               }
-              onClick={() => agents?.onActivate(item.sessionId)}
-              onDoubleClick={() => agents?.onPromote(item.sessionId)}
+              onClick={() => agents?.onActivate(item.id)}
+              onDoubleClick={() => agents?.onPromote(item.id)}
               onAuxClick={(event) => {
-                if (event.button === 1) agents?.onClose(item.sessionId);
+                if (event.button === 1) agents?.onClose(item.id);
               }}
             >
               {/* The status mark stands where a document's unsaved dot stands,
@@ -222,7 +226,7 @@ export function TabStrip({
               type="button"
               className="tabs__close"
               aria-label={`Close the ${item.label} agent console`}
-              onClick={() => agents?.onClose(item.sessionId)}
+              onClick={() => agents?.onClose(item.id)}
             >
               ×
             </button>

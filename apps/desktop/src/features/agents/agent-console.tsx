@@ -1,8 +1,10 @@
 import type { AgentSession } from '@gritty/protocol';
 import { ErrorEnvelope } from '../../components/error-envelope';
 import { activitySourceLabel, agentStatus, providerLabel } from './agent-status';
+import type { ConsoleKey } from './agent-tabs-reducer';
 import { AgentTimelinePanel } from './agent-timeline';
 import { taskLine } from './agents-reducer';
+import type { RosterRow } from './roster-model';
 import type { AgentConsoleController } from './use-agent-console';
 import type { AgentsController } from './use-agents';
 
@@ -24,7 +26,10 @@ import type { AgentsController } from './use-agents';
  *
  * Read-only, still. Every session here is one another terminal owns; nothing
  * here starts or stops one. The single exception is answering a permission
- * prompt, which the feed carries and ADR-020 licenses.
+ * prompt, which the feed carries and ADR-020 licenses. In particular there is
+ * **no prompt box** here and no disabled one either (T310-U §9): there is
+ * nothing to enable, and a greyed-out control would imply a permission the user
+ * could acquire. Speaking to an agent is `RunConsole`'s, in the other lane.
  */
 export function AgentConsole({
   session,
@@ -98,17 +103,17 @@ export function AgentConsole({
 /**
  * One console's tab, as the strip needs it.
  *
- * A view model rather than an `AgentSession`, so the tab strip never learns
- * what a session is: it is handed a label, a tone and a preview flag, exactly
- * the shape it already derives for a document.
+ * A view model rather than a session or a run, so the tab strip never learns
+ * what either is: it is handed a key, a label, a tone and a preview flag,
+ * exactly the shape it already derives for a document.
  */
 export interface AgentTabItem {
-  readonly sessionId: string;
+  /** The console this tab activates — `run:<id>` or `session:<id>`. */
+  readonly id: ConsoleKey;
   /**
-   * The session's folder rather than its id: an id is a uuid nobody reads, and
-   * the folder is what the roster groups by and what the user recognises. A
-   * short id stands in when the working directory was never seen — a session
-   * found by transcript alone has no `rootName`.
+   * What the sidebar row calls the same thing: a session's folder, a run's
+   * short id. Taken from the row rather than re-derived, so the list a user
+   * clicks in and the tab it opens cannot end up calling one agent two names.
    */
   readonly label: string;
   readonly tone: string;
@@ -117,29 +122,33 @@ export interface AgentTabItem {
 }
 
 /**
- * The open consoles, in tab order, resolved against the one shared roster.
+ * The open consoles, in tab order, resolved against the one shared row list.
  *
- * A tab whose session has left the roster is dropped here as well as in the
- * reducer: the roster is what a label and a status come from, and a tab that
- * could only be drawn as a bare id is worse than one that is gone.
+ * `RosterRow` rather than `AgentSession`, because a tab is now either lane's
+ * (T310-U) and that projection is the one place the two are already drawn side
+ * by side. Nothing about the domains is merged by this: a row is what a row
+ * *says*, its `key` is the console key, and the tab strip gets strings.
+ *
+ * A tab whose row has gone is dropped here as well as in the reducer: the row
+ * is what a label and a status come from, and a tab that could only be drawn as
+ * a bare id is worse than one that is gone.
  */
 export function agentTabItems(
-  openTabs: readonly string[],
-  previewId: string | null,
-  sessions: readonly AgentSession[],
+  openTabs: readonly ConsoleKey[],
+  previewId: ConsoleKey | null,
+  rows: readonly RosterRow[],
 ): AgentTabItem[] {
-  const byId = new Map(sessions.map((session) => [session.id, session]));
+  const byKey = new Map(rows.map((row) => [row.key, row]));
   const items: AgentTabItem[] = [];
-  for (const sessionId of openTabs) {
-    const session = byId.get(sessionId);
-    if (!session) continue;
-    const status = agentStatus(session.activity);
+  for (const key of openTabs) {
+    const row = byKey.get(key);
+    if (!row) continue;
     items.push({
-      sessionId,
-      label: session.rootName ?? sessionId.slice(0, 7),
-      tone: status.tone,
-      hint: `${status.label} — ${status.hint}`,
-      preview: sessionId === previewId,
+      id: key,
+      label: row.id,
+      tone: row.status.tone,
+      hint: `${row.status.label} — ${row.status.hint}`,
+      preview: key === previewId,
     });
   }
   return items;
