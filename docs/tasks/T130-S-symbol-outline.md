@@ -123,4 +123,85 @@ pnpm check
 
 ## Completion report
 
-*(filled on completion)*
+### Summary
+
+`outline.ts`: `outlineOf(languageId, text) -> OutlineResult` and
+`hasOutlineRules(languageId)`, plus `OUTLINE_LIMIT = 1000` and a 4 MiB markdown
+input cap. Markdown reuses `@gritty/markdown`'s block parser, so there is no
+second heading parser; Rust and TS/JS are a bounded, index-based line walk.
+
+### Files changed
+
+| File | Why |
+|---|---|
+| `apps/desktop/src/features/quick-open/outline.ts` | New. The extractor. |
+| `apps/desktop/src/features/quick-open/outline.test.ts` | New. 23 table tests. |
+| `apps/desktop/src/features/quick-open/quick-open-types.ts` | Shared seam, written before the parallel work started. |
+| `apps/desktop/src/features/quick-open/quick-open-model.ts` | `OutlineState.ready` gained `truncated` — see *the defect* below. |
+
+### Tests actually executed
+
+`pnpm exec vitest run --project desktop apps/desktop/src/features/quick-open` —
+**102 passed, 5 files** (23 of them this module's). `biome check` on the
+directory clean; `pnpm --filter @gritty/desktop typecheck` clean. The whole JS
+gate is green including this work: biome 302 files, **vitest 1060 passed**.
+
+`pnpm check` overall is red at `cargo fmt --all --check` on another lane's
+uncommitted `crates/gritty-core/src/settings/**`, which is inside their live
+lease and not touched here.
+
+### Architectural decisions
+
+**Markdown's block parser, with the inline chain switched off.** Reuse was the
+instruction, and it paid twice: fences, `~~~`, indented code and setext edge
+cases are markdown-it's, so the outline and the preview cannot disagree. But the
+inline tokenizer is superlinear on adversarial input, which is hard rule 13
+territory for repository content. Measured:
+
+| input | full parse | block-only |
+|---|---|---|
+| 1 MB of `![` | **5,528 ms** | **7 ms** |
+| 1 MB of `[` | 2,800 ms | 5 ms |
+| 8 MB / 200k-line doc | 3,145 ms | 183 ms |
+
+So blocks give structure, and the reused `inlineText` runs only over each
+heading's own source, capped at 512 chars. Two timing guards in the suite fail
+if the inline chain is ever switched back on.
+
+**`OutlineResult`, not a bare array.** `{ supported, truncated, entries }` plus
+`hasOutlineRules`, because "this language has no rules" and "this file has no
+entries" are different facts and the row model must say different things. The
+suite asserts `result.supported === hasOutlineRules(languageId)`.
+
+### The defect the split created, and the fix
+
+Each agent was correctly scoped to its own files, and the bug lived exactly
+between them: `OutlineState`'s `ready` arm had nowhere to carry `truncated`, and
+the symbols branch hardcoded `capped('symbols', rows, false)`. An outline cut
+short at `OUTLINE_LIMIT` would have rendered as complete — requirement 4 of
+T130-U (the quick-open bar) is not scoped to the files mode. Fixed by adding
+`truncated` to the ready arm and passing it through; the type change made the
+two stale test fixtures a compile error rather than a silent pass, which is why
+it was caught.
+
+### Known limitations
+
+- **Nothing here knows what a name means.** A keyword inside a string literal or
+  a block comment is an entry; only a line *starting* `//`, `/*` or `*` is
+  skipped.
+- **Declarations split across lines are missed** — notably
+  `const f = (\n  a,\n) => …`, since the arrow test is same-line.
+- Macro-generated Rust items, associated consts/types inside an `impl`, object
+  literal methods and class members are not listed. Code entries are flat
+  (`depth: 0`); only Markdown nests.
+- Markdown beyond 4 MiB is parsed to the last line boundary before the cut;
+  later headings are absent and `truncated` says so.
+- Two markdown-it instances are memoised at module scope for the process
+  lifetime — the preview does the same.
+
+### Follow-up tasks
+
+| Ticket | Why |
+|---|---|
+| LSP symbols replacing this | The honest ceiling of a regex outline. This module is one file precisely so it can be swapped out. |
+| Code-splitting note | Quick open now imports `@gritty/markdown`, hence markdown-it and transitively dompurify. The desktop bundle already carries both for the preview, so nothing is added today — but splitting the palette from the preview would pull that chunk along. |

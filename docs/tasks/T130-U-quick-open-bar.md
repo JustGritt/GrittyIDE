@@ -171,4 +171,97 @@ pnpm check
 
 ## Completion report
 
-*(filled on completion)*
+### Summary — the wire-free half only
+
+Four pure modules and their tests: the prefix parser, the row model, the keymap
+and the command array. **The component, the controller, the render test, the dom
+test and the mount are not built**, because all five need
+`workspace.findFiles` — T130-C (the quick-open contract), which is still behind
+another lane's protocol lease. This ticket stays at review as a half, and says so
+rather than reading as finished.
+
+### Files changed
+
+All new, in `apps/desktop/src/features/quick-open/`:
+
+| File | What |
+|---|---|
+| `quick-open-parser.ts` | `parseQuery`, and `QUICK_OPEN_PREFIX` as a `Record<QuickOpenMode, string>` so adding a mode is a compile error until it decides whether it has a prefix |
+| `quick-open-model.ts` | `quickOpenList(state)`, the total union, seven named empty reasons, four row kinds, `parseLineTarget` |
+| `quick-open-keymap.ts` | `quickOpenIntentFor(chord)` over a structural chord; `null` for unclaimed keys |
+| `quick-open-commands.ts` | `quickOpenCommands(deps): readonly QuickCommand[]`, four real entries |
+| `quick-open-types.ts` | The seam frozen before the parallel work started |
+| four `*.test.ts` | 79 tests: parser 15, model 38, keymap 14, commands 12 |
+
+### Tests actually executed
+
+`pnpm exec vitest run --project desktop apps/desktop/src/features/quick-open` —
+**102 passed, 5 files** (79 this ticket's, 23 T130-S's). biome clean; typecheck
+clean. Whole JS gate green: biome 302 files, typecheck done, **vitest 1060
+passed / 102 files**. `pnpm check` overall red at `cargo fmt --all --check` on
+another lane's uncommitted settings crate.
+
+### Architectural decisions
+
+**No registry, as the non-goals require.** `quickOpenCommands(deps)` is a pure
+function returning a typed array over a plain callback interface. No
+registration API, no contribution points, nothing to plug into — which is what
+keeps it clear of hard rule 9.
+
+**Row ids are positional** (`file:0`, `command:2`), not the natural key: HTML5
+forbids whitespace in an `id`, and both a path and a Markdown heading routinely
+contain one, so `aria-activedescendant` would point at nothing. The natural key
+stays on the row. It also means the keyboard holds its *position* as debounced
+results settle, rather than chasing a path.
+
+**Movement clamps rather than wrapping.** The acceptance criterion says "as the
+explorer tree's do" and `focusAt` clamps, so reusing `moveFocus`/`focusAt`
+unchanged satisfies both the reuse requirement and the criterion.
+
+**Trailing whitespace is kept, leading whitespace stripped.** A file name may
+legally end in a space, and eating it would make such a path the one thing quick
+open cannot reach. Line mode trims its own term, where a space is never part of
+the answer.
+
+**A term with a query still settling draws `loading`, not "no match"** — that is
+the debounce window, and "no match" would be a lie the user watches being
+corrected.
+
+**Truncation is one state with two causes** (the core's flag, and the 50-row
+cap): the user's question is "is this all of them?" and the answer is the same.
+A list that exactly fills the cap is `results`, not `truncated`.
+
+### Deviations from the task text
+
+**The ticket's escape rule contradicted itself and has been corrected in place**
+(see requirement 1). "`>>foo` is the command `>foo`" and "so a path beginning
+with a prefix character is still reachable" cannot both hold. Implemented the
+reading that makes the rationale true — a doubled prefix escapes to files mode —
+and only the first doubling is consumed, so the mode does not flicker as a run
+of prefix characters is typed.
+
+**Symbols' third sub-case folds into the second.** "Rules ran, file is empty"
+and "rules ran, term matched none" share `noOutlineMatch` with different prose,
+keeping exactly the two reasons the ticket demands; `noOutlineRules` stays
+distinct.
+
+### Known limitations
+
+- `FileMatch` and `FileQueryState` are **this module's provisional seam**, marked
+  as such at both declarations. No find-files type is imported from
+  `@gritty/protocol` and no `core.*` call exists, deliberately: inventing the
+  response shape now would be guessing at T130-C's contract.
+- `matchesTerm` decides membership only, never order. T130-R (the fuzzy path
+  scorer) replaces it for commands and symbols once it is reachable from the UI;
+  files never pass through it.
+- Home/End are claimed, costing those caret shortcuts inside the field. ⌘←/⌘→
+  still reach the caret on macOS. ⇧Enter and ⌥Enter are left unclaimed rather
+  than aliased.
+
+### Follow-up tasks
+
+| Ticket | Why |
+|---|---|
+| The component, controller and the two remaining test tiers | Blocked with this ticket on T130-C (the quick-open contract). |
+| T130-M (mount the bar in the app bar) | Needs the component. Queued behind T101-D (the diff as an editor tab) and T120-M (mount the settings tab) for the same three files. |
+| A shortcut registry | Still the follow-up four task files have now recorded. |
