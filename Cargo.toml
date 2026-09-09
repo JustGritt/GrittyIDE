@@ -29,6 +29,12 @@ gritty-agent-fake = { path = "crates/agent-fake" }
 # real child, and the reverse edge would be the same Cargo cycle.
 gritty-agent-claude = { path = "crates/agent-claude" }
 gritty-git = { path = "crates/git" }
+# T102-R: the git *write* adapter (ADR-029 decision 2). A separate crate from
+# `gritty-git` on purpose: that one promises "nothing writes" and "no external
+# program runs" and has a test enforcing it, so the two never depend on each
+# other in anything that ships and `gritty-core::git` composes both. A path
+# dependency; it adds no new third-party crate.
+gritty-git-write = { path = "crates/git-write" }
 gritty-search = { path = "crates/search" }
 tauri = { version = "2.11.5", features = [] }
 tauri-build = { version = "2.6.3", features = [] }

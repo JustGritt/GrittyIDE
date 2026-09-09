@@ -137,8 +137,10 @@ rule below. `PROTOCOL_VERSION` **2.15.0** is on `main`; 2.13.0 and 2.14.0 were
 spent on the way and the resolved line took the highest. `SCHEMA_VERSION` is
 still **4** and migration **`0005` is free** — T326 needed neither.
 
-**The next free values are `PROTOCOL_VERSION` 2.23.0, `SCHEMA_VERSION` 5 and
-migration `0005`; the next free ADR number is 030.** ADR-027 is not free:
+**The next free values are `PROTOCOL_VERSION` 2.26.0, `SCHEMA_VERSION` 5 and
+migration `0005`; the next free ADR number is 032.** (2.23.0–2.25.0 and
+ADR-030/031 were taken on 2026-09-09 — see the two blocks at the end of this
+section.) ADR-027 is not free:
 `HANDOFF.md:102` reserves it for T310's "the feed comes from the run event ring,
 not the transcript" decision. That reservation was never written here, which is
 rule 2's failure mode again — it is written here now.
@@ -161,6 +163,46 @@ Both halves take the same four contended seams every recent collision has been
 about — `protocol/mod.rs`, `protocol/export.rs`, `packages/protocol/src/commands.ts`
 and the generated directory — so they are built one at a time and never in
 flight together.
+
+**Claimed by the source-control session on 2026-09-09.** First written down by
+the settings session, which had agreed them over a socket and correctly refused
+to leave them there — a claim nobody else can read is not a claim, which is
+rule 2's failure mode wearing a different hat. **Confirmed by the session that
+holds them**, and the ticket ids filled in:
+
+| Claim | Ticket | For |
+|---|---|---|
+| `PROTOCOL_VERSION` **2.23.0** | `T103-C` | `git.refs`, and `git.log` seeded from every ref — the all-refs commit graph. Additive: one new command, one optional request field, one optional response field. No `CoreEvent` variant, no `SCHEMA_VERSION`, no migration: both are reads. |
+| `PROTOCOL_VERSION` **2.24.0** | `T104-C` | `git.push` / `git.fetch` — the networked half, behind ADR-030 and not to be spent before it is accepted. |
+| ADR **030** | — | The networked git write surface. Amends ADR-029 decision 3 ("Nothing in this crate reaches the network"), which named this in its own *Revisit when*. |
+
+**None of the three adds a `CoreEvent` variant**, so `crates/gritty-core/src/event/mod.rs`
+and the exhaustive match in `crates/gritty-core/src/session/tap.rs` are untouched
+by all of them — git reads and writes alike ride the existing `Operation*`
+events. `T120` is the only branch in this group that adds one, which is what
+makes the ordering below a courtesy rather than a hazard.
+
+**Claimed by `T120` (settings) on 2026-09-09, before any of it is spent.**
+
+| Claim | Ticket | For |
+|---|---|---|
+| `PROTOCOL_VERSION` **2.25.0** | `T120-C` | `settings.describe`, `settings.get`, `settings.set`, `settings.reset`, and one new `CoreEvent::SettingsChanged`. Additive: four commands, their request/response types, one event variant. |
+| ADR **031** | — | Settings are a core-owned `settings.json` in the app data dir, user scope only. Draws the boundary against ADR-004 ("SQLite for application metadata"): that rule governs state the app keeps about itself, and user configuration is a different category. |
+
+`T120` spends **no `SCHEMA_VERSION` and no migration** — deliberately, and that
+is the whole point of the ADR. Settings go in a file precisely so they are
+recoverable and inspectable without the application running; `SCHEMA_VERSION` 5
+and migration `0005` stay free for whoever needs them.
+
+Its seams are three of the same four (`protocol/mod.rs`, `protocol/export.rs`,
+`packages/protocol/src/commands.ts`, the generated directory) **plus the two a
+`CoreEvent` variant always costs**: `crates/gritty-core/src/event/mod.rs` and
+the exhaustive match in `crates/gritty-core/src/session/tap.rs`. So `T120-C`
+must not be in flight with 2.23.0 or 2.24.0 — the three take turns, and the
+source-control session goes first by agreement. Note the asymmetry `PROTO-W3`
+recorded: two branches adding a `CoreEvent` variant in different places merge
+**cleanly and wrongly** in `export.rs` and the generated directory, and only
+the `tap.rs` half is caught by the compiler.
 
 **Claimed by the 2026-09-08 wave.** `PROTO-W3` takes **2.18.0** for `search.query`
 and the one `CoreEvent` variant T080 adds; it spends no `SCHEMA_VERSION` and no

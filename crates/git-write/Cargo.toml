@@ -1,0 +1,56 @@
+[package]
+name = "gritty-git-write"
+description = "Gritty git write adapter: the four writes, invoked as the user's own `git` binary, with a closed argv and no network"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# Deliberately **no `gritty-git`**, in either direction (ADR-029 decision 2).
+# That crate's header promises "nothing writes" and "no external program runs",
+# and `open.rs`'s `no_program_named_by_the_repository_can_run` enforces it. The
+# two are kept apart so that promise stays literally true and testable, and so
+# the trust boundary is visible in the dependency graph rather than buried in a
+# module. `gritty-core::git` composes both.
+[dependencies]
+# T102-R: a refusal from this adapter is an error type, spelled the way every
+# other adapter crate in this workspace spells one.
+thiserror = { workspace = true }
+# T102-R: a killed process group and a probe verdict are logged once, by kind
+# only. Never a hook's output or a path from the repository, which are
+# untrusted (rule 13).
+tracing = { workspace = true }
+# T102-R: the `git` child and the bounded waits around it. `process` and
+# `io-util` are added on top of the workspace features rather than widened
+# there, so no other crate's build changes for this one — exactly as
+# `gritty-agent-claude` declares them.
+tokio = { workspace = true, features = ["process", "io-util"] }
+# T102-R: `WorkspaceRoot` and `WorkspacePath`, so a path is validated against
+# the workspace root by the same code every other command uses, before any
+# process is spawned.
+gritty-workspace = { workspace = true }
+
+# T102-R: `killpg`, so cancelling a commit reaches the whole process group
+# rather than only the `git` process. A `pre-commit` hook is the thing actually
+# worth killing, and it is a grandchild. Unix-only, exactly as
+# `gritty-agent-claude` and `gritty-terminal` declare it. No new third-party
+# crate: `nix` is already a workspace dependency.
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true }
+
+[dev-dependencies]
+# T102-R: real repositories with real hooks, built by the fixture helpers that
+# already shell out to `git`. Behind `gritty-git`'s test-only `fixtures`
+# feature, which is compiled out of release builds — so this is a dev edge
+# only, and does not make ADR-029 decision 2's "never depend on each other"
+# false for anything that ships.
+gritty-git = { workspace = true, features = ["fixtures"] }
+# T102-R: `#[tokio::test]` for the process tests, which need a real reactor and
+# a real child. No `test-util`: a force-kill test that advanced a fake clock
+# would prove nothing about a real hook (rule 12).
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "io-util"] }
+
+[lints]
+workspace = true
