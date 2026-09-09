@@ -1,7 +1,7 @@
 # Task T130-M — Mount the bar in the app bar, and the quick-open chord
 
 - **Phase:** 2
-- **Status:** blocked (the mount files carry T310-U's unlanded work)
+- **Status:** todo
 - **Depends on:** T130-U, T310-U (landing, not building)
 
 ## Objective

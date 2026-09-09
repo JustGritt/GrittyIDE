@@ -114,11 +114,11 @@ the workflow below are hand-maintained.
 | [T120-R](T120-R-settings-service.md) | gritty-settings: the registry, the file, and the failure policy | 2 | T120-C | doing |
 | [T120-T](T120-T-theme.md) | A theme the user picks: system, light or dark | 2 | T120-C | todo |
 | [T120-U](T120-U-settings-page.md) | The settings page, and retiring the three popovers | 2 | T120-C | todo |
-| T130-C | The quick-open contract: workspace.findFiles and ranked paths | 2 | T080 | blocked |
-| T130-M | Mount the bar in the app bar, and the quick-open chord | 2 | T130-U, T310-U | todo |
-| T130-R | A fuzzy path scorer, and the walk that ranks with it | 2 | T080 | review |
-| T130-S | @ symbols: a regex outline, honestly named | 2 | T130-U | doing |
-| T130-U | The quick-open bar, and its four modes | 2 | T130-C, T130-R | doing |
+| [T130-C](T130-C-quick-open-contract.md) | The quick-open contract: workspace.findFiles and ranked paths | 2 | T080 | blocked |
+| [T130-M](T130-M-quick-open-mount.md) | Mount the bar in the app bar, and the quick-open chord | 2 | T130-U, T310-U | todo |
+| [T130-R](T130-R-path-ranking.md) | A fuzzy path scorer, and the walk that ranks with it | 2 | T080 | review |
+| [T130-S](T130-S-symbol-outline.md) | @ symbols: a regex outline, honestly named | 2 | T130-U | doing |
+| [T130-U](T130-U-quick-open-bar.md) | The quick-open bar, and its four modes | 2 | T130-C, T130-R | doing |
 | T222-CODEX | Codex, as one provider file | 3 | T222-SEAM | todo |
 | T222-SEAM | A provider registry, so providers stop being serial | 3 | T220 | unspec |
 | [T233](T233-agents-sidebar.md) | Agents in the left sidebar (design artboard 12a) | 3 | – | unspec |

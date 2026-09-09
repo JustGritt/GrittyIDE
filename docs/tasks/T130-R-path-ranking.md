@@ -1,7 +1,7 @@
 # Task T130-R — A fuzzy path scorer, and the walk that ranks with it
 
 - **Phase:** 2
-- **Status:** todo
+- **Status:** review
 - **Depends on:** T080 (the walk, the ignore predicate and the cancellation shape it already proved)
 
 > The ID is an addition to the project plan's §17 numbering, not from it, the

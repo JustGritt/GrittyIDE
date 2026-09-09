@@ -1,7 +1,7 @@
 # Task T130-U — The quick-open bar, and its four modes
 
 - **Phase:** 2
-- **Status:** todo
+- **Status:** doing
 - **Depends on:** T130-C (the wire), T130-R (the ranking). Independent of T130-S,
   which adds one mode to a surface this ticket builds.
 
