@@ -109,9 +109,16 @@ which is blocked on which. So:
   commit message, a completion report, a handover, or a message to another
   session. Write `T120-M (mount the settings tab)`, not `T120-M`. The id stays
   the stable key; the title is what makes it legible.
-- `--force` on `add` re-adds rather than edits: it overwrites `label`, `phase`
-  and `depends` with defaults when you omit them, so pass those through. Use
-  `meta --title` to change a title, never `add --force`.
+- Editing an existing ticket: `meta` sets `--lane`, `--scope`, `--title`,
+  `--phase` and `--depends`. It **cannot set a link** — `add --force` is the
+  only route to one, so reach for it deliberately rather than by habit.
+  `add --force` re-adds rather than edits: `label`, `phase` and `depends` are
+  non-`None` by construction (`args.label or args.id`, `args.phase or ""`,
+  `args.depends or "–"`), so **omitting one overwrites it**, and omitting
+  `--status` resets the ticket to `unspec`. Pass every field you want kept.
+  `holder` and `note` are safe: the reducer's `add` branch never writes them,
+  so backfilling a link on a ticket a live session is holding does not disturb
+  it. Prefer `meta --title` for a title.
 
 State is an append-only log in the shared git directory, so worktrees see one
 board. It is machine-local and never committed. The committed projection is the
