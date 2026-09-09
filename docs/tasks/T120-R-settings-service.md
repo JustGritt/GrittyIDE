@@ -1,7 +1,7 @@
 # Task T120-R — `gritty-settings`: the registry, the file, and the failure policy
 
 - **Phase:** 2
-- **Status:** doing
+- **Status:** review
 - **Depends on:** T120-C (the contract), ADR-031
 
 ## Objective

@@ -81,6 +81,8 @@ the workflow below are hand-maintained.
 | ADR-029 | Git writes run through the git binary, not gix | 2 | – | unspec |
 | ADR-031 | Settings are a core-owned settings.json, user scope only | 2 | – | review |
 | ADR-032 | Record the UI framework decision (React 19) | 0 | – | review |
+| BOARD-STALE-REASON | A block reason outlives its block, and show prints it as present tense | tools | – | todo |
+| [CARGO-FLAKE](CARGO-FLAKE-desktop-command-tests.md) | Three desktop command tests fail under a loaded machine | 2 | – | todo |
 | CI-COST | CI: self-hosted macOS runner, and stop burning metered minutes |  | – | review |
 | CI-LINUX-DARK | Linux CI is dark until the minute allowance resets (1 Oct) or a spending limit is set |  | – | blocked |
 | [CI-RUNNER-GC](CI-RUNNER-GC-disk-retention.md) | Self-hosted runner never cleans up: target/ and stale bundles grow unbounded on the dev Mac |  | – | review |
