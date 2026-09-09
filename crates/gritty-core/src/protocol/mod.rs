@@ -24,7 +24,7 @@ mod export;
 ///
 /// Bump MAJOR for breaking shape changes, MINOR for additive ones. The client
 /// refuses to talk to a core whose MAJOR differs from its own.
-pub const PROTOCOL_VERSION: &str = "2.25.0";
+pub const PROTOCOL_VERSION: &str = "2.26.0";
 
 /// The single Tauri event channel every core event envelope is delivered on.
 /// The client demultiplexes by the envelope's `name`.

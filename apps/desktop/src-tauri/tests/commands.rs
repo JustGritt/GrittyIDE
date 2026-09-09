@@ -587,6 +587,79 @@ fn workspace_list_rejects_traversal_unknown_ids_and_bad_pages() {
 }
 
 #[test]
+fn workspace_find_files_ranks_over_the_adapter_and_refuses_bad_requests() {
+    let h = Harness::new();
+    let root = TempWorkspace::new("find");
+    let workspace = h.open_workspace(&root.0);
+
+    let found = h
+        .invoke(
+            "workspace_find_files",
+            json!({ "request": { "workspaceId": workspace["id"], "query": "mn" } }),
+        )
+        .expect("a three-file tree finishes well inside the budget");
+    assert_eq!(found["status"], "ready");
+    assert_eq!(found["matches"][0]["path"], "src/main.rs");
+    assert_eq!(found["truncated"], false);
+    // The highlight crosses the wire with the match, which is the whole reason
+    // this is not a client-side rank over `search.query`.
+    assert!(
+        found["matches"][0]["ranges"]
+            .as_array()
+            .is_some_and(|ranges| !ranges.is_empty()),
+        "no ranges in {found}"
+    );
+    // A bounded response that answered within its budget needs no operation,
+    // and the command adds no event of its own: nothing streams here.
+    assert!(
+        !h.event_names()
+            .iter()
+            .any(|name| name.starts_with("Operation")),
+        "{:?}",
+        h.event_names()
+    );
+
+    // An id nobody opened.
+    let error = h
+        .invoke(
+            "workspace_find_files",
+            json!({ "request": { "workspaceId": "not-open", "query": "mn" } }),
+        )
+        .unwrap_err();
+    assert_eq!(error["code"], "NotFound");
+
+    // Malformed requests land as InvalidInput inside `guard`, never as a panic
+    // and never as a promise that does not settle. An entirely absent
+    // `request` argument is not in this list: Tauri's own argument
+    // deserialization refuses that before the adapter body runs, so it is not
+    // this command's error to shape.
+    for malformed in [
+        json!({ "request": { "workspaceId": workspace["id"] } }),
+        json!({ "request": { "workspaceId": workspace["id"], "query": 7 } }),
+        json!({ "request": { "query": "mn" } }),
+    ] {
+        let error = h
+            .invoke("workspace_find_files", malformed.clone())
+            .unwrap_err();
+        assert_eq!(error["code"], "InvalidInput", "{malformed}");
+    }
+
+    // Outside `1..=200` is refused rather than clamped, so a caller that asked
+    // for something this command cannot do is told, not quietly served 200.
+    for limit in [0, 201, 5000] {
+        let error = h
+            .invoke(
+                "workspace_find_files",
+                json!({
+                    "request": { "workspaceId": workspace["id"], "query": "mn", "limit": limit }
+                }),
+            )
+            .unwrap_err();
+        assert_eq!(error["code"], "InvalidInput", "limit {limit}");
+    }
+}
+
+#[test]
 fn root_removed_while_open_fails_with_not_found_and_closes_the_workspace() {
     let h = Harness::new();
     let root = TempWorkspace::new("removed");

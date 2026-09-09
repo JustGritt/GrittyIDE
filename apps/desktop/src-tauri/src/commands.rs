@@ -61,6 +61,7 @@ use gritty_core::workspace::files::{
     FileOperationResponse, FileOperationResult, MoveEntriesRequest, RenameEntryRequest,
     UndoRequest,
 };
+use gritty_core::workspace::find::{DEFAULT_FIND_BUDGET, FindFilesRequest, FindFilesResponse};
 use gritty_core::workspace::{
     CloseWorkspaceRequest, DEFAULT_LIST_BUDGET, ForgetWorkspaceRequest, ListDirectoryRequest,
     ListDirectoryResponse, OpenWorkspaceRequest, RecentWorkspace, RecentWorkspacesRequest,
@@ -225,6 +226,27 @@ pub async fn workspace_list(
         let request: ListDirectoryRequest = parse_request(request)?;
         workspaces
             .list(request, Actor::User, correlation, DEFAULT_LIST_BUDGET)
+            .await
+    })
+    .await
+}
+
+/// `workspace.findFiles`
+///
+/// The quick-open search (T130-C). Same budget hand-over as `workspace.list`:
+/// the walk runs on the blocking pool, and a tree that outlives
+/// `DEFAULT_FIND_BUDGET` comes back as an operation rather than making the
+/// command wait. Cancel it with `operations.cancel`.
+#[tauri::command]
+pub async fn workspace_find_files(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<FindFilesResponse, CoreError> {
+    let workspaces = core.workspaces.clone();
+    guard("workspace.findFiles", move |correlation| async move {
+        let request: FindFilesRequest = parse_request(request)?;
+        workspaces
+            .find_files(request, Actor::User, correlation, DEFAULT_FIND_BUDGET)
             .await
     })
     .await

@@ -37,6 +37,8 @@ import {
   type EventOf,
   type FileOperationResponse,
   type FileOperationResult,
+  type FindFilesRequest,
+  type FindFilesResponse,
   type ForgetWorkspaceRequest,
   type GitCommitRequest,
   type GitDiffRequest,
@@ -162,6 +164,33 @@ export interface CoreClient {
      * operation whose `OperationCompleted.result` will carry it.
      */
     list(request: ListDirectoryRequest): Promise<ListDirectoryResponse>;
+    /**
+     * The best-ranked paths in the open workspace for `query` — the quick-open
+     * search (T130-C). `list` walks one level; this walks the tree and ranks.
+     *
+     * The query is a case-insensitive **subsequence**, not a substring: `epn`
+     * finds `editor-pane.tsx`. Each match carries the spans that matched, so
+     * the UI highlights without re-running the matcher — which is why this is
+     * not a client-side rank over `search.query`, whose `SearchMatch` carries
+     * one contiguous span and cannot express a subsequence hit at all.
+     *
+     * The same budget hand-over as `list`: `ready` carries the matches,
+     * `pending` names the operation whose `OperationCompleted.result` will
+     * carry the same `FoundFiles`. On a repository of any size `pending` is
+     * the normal answer, not the exceptional one — a walk of 10,429 files was
+     * measured at 94 ms against a 100 ms budget — so a caller that only
+     * handles `ready` will look like it works on a fixture and not on a
+     * real project.
+     *
+     * `ranges` are **char** indices, so slice by code point (`Array.from`)
+     * rather than by `String.prototype.slice`, whose UTF-16 indices disagree
+     * past the BMP. Cancel with `operations.cancel`; there is no
+     * `findFiles.cancel`. `limit` outside `1..=200` is `InvalidInput`, not a
+     * clamp. An empty `query` is not an error: it returns the first `limit`
+     * paths in walk order, which is what the field shows before a key is
+     * pressed.
+     */
+    findFiles(request: FindFilesRequest): Promise<FindFilesResponse>;
     /**
      * The roots opened before, newest first, for the startup screen (T049).
      * Each entry says whether its root is still a directory and carries a
@@ -830,6 +859,7 @@ export function createCoreClient(
       },
       current: () => command<Workspace | null>('workspace.current'),
       list: (request) => command<ListDirectoryResponse>('workspace.list', { request }),
+      findFiles: (request) => command<FindFilesResponse>('workspace.findFiles', { request }),
       recents: (limit) => {
         const request: RecentWorkspacesRequest = {};
         if (limit !== undefined) request.limit = limit;

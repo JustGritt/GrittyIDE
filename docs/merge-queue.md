@@ -219,7 +219,7 @@ starts — rule 2 — because the number is the thing two branches collide on an
 
 | Claim | Ticket | For |
 |---|---|---|
-| `PROTOCOL_VERSION` **2.26.0** | `T130-C` | `workspace.findFiles` — a query in, the best-ranked workspace paths out, each carrying the char-index spans that matched so the UI highlights without re-running the matcher. Additive: one command, its request type, and a `ready`/`pending` response union mirroring `ListDirectoryResponse`'s. No `SCHEMA_VERSION` and no migration: nothing about a query is persisted. |
+| `PROTOCOL_VERSION` ~~2.26.0~~ | `T130-C` | `workspace.findFiles` — a query in, the best-ranked workspace paths out, each carrying the char-index spans that matched so the UI highlights without re-running the matcher. **Spent 2026-09-09.** Additive: one command, three generated roots (`FindFilesRequest`, `FindFilesResponse`, `FoundFiles`) plus `FoundFile` transitively, and a `ready`/`pending` response union mirroring `ListDirectoryResponse`'s. No `CoreEvent` variant, no `SCHEMA_VERSION` and no migration: nothing about a query is persisted. |
 
 **Deliberately no `CoreEvent` variant**, which is what keeps this off the two
 seams `T120-C` has just spent and that this file warns merge *cleanly and

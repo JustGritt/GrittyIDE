@@ -108,7 +108,12 @@ export type { FileOperationResponse } from './generated/FileOperationResponse';
 export type { FileOperationResult } from './generated/FileOperationResult';
 export type { FileState } from './generated/FileState';
 export type { FileStatus } from './generated/FileStatus';
+// Quick open (T130-C). `FoundFile` below is reached through both arms.
+export type { FindFilesRequest } from './generated/FindFilesRequest';
+export type { FindFilesResponse } from './generated/FindFilesResponse';
 export type { ForgetWorkspaceRequest } from './generated/ForgetWorkspaceRequest';
+export type { FoundFile } from './generated/FoundFile';
+export type { FoundFiles } from './generated/FoundFiles';
 export type { GitCommitRequest } from './generated/GitCommitRequest';
 export type { GitDiffRequest } from './generated/GitDiffRequest';
 export type { GitDiffResponse } from './generated/GitDiffResponse';

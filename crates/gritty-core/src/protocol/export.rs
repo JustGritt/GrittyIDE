@@ -65,6 +65,7 @@ use crate::workspace::files::{
     CreateEntryRequest, DeleteEntriesRequest, FileOperationResponse, FileOperationResult,
     MoveEntriesRequest, RenameEntryRequest, UndoRequest,
 };
+use crate::workspace::find::{FindFilesRequest, FindFilesResponse, FoundFiles};
 use crate::workspace::{
     CloseWorkspaceRequest, ForgetWorkspaceRequest, ListDirectoryRequest, ListDirectoryResponse,
     OpenWorkspaceRequest, RecentWorkspace, RecentWorkspacesRequest, Workspace,
@@ -178,6 +179,12 @@ fn export_bindings() {
     CloseWorkspaceRequest::export_all(&cfg).expect("export CloseWorkspaceRequest");
     ListDirectoryRequest::export_all(&cfg).expect("export ListDirectoryRequest");
     ListDirectoryResponse::export_all(&cfg).expect("export ListDirectoryResponse");
+    // T130-C `workspace.findFiles`. `FoundFile` comes along transitively
+    // through both the response's `ready` arm and `FoundFiles`, which is the
+    // operation's completion payload for the `pending` one.
+    FindFilesRequest::export_all(&cfg).expect("export FindFilesRequest");
+    FindFilesResponse::export_all(&cfg).expect("export FindFilesResponse");
+    FoundFiles::export_all(&cfg).expect("export FoundFiles");
     // T042 `files.*`. `NewEntryKind`, `TransferMode`, `DeleteMode` and
     // `MovedEntry` come along transitively through these roots.
     CreateEntryRequest::export_all(&cfg).expect("export CreateEntryRequest");

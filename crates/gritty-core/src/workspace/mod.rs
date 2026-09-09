@@ -10,6 +10,7 @@
 //! event carries the page. Wire types are exported to TypeScript from here.
 
 pub mod files;
+pub mod find;
 pub mod journal;
 pub mod recents;
 pub mod watch;
@@ -227,6 +228,11 @@ pub struct WorkspaceManager {
     /// cancellation can be exercised deterministically.
     #[cfg(test)]
     listing_delay: Mutex<Duration>,
+    /// The same hook for `find_files` (T130-C), and for the same reason: a
+    /// ranked walk over a temporary tree finishes in microseconds, so
+    /// cancelling one mid-flight would be a race rather than a test.
+    #[cfg(test)]
+    pub(super) find_delay: Mutex<Duration>,
 }
 
 impl WorkspaceManager {
@@ -245,6 +251,8 @@ impl WorkspaceManager {
             me: me.clone(),
             #[cfg(test)]
             listing_delay: Mutex::new(Duration::ZERO),
+            #[cfg(test)]
+            find_delay: Mutex::new(Duration::ZERO),
         })
     }
 
