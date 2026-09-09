@@ -1,7 +1,7 @@
 # Task T130-V — The quick-open component, its controller, and the two test tiers
 
 - **Phase:** 2
-- **Status:** doing
+- **Status:** review
 - **Depends on:** T130-C (the wire), T130-U (the pure modules), T130-S (the outline)
 
 ## Objective
