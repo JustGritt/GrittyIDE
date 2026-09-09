@@ -63,6 +63,14 @@ scripts/agent-lease.py claim --agent T097-blocks --session <your-session-uuid> \
 scripts/agent-lease.py release --agent T097-blocks   # the moment you are done
 ```
 
+**`claim` appends a row; it does not replace one.** Re-claiming with a shorter
+scope leaves the wider row live and adds a second, and the command prints only
+the scope you passed — so it reads exactly like a narrowing when it is not. To
+narrow, `release --agent <name>` (which drops *every* row that agent holds)
+and then `claim` the smaller scope. Check `AGENT-LEASES.md` afterwards rather
+than trusting the output: two sessions have now been blocked by a row its
+holder believed was gone.
+
 Read the registry before your first edit, claim the narrowest scope your task
 needs, and never edit inside another agent's scope — say so and let the user
 sequence the two sessions instead. Your session UUID is the directory name in
