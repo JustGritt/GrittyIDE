@@ -34,7 +34,7 @@ requires updating the relevant ADR.
 | [ADR-026](ADR-026-agent-console-tab.md) | An agent console is a tab in the editor, and the agent rail is retired | Accepted |
 | [ADR-028](ADR-028-explorer-file-operations.md) | Editing the file tree is a `files.*` command domain, and the Trash is the recovery | Proposed |
 | [ADR-029](ADR-029-git-write-backend.md) | Git writes run through the `git` binary, while reads stay in-process on `gix` | Accepted |
-| [ADR-031](ADR-031-settings-storage.md) | Settings are a core-owned JSON file, and user configuration is not application metadata | Proposed |
+| [ADR-031](ADR-031-settings-storage.md) | Settings are a core-owned JSON file, and user configuration is not application metadata | Accepted |
 | [ADR-032](ADR-032-ui-framework.md) | The UI framework is React 19, and it renders chrome rather than content | Accepted |
 
 Template:

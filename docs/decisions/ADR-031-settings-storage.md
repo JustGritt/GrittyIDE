@@ -1,7 +1,11 @@
 # ADR-031: Settings are a core-owned JSON file, and user configuration is not application metadata
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-09
+- **Accepted:** 2026-09-09 by Alexis. `settings.json` is the home for user
+  configuration, and the T120 surface built on it stands: the crate, the
+  `settings.*` contract at `PROTOCOL_VERSION` 2.25.0, the focus re-read, and the
+  durable notification setting that supersedes T223 decision 6.
 
 ## Context
 
