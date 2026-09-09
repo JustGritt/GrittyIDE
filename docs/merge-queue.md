@@ -201,7 +201,7 @@ by the compiler.
 
 | Claim | Ticket | For |
 |---|---|---|
-| ADR **033** | `T140-PROFILE` | What `[profile.dev]` should be: debuginfo, and `split-debuginfo` on macOS. **Spends no `PROTOCOL_VERSION`** — it changes no command, event or type, only how every crate is compiled. |
+| ADR ~~033~~ | `T140-PROFILE` | What `[profile.dev]` should be. **Written and spent 2026-09-09**: `debug = "line-tables-only"`, measured at 23% less disk and 14% faster per build, with `split-debuginfo = "packed"` measured and rejected for being *worse* than the default. Spends no `PROTOCOL_VERSION` — it changes no command, event or type, only how every crate is compiled. |
 
 Why a new ADR rather than an amendment to ADR-024: that ADR's three rejection
 arguments are all about *sharing* a `CARGO_TARGET_DIR` across concurrent

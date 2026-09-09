@@ -128,6 +128,21 @@ rust_2018_idioms = { level = "warn", priority = -1 }
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 
+# Debug info is the whole of this profile, and it is set deliberately
+# (ADR-033). Cargo's default is full DWARF, and on macOS `split-debuginfo`
+# defaults to `unpacked`, which leaves that DWARF in 256 loose `.o` files per
+# crate that are never folded away — measured at 64% of an 82 GB `target/`.
+#
+# `line-tables-only` keeps file and line in backtraces, which is how this
+# codebase is actually debugged, and drops the type and variable information a
+# stepping debugger would want. Measured 2026-09-09: 23% less disk per build
+# and 14% faster than the default. `split-debuginfo = "packed"` was measured
+# too and is worse than doing nothing — it empties `deps` of `.o` files but
+# moves the DWARF into per-binary `.dSYM` bundles, costing 20% MORE disk and
+# 14% more time.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.release]
 codegen-units = 1
 lto = "thin"

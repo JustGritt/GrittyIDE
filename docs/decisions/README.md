@@ -36,6 +36,7 @@ requires updating the relevant ADR.
 | [ADR-029](ADR-029-git-write-backend.md) | Git writes run through the `git` binary, while reads stay in-process on `gix` | Accepted |
 | [ADR-031](ADR-031-settings-storage.md) | Settings are a core-owned JSON file, and user configuration is not application metadata | Accepted |
 | [ADR-032](ADR-032-ui-framework.md) | The UI framework is React 19, and it renders chrome rather than content | Accepted |
+| [ADR-033](ADR-033-dev-profile-debuginfo.md) | The dev profile is set deliberately, and debug info is the thing it sets | Proposed |
 
 Template:
 
