@@ -106,9 +106,9 @@ the workflow below are hand-maintained.
 | T101-D | The diff as an editor tab (Monaco diff editor) on git.show | 2 | T101-R | todo |
 | T101-R | gix: a paged commit walk, and a blob at a revision | 2 | T101-C | review |
 | T101-U | History in the git panel, on git.log | 2 | T101-R | review |
-| T102-C | The write contract: stage, unstage, discard, commit | 2 | ADR-029 | review |
-| T102-R | gritty-git-write: the subprocess adapter and the git probe | 2 | T102-C | review |
-| T102-U | Staging, discard and the commit box in the Changes panel | 2 | T102-R | todo |
+| [T102-C](T102-C-git-write-contract.md) | The write contract: stage, unstage, discard, commit | 2 | ADR-029 | review |
+| [T102-R](T102-R-git-write-adapter.md) | gritty-git-write: the subprocess adapter and the git probe | 2 | T102-C | review |
+| [T102-U](T102-U-git-write-ui.md) | Staging, discard and the commit box in the Changes panel | 2 | T102-R | todo |
 | [T120-C](T120-C-settings-contract.md) | The settings contract: settings.* and SettingsChanged | 2 | ADR-031 | todo |
 | [T120-M](T120-M-settings-mount.md) | Mount the settings tab, and the comma chord | 2 | T120-U | todo |
 | [T120-R](T120-R-settings-service.md) | gritty-settings: the registry, the file, and the failure policy | 2 | T120-C | doing |
@@ -130,7 +130,7 @@ the workflow below are hand-maintained.
 | T300-PANEL | A run belongs on its workstream's island row, not a fourth roster | 4 | T300-WIRE | unspec |
 | T300-WIRE | Connect the three Gate D halves: fake driver, manager, runs.* adapters | 4 | T300-CORE | review |
 | T400-R | Worktree create and remove | 5 | T100 | unspec |
-| WATCH-FLAKE | watch.rs::a_directory_created_after_the_watch_started_is_followed is load-sensitive |  | – | todo |
+| WATCH-FLAKE | Two load-sensitive tests fail in the full-workspace run, pass alone |  | – | todo |
 | T233-M | The roster row model: owned runs and observed sessions in one list | 3 | T300-C | review |
 | T233-S | The Agents section in the left sidebar, and the sidebar tab strip (12a) | 3 | T233-M | review |
 | T233-C | The full-height agent console, and retiring the right rail (12a) | 3 | T233-S,T232 | review |
