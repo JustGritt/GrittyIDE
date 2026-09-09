@@ -1,7 +1,7 @@
 # Task T102-C — The write contract: `git.stage`, `git.unstage`, `git.discard`, `git.commit`
 
 - **Phase:** 2
-- **Status:** todo (ADR-029 accepted 2026-09-09)
+- **Status:** review
 - **Depends on:** ADR-029, T100, T101-C
 
 ## Objective
@@ -127,8 +127,17 @@ other. Landed together with T102-R, as the ticket required.
 
 **Tests actually executed.** `cargo test -p gritty-core` — 499 passed.
 `cargo test --workspace` green. `cargo clippy --workspace --all-targets -D
-warnings` clean. `pnpm test` — 97 files, 958 tests. `pnpm typecheck` clean.
-`pnpm check:generated` exit 0 after committing. 8 new protocol-client tests
+warnings` clean. **`pnpm check` exit 0** — 97 test files, 958 tests, including
+`check:generated` once the new types were committed.
+
+A correction worth recording, because it is the failure mode the "tests
+actually executed" section exists to prevent: this report first claimed
+`pnpm typecheck` clean on the strength of a run that *predated*
+`git-write-client.test.ts`. The full gate then failed on two `TS2339`s in that
+very file, where a `.catch()` widened the result to `CoreError | GitWriteResponse`
+and the error branch was read without narrowing. Fixed by narrowing in a
+`try/catch`, and the whole gate re-run to exit 0. Re-run the gate *after* the
+last edit, not before it. 8 new protocol-client tests
 cover the four names, the request shapes, the `Conflict`-then-`force` replay,
 the `pending` arm and a hook's stderr reaching the caller.
 

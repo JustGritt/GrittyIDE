@@ -146,9 +146,15 @@ describe('the git write wire', () => {
       },
     });
 
-    const refused = await core.git
-      .discard({ workspaceId, paths: [notes] })
-      .catch((error: unknown) => error as CoreErrorShape);
+    // Typed as the refusal rather than as the union `catch` would infer: the
+    // point of the assertion is that a `Conflict` carries the dirty list.
+    let refused: CoreErrorShape | undefined;
+    try {
+      await core.git.discard({ workspaceId, paths: [notes] });
+    } catch (error: unknown) {
+      refused = error as CoreErrorShape;
+    }
+    if (!refused) throw new Error('the discard should have been refused');
     expect(refused.code).toBe('Conflict');
     // The UI needs the list, not just the count, to say *which* buffers.
     expect(refused.details).toMatchObject({

@@ -1,7 +1,7 @@
 # Task T102-U — Staging, discard and the commit box in the git panel
 
 - **Phase:** 2
-- **Status:** blocked (behind T102-R; ADR-029 is decided)
+- **Status:** todo
 - **Depends on:** T102-R, T101-U
 
 ## Objective
@@ -23,9 +23,11 @@ missing.
   file can be in two bands
 - `apps/desktop/src/features/explorer/explorer-tree.tsx:660-705` — `DeleteDialog`
   and its policy: only an *irreversible* delete asks
-- `apps/desktop/src/features/explorer/use-explorer.ts:309-334` and
-  `explorer-panel.tsx:128-139` — the `Conflict`-then-`force` replay, **and the
-  bug beside it** (see below)
+- `apps/desktop/src/features/explorer/use-explorer.ts` (`Refusal`,
+  `discardAndRetry`) and `explorer-panel.tsx:128-139` — the
+  `Conflict`-then-`force` replay, now correct (see below)
+- `apps/desktop/src/features/explorer/use-explorer-force-replay.dom.test.tsx` —
+  how that replay is tested through the hook
 - `apps/desktop/src/components/error-envelope.tsx`
 
 ## Allowed scope
@@ -67,13 +69,21 @@ missing.
    stop it. A hook's refusal is shown with its output, not swallowed.
 7. The response's changed paths refresh the list; no re-poll of `git.status`.
 
-## A bug to fix first, not to copy
+## The bug to copy from — fixed 2026-09-09, so copy it
 
-`use-explorer.ts:309-334` defines `deleteAnyway` and returns it, and **nothing
-calls it**: the notice at `explorer-panel.tsx:128-139` wires `discardAndRetry`,
-which is the *open/close* force replay. So `files.delete`'s dirty-document
-`Conflict` currently offers a button that does something else. Requirement 5 is
-the same pattern, so `EXPLORER-FORCE-REPLAY` should land first.
+This section used to say `deleteAnyway` was dead code and the notice replayed
+the wrong action. **`EXPLORER-FORCE-REPLAY` (the dirty-document force replay)
+landed in `d104d29` and fixed it**, so requirement 5 now has a correct pattern
+to follow rather than a trap to avoid.
+
+What it settled, and what this ticket should mirror: there is **one** refusal
+slot, not one per command. `use-explorer.ts` holds a single `Refusal`
+discriminated union over the three commands that can earn a dirty-document
+`Conflict`, each writing it before the call and clearing it on success, and
+`discardAndRetry` switches on the kind. Two slots meant the single notice
+button had to guess which one to replay, and the guess was the defect. A git
+discard adds a fourth case of exactly the same shape — resist giving it its own
+slot.
 
 ## Failure behavior
 

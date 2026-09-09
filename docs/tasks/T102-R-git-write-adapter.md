@@ -1,7 +1,7 @@
 # Task T102-R — `gritty-git-write`: the subprocess adapter, the probe, and the failure map
 
 - **Phase:** 2
-- **Status:** blocked (behind T102-C; ADR-029 is decided)
+- **Status:** review
 - **Depends on:** ADR-029, T102-C
 
 ## Objective
