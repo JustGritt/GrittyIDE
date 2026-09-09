@@ -57,6 +57,15 @@ const BOUNDARY_BONUS: i32 = 12;
 const CAMEL_BONUS: i32 = 10;
 const BASENAME_BONUS: i32 = 8;
 const BASENAME_START_BONUS: i32 = 10;
+/// Every matched character landed in the file name, not in a directory above
+/// it. Applied once, to the whole match, rather than per character — see
+/// `Scorer::best`, where the failing real-world case is recorded.
+const WHOLLY_IN_BASENAME_BONUS: i32 = 24;
+/// The query began exactly where the file name begins. This is the strongest
+/// single signal a quick-open has — someone typing `epn` for `editor-pane.tsx`
+/// almost always starts from the first letter of the name — and it is why fzf
+/// gives the first character its own multiplier.
+const STARTS_THE_BASENAME_BONUS: i32 = 20;
 const EXACT_CASE_BONUS: i32 = 2;
 /// Opening a gap. Larger in magnitude than [`BOUNDARY_BONUS`] on purpose: if it
 /// were not, jumping to the next separator would always pay for itself and a
@@ -337,9 +346,26 @@ impl Scorer {
         }
         positions.reverse();
 
+        // A query almost always names the *file*, not the path it sits under.
+        // Without this, a query can spend a character inside a directory and
+        // buy the rest back with one lucky boundary run in the basename:
+        // `epn` scored `fixtures/weird-files/binary/pixel.png` (the `e` of
+        // `fixtures`, then `p`+`n` of `png`) above `editor-pane.tsx`. Rewarding
+        // a match that lies wholly inside the basename says the thing the
+        // per-character basename bonus cannot: not "more of this matched the
+        // file name" but "*all* of it did".
+        let basename_start = basename_start(&self.path) as u32;
+        let first = positions.first().copied();
+
         // Longer paths are worse answers for the same score: `src/a.ts` should
         // beat `vendor/generated/deep/a.ts` when both match equally well.
-        let score = best_score - path_len as i32 / LENGTH_PENALTY_DIVISOR;
+        let mut score = best_score - path_len as i32 / LENGTH_PENALTY_DIVISOR;
+        if first.is_some_and(|first| first >= basename_start) {
+            score += WHOLLY_IN_BASENAME_BONUS;
+        }
+        if first == Some(basename_start) {
+            score += STARTS_THE_BASENAME_BONUS;
+        }
         Some(PathScore {
             score,
             ranges: merge(&positions),
@@ -663,6 +689,34 @@ mod tests {
             "epn",
             "apps/desktop/src/features/editor/editor-pane.tsx",
             "crates/persistence/src/expand.rs",
+        );
+    }
+
+    #[test]
+    fn a_match_wholly_inside_the_basename_beats_one_that_borrows_a_directory() {
+        // The real failure, found by ranking this repository rather than by a
+        // counter-example chosen to be beatable: `epn` scored
+        // `fixtures/weird-files/binary/pixel.png` **above** `editor-pane.tsx`,
+        // by spending its `e` on the `e` of `fixtures` and buying the rest back
+        // with the boundary-plus-consecutive run in `.png`. Every per-character
+        // bonus was working as designed; what was missing was a signal for
+        // "the whole query named the file".
+        beats(
+            "epn",
+            "apps/desktop/src/features/editor/editor-pane.tsx",
+            "fixtures/weird-files/binary/pixel.png",
+        );
+    }
+
+    #[test]
+    fn a_directory_query_still_matches_across_the_separator() {
+        // The basename reward must not become a basename *requirement*: a query
+        // that genuinely spans directories has nowhere else to match.
+        assert!(score_path("srcutil", "src/lib/util.ts").is_some());
+        beats(
+            "srcutil",
+            "src/lib/util.ts",
+            "src/lib/nested/deep/utility-other.ts",
         );
     }
 

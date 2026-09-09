@@ -280,6 +280,45 @@ highlight it and a byte offset is wrong for any non-ASCII path. There is a test.
 would return the first `limit` matches, not the best; `keeping_the_best_limit_is_not_keeping_the_first_limit`
 puts the single best match behind forty worse ones to prove it survives.
 
+### The ranking was wrong, and only a real corpus showed it
+
+The suite passed and the ranking was still wrong. Run against this repository
+rather than against fixtures, `epn` returned:
+
+```
+1.  79  fixtures/weird-files/binary/pixel.png       ← wrong
+2.  73  apps/desktop/src/features/editor/editor-pane.tsx
+```
+
+`pixel.png` matched `e`(pix**e**l) `p`(**p**ng) `n`(p**n**g) — one boundary hit
+plus one consecutive hit, on a short path. Every per-character bonus was working
+as specified. **The acceptance test passed only because the counter-example was
+chosen by the same person who wrote the scorer**, which is the failure mode a
+table test cannot catch: it proves the rule you thought of, not the ranking.
+
+Two signals were missing, both about the match *as a whole* rather than any
+character in it, so neither could be expressed as a positional bonus:
+
+- `WHOLLY_IN_BASENAME_BONUS` — every matched character is in the file name, not
+  borrowed from a directory above it.
+- `STARTS_THE_BASENAME_BONUS` — the query begins exactly where the file name
+  begins. This is the strongest signal a quick-open has, and it is why fzf gives
+  the first character its own multiplier.
+
+The first alone did not fix it (`pixel.png`'s match is *also* wholly in its
+basename — the first analysis was wrong and the test said so). The second is
+what settles it. Both are pinned by
+`a_match_wholly_inside_the_basename_beats_one_that_borrows_a_directory`, which
+uses the real losing path, and by
+`a_directory_query_still_matches_across_the_separator`, which stops the basename
+reward becoming a basename *requirement*.
+
+Re-validated across nine hand-written queries against this repository —
+`epn`, `appbar`, `rank`, `wksp`, `adr29`, `qopen`, `tabstrip`, `usedoc`, `mq` —
+each returning the intended file first, with no regression in the other eight.
+Walks were 36–107 ms over 11,352 files, which is the 94 ms this ticket was
+designed around.
+
 ### Known limitations
 
 - **Ignoring is still the eleven directory names.** No `.gitignore` support, so

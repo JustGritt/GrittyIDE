@@ -1,7 +1,7 @@
 # Task T130-U — The quick-open bar, and its four modes
 
 - **Phase:** 2
-- **Status:** doing
+- **Status:** review
 - **Depends on:** T130-C (the wire), T130-R (the ranking). Independent of T130-S,
   which adds one mode to a surface this ticket builds.
 
@@ -73,9 +73,17 @@ panel) and these must not touch each other.
 1. **The parser is pure and owns every prefix rule.**
    `parseQuery(raw) -> { mode: 'files'|'commands'|'line'|'symbols', term }`.
    `>` commands, `:` line, `@` symbols, anything else files. Leading whitespace
-   is insignificant; a second prefix character is part of the term (`>>foo` is
-   the command `>foo`), so a path beginning with a prefix character is still
-   reachable.
+   is insignificant.
+
+   **Corrected 2026-09-09** — the original text said "a second prefix character
+   is part of the term (`>>foo` is the command `>foo`), so a path beginning with
+   a prefix character is still reachable", and those two halves contradict each
+   other: if `>>foo` stays in *commands* mode then no path starting with `>` is
+   reachable, which was the stated purpose. The rule that makes the rationale
+   true is the one to implement: **a doubled prefix escapes it** — `>>foo` is
+   *files* mode with the term `>foo` — and only the first doubling is consumed
+   (`>>>x` → files, term `>>x`), so the mode does not flicker as a run of prefix
+   characters is typed.
 2. **The rows are a discriminated union, total over every state**: results,
    empty-because-no-query, empty-because-no-match, truncated, error, and
    loading. Follow `run-console-model.ts`'s `PromptGate`: every state named,

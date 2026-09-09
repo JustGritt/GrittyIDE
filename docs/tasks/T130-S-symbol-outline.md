@@ -1,7 +1,7 @@
 # Task T130-S — `@` symbols: a regex outline, honestly named
 
 - **Phase:** 2
-- **Status:** doing
+- **Status:** review
 - **Depends on:** T130-U (the bar, the parser and the row union it plugs into)
 
 ## Objective
