@@ -123,7 +123,7 @@ the workflow below are hand-maintained.
 | [T130-R](T130-R-path-ranking.md) | A fuzzy path scorer, and the walk that ranks with it | 2 | T080 | review |
 | [T130-S](T130-S-symbol-outline.md) | @ symbols: a regex outline, honestly named | 2 | T130-U | review |
 | [T130-U](T130-U-quick-open-bar.md) | The quick-open bar, and its four modes | 2 | T130-C, T130-R | review |
-| [T130-V](docs/tasks/T130-V-quick-open-component.md) | The quick-open component, its controller, and the two test tiers | 2 | T130-C, T130-U | review |
+| [T130-V](T130-V-quick-open-component.md) | The quick-open component, its controller, and the two test tiers | 2 | T130-C, T130-U | review |
 | [T140-PROFILE](T140-PROFILE-dev-profile-debuginfo.md) | Measure, then set the dev profile debuginfo | 2 | ADR-033 | todo |
 | [T140-SWEEP](T140-SWEEP-local-gc-trigger.md) | Fire the build-cache sweeper where the growth is | 2 | – | review |
 | T222-CODEX | Codex, as one provider file | 3 | T222-SEAM | todo |
