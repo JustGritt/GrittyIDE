@@ -19,13 +19,15 @@ import type { OutlineEntry, OutlineKind, QuickOpenMode } from './quick-open-type
  * resolves, joins or logs one; each is carried to the component and rendered
  * into a text node.
  *
- * **What is provisional.** `workspace.findFiles` is T130-C's and does not exist
- * yet, so this module does not name its response type. `FileMatch` and
- * `FileQueryState` below are *this module's* seam — the shape the controller
- * maps a response into — deliberately small so that landing the real command
- * is a mapping function, not a redesign. Nothing here imports a find-files type
- * from `@gritty/protocol`, because guessing at a contract nobody has agreed is
- * how two things end up disagreeing about it.
+ * **The seam, now that the contract exists.** `workspace.findFiles` landed with
+ * T130-C, and `FileMatch` below is still not its response type. It is what a
+ * *row* needs, which is less: no `score` (the wire says not to render it — the
+ * scale is the scorer's bonuses and means nothing outside one response) and one
+ * field the wire does not carry, `name`, because the basename is the row's
+ * title and deriving it per render is work the controller does once. Keeping
+ * the two apart is hard rule 4: what a provider returns is not domain state.
+ * The prediction the provisional version made held — landing the command was a
+ * mapping function and one added field.
  */
 
 /**
@@ -39,23 +41,33 @@ import type { OutlineEntry, OutlineKind, QuickOpenMode } from './quick-open-type
 export const QUICK_OPEN_MAX_ROWS = 50;
 
 /**
- * One file the search found. **Provisional until T130-C lands.**
+ * One file the search found: what a row needs, mapped from `FoundFile`.
  *
- * The two facts a row needs and nothing else. When `workspace.findFiles`
- * exists, the controller maps its response into this; if the real contract
- * carries more (a score, match offsets for highlighting), the addition happens
- * here and the row grows a field. It is not a wire type and must not become
- * one.
+ * Not a wire type, and it must not become one — see the module header.
  */
 export interface FileMatch {
   /** Workspace-relative, as the core reported it. Untrusted text. */
   readonly path: string;
   /** The basename, for the row's title. Untrusted text. */
   readonly name: string;
+  /**
+   * Where the query matched `path`, as `[start, length]` spans in **char**
+   * indices, ascending and non-overlapping.
+   *
+   * Straight from `FoundFile.ranges`, so the bar highlights without re-running
+   * the matcher — the reason `workspace.findFiles` exists rather than a
+   * client-side rank over `search.query`. Slice with `highlightSegments`, never
+   * with `String.prototype.slice`: these index code points and JavaScript
+   * strings index UTF-16 code units, and the two disagree past the BMP.
+   */
+  readonly ranges: readonly HighlightRange[];
 }
 
+/** `[start, length]`, in char indices. */
+export type HighlightRange = readonly [start: number, length: number];
+
 /**
- * Where the files query has got to. **Provisional until T130-C lands.**
+ * Where the files query has got to.
  *
  * Four states because a search has four: never asked, in flight, answered, and
  * failed. A cancelled query is deliberately *not* one of them — cancellation is
@@ -134,6 +146,8 @@ export type QuickOpenRow =
       readonly id: string;
       readonly name: string;
       readonly path: string;
+      /** Spans over `path`, for `highlightSegments`. Never over `name`. */
+      readonly ranges: readonly HighlightRange[];
     }
   | {
       readonly kind: 'command';
@@ -320,6 +334,7 @@ function filesList(state: QuickOpenState): QuickOpenList {
           id: `file:${index}`,
           name: match.name,
           path: match.path,
+          ranges: match.ranges,
         }),
       );
       return capped('files', rows, state.files.truncated);
@@ -466,4 +481,51 @@ export function rowsOf(list: QuickOpenList): readonly QuickOpenRow[] {
  */
 export function rowIds(list: QuickOpenList): readonly string[] {
   return rowsOf(list).map((row) => row.id);
+}
+
+/** A run of `text`, either matched by the query or not. */
+export interface HighlightSegment {
+  readonly text: string;
+  readonly matched: boolean;
+}
+
+/**
+ * Split `text` into matched and unmatched runs, for the bar to draw.
+ *
+ * **Slices by code point, not by `String.prototype.slice`.** `FoundFile.ranges`
+ * are char indices — Unicode scalar values, which is what the Rust scorer walks
+ * — and JavaScript string indices are UTF-16 code units. The two agree exactly
+ * up to U+FFFF and disagree after it, so a path containing an emoji or a rarer
+ * CJK character would highlight the wrong span, or half a surrogate pair, with
+ * the obvious slice. `Array.from` iterates code points, which is the same unit.
+ *
+ * Total by construction: the segments always concatenate back to `text`, so a
+ * malformed range cannot lose characters from the row. Ranges are assumed
+ * ascending and non-overlapping, which the contract guarantees; anything that
+ * would run backwards or past the end is clamped rather than trusted, because
+ * this is workspace-derived input (rule 13) and a render must not throw.
+ */
+export function highlightSegments(
+  text: string,
+  ranges: readonly HighlightRange[],
+): readonly HighlightSegment[] {
+  const points = Array.from(text);
+  if (ranges.length === 0) {
+    return text === '' ? [] : [{ text, matched: false }];
+  }
+  const segments: HighlightSegment[] = [];
+  let at = 0;
+  const push = (from: number, to: number, matched: boolean) => {
+    if (to <= from) return;
+    segments.push({ text: points.slice(from, to).join(''), matched });
+  };
+  for (const [start, length] of ranges) {
+    const from = Math.max(at, Math.min(start, points.length));
+    const to = Math.max(from, Math.min(start + length, points.length));
+    push(at, from, false);
+    push(from, to, true);
+    at = to;
+  }
+  push(at, points.length, false);
+  return segments;
 }

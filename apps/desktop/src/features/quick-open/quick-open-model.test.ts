@@ -4,6 +4,7 @@ import type { QuickCommand } from './quick-open-commands';
 import {
   type ActiveDocument,
   type FileMatch,
+  highlightSegments,
   parseLineTarget,
   QUICK_OPEN_MAX_ROWS,
   type QuickOpenEmptyReason,
@@ -53,6 +54,8 @@ function files(count: number): readonly FileMatch[] {
   return Array.from({ length: count }, (_, index) => ({
     path: `src/f${index}.ts`,
     name: `f${index}.ts`,
+    // `f` at index 4 of `src/f0.ts`: what the scorer would report for `f`.
+    ranges: [[4, 1] as const],
   }));
 }
 
@@ -445,6 +448,84 @@ describe('the union is total', () => {
       const list = quickOpenList(state);
       if (list.kind === 'results' || list.kind === 'truncated') continue;
       expect(`${label}: ${rowsOf(list).length}`).toBe(`${label}: 0`);
+    }
+  });
+});
+
+describe('highlightSegments', () => {
+  it('splits a path into matched and unmatched runs, in order', () => {
+    // `epn` against `editor-pane.tsx`: e, p, n.
+    expect(
+      highlightSegments('editor-pane.tsx', [
+        [0, 1],
+        [7, 1],
+        [9, 1],
+      ]),
+    ).toEqual([
+      { text: 'e', matched: true },
+      { text: 'ditor-', matched: false },
+      { text: 'p', matched: true },
+      { text: 'a', matched: false },
+      { text: 'n', matched: true },
+      { text: 'e.tsx', matched: false },
+    ]);
+  });
+
+  it('merges nothing and invents nothing: the segments rebuild the text', () => {
+    const cases: [string, readonly (readonly [number, number])[]][] = [
+      ['src/main.rs', []],
+      ['src/main.rs', [[0, 11]]],
+      [
+        'src/main.rs',
+        [
+          [0, 3],
+          [4, 4],
+        ],
+      ],
+      ['', []],
+      ['a', [[0, 1]]],
+    ];
+    for (const [text, ranges] of cases) {
+      const rebuilt = highlightSegments(text, ranges)
+        .map((segment) => segment.text)
+        .join('');
+      expect(rebuilt).toBe(text);
+    }
+  });
+
+  it('indexes by code point, not by UTF-16 code unit', () => {
+    // The whole reason the contract carries char indices: `🎨` is one char to
+    // the Rust scorer and two code units to JavaScript. `slice` would take
+    // half a surrogate pair here and highlight the wrong span after it.
+    const path = '🎨/theme.ts';
+    expect(path.length).toBe(11);
+    expect(Array.from(path).length).toBe(10);
+
+    // `t` at char 2 — the first character of `theme.ts`.
+    expect(highlightSegments(path, [[2, 1]])).toEqual([
+      { text: '🎨/', matched: false },
+      { text: 't', matched: true },
+      { text: 'heme.ts', matched: false },
+    ]);
+    // What the naive slice would have produced, kept as the counter-example:
+    expect(path.slice(2, 3)).not.toBe('t');
+  });
+
+  it('clamps a range that runs past the end rather than throwing', () => {
+    // Workspace-derived input (rule 13): a render must not throw on it.
+    expect(highlightSegments('abc', [[1, 99]])).toEqual([
+      { text: 'a', matched: false },
+      { text: 'bc', matched: true },
+    ]);
+    expect(highlightSegments('abc', [[99, 1]])).toEqual([{ text: 'abc', matched: false }]);
+  });
+
+  it('never emits an empty segment', () => {
+    for (const segment of highlightSegments('abc', [
+      [0, 1],
+      [1, 2],
+    ])) {
+      expect(segment.text).not.toBe('');
     }
   });
 });
