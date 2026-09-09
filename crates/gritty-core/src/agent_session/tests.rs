@@ -1653,6 +1653,54 @@ async fn notifications_are_off_until_the_user_asks_and_asking_is_what_prompts() 
 }
 
 #[tokio::test]
+async fn arming_a_stored_setting_never_prompts_at_startup() {
+    // T223 §2 forbids application startup from producing a permission prompt,
+    // which is the reason decision 6 kept this setting in memory at all. Now
+    // that ADR-031 gives it somewhere to live, restoring it must go through
+    // `arm_notifications` — which reads the permission — and never through
+    // `set_notifications`, which asks for it. This test is what keeps the two
+    // apart: it fails the moment someone "simplifies" the restore path.
+    let notifier = RecordingNotifier::answering(AgentNotificationPermission::Granted);
+    let (manager, _sink) = manager_with(
+        Arc::new(FakeRunner(Some(ONE_CLAUDE.to_owned()))),
+        None,
+        Some(notifier.clone()),
+    );
+
+    let armed = manager.arm_notifications(true);
+    assert!(armed.enabled, "a granted permission arms");
+    assert!(manager.notification_settings().enabled);
+    assert_eq!(
+        notifier.asked(),
+        0,
+        "arming a stored setting must never ask the operating system"
+    );
+
+    manager.shutdown();
+}
+
+#[tokio::test]
+async fn arming_against_a_revoked_permission_stays_off_without_asking() {
+    // The user turned notifications on, then revoked them at the OS level. The
+    // honest answer is a setting that reads enabled-but-blocked, not a
+    // permission dialog they did not open Gritty to answer.
+    let notifier = RecordingNotifier::answering(AgentNotificationPermission::Denied);
+    let (manager, _sink) = manager_with(
+        Arc::new(FakeRunner(Some(ONE_CLAUDE.to_owned()))),
+        None,
+        Some(notifier.clone()),
+    );
+
+    let armed = manager.arm_notifications(true);
+    assert!(!armed.enabled, "a revoked permission does not arm");
+    assert_eq!(armed.permission, AgentNotificationPermission::Denied);
+    assert_eq!(notifier.asked(), 0, "and it still asks nobody");
+    assert!(!manager.notification_settings().enabled);
+
+    manager.shutdown();
+}
+
+#[tokio::test]
 async fn a_refusal_leaves_the_setting_off_and_is_reported_rather_than_retried() {
     let notifier = RecordingNotifier::answering(AgentNotificationPermission::Denied);
     let (manager, _sink) = manager_with(

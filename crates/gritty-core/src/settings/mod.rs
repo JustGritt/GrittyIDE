@@ -77,6 +77,16 @@ impl SettingsService {
         self.blocking(move || opener.reveal(&path)).await?
     }
 
+    /// One setting's effective value, read synchronously.
+    ///
+    /// For the composition root, which needs an answer before the async
+    /// runtime is doing anything else — the store is already loaded by then, so
+    /// this is a lock and a map lookup rather than I/O. Everything on the
+    /// command path goes through [`Self::get`] and the blocking pool instead.
+    pub fn snapshot_value(&self, key: &str) -> Option<serde_json::Value> {
+        self.store.snapshot().values.get(key).cloned()
+    }
+
     /// `settings.describe`. A build constant: it does not read the file, so it
     /// cannot fail and does not touch the blocking pool.
     pub fn describe(&self) -> SettingsSchema {

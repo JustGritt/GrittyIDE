@@ -373,11 +373,25 @@ table works against them.
 5. **Focus suppression is suppression, not deferral.** A transition that
    happened while the window was focused is not replayed when it loses focus:
    the user was looking at the island, which is where that session already was.
-6. **The setting is per process and off at every launch.** §2 says off by
-   default and that enabling is what asks for permission; storing "enabled"
-   would mean either re-arming at startup (which §2 forbids) or inventing a
-   settings-persistence mechanism this repository does not have (rule 14). The
-   cost is real and is in the limitations below.
+6. **The setting is per process and off at every launch.**
+   **~~Superseded by T120-R on 2026-09-09~~** — the setting is now durable, and
+   §2 is intact. The reasoning below held only while the second horn was true:
+
+   > §2 says off by default and that enabling is what asks for permission;
+   > storing "enabled" would mean either re-arming at startup (which §2
+   > forbids) or inventing a settings-persistence mechanism this repository
+   > does not have (rule 14). The cost is real and is in the limitations below.
+
+   ADR-031 built that mechanism, so the dilemma dissolved rather than being
+   decided: `agents.notifications` lives in `settings.json`, and startup
+   restores it through `AgentSessionManager::arm_notifications`, which calls
+   `permission()` — a *query* — and never `request_permission()`. Nothing about
+   launching Gritty can raise a prompt, which is what §2 actually forbids.
+   A permission revoked at the OS level since leaves the setting reading
+   enabled-but-blocked rather than opening a dialog nobody asked for.
+
+   Two tests keep the two paths apart, and both were verified to fail when
+   `arm_notifications` is changed to ask.
 7. **`ENDED` and `IDLE` never notify.** `AgentActivity::needs_you` already
    answers this and is what the island counts; using the same predicate is what
    keeps the notification and the badge from disagreeing.

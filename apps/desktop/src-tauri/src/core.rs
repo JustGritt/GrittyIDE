@@ -274,6 +274,23 @@ impl Core {
                     })
                 })),
         );
+        // Restore the stored notification setting (T120-R, ADR-031). This is
+        // the one setting the *core* acts on by itself, and it is why the
+        // settings surface exists at all — T223 could not store it, because
+        // there was nowhere for a boolean the core acts on to live.
+        //
+        // `arm_notifications`, never `set_notifications`: the second calls
+        // `request_permission()`, so restoring through it would ask the
+        // operating system for notification permission at application startup,
+        // which T223 §2 forbids. This reads the permission already granted and
+        // arms only if it still holds.
+        if let Some(enabled) = settings
+            .snapshot_value("agents.notifications")
+            .and_then(|value| value.as_bool())
+        {
+            agents.arm_notifications(enabled);
+        }
+
         Self {
             registry,
             workspaces,

@@ -1076,6 +1076,46 @@ impl AgentSessionManager {
         }
     }
 
+    /// Restore a stored "on" **without asking anyone** (T120-R, ADR-031).
+    ///
+    /// Deliberately not [`Self::set_notifications`], and the difference is the
+    /// whole point: that one calls `request_permission()`, so routing a restore
+    /// through it would ask the operating system for notification permission at
+    /// application startup — which T223 §2 forbids in as many words, and which
+    /// is why decision 6 kept the setting in memory in the first place.
+    ///
+    /// This asks nothing. It reads the permission the user has already given,
+    /// which is a query and not a prompt, and arms only if it is still
+    /// `Granted`. A user who turned notifications on and later revoked them at
+    /// the OS level comes back to a setting that reads enabled-but-blocked
+    /// rather than to a permission dialog they did not open Gritty to answer.
+    ///
+    /// The prompt is reachable only from the control the user touches.
+    pub fn arm_notifications(&self, enabled: bool) -> AgentNotificationSettings {
+        let Some(notifier) = self.config.notifier.as_deref() else {
+            return self.notification_settings();
+        };
+        if !enabled || !notifier.supported() {
+            self.notifications_enabled.store(false, Ordering::Relaxed);
+            return self.notification_settings();
+        }
+        // `permission()`, never `request_permission()`. This line is the whole
+        // of T223 §2's guarantee.
+        let permission = notifier.permission();
+        let granted = permission == AgentNotificationPermission::Granted;
+        self.notifications_enabled.store(granted, Ordering::Relaxed);
+        tracing::info!(
+            granted,
+            ?permission,
+            "agent attention notifications armed from the stored setting"
+        );
+        AgentNotificationSettings {
+            enabled: granted,
+            supported: true,
+            permission,
+        }
+    }
+
     /// Whether the Gritty window has focus, from the composition root's window
     /// events. Focus that is never reported stays `true`, and Gritty stays
     /// silent (T223 §3, and the failure table's "window focus unknown").
