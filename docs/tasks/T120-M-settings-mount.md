@@ -1,7 +1,7 @@
 # Task T120-M — Mount the settings tab, and the comma chord
 
 - **Phase:** 2
-- **Status:** blocked
+- **Status:** todo
 - **Depends on:** T120-U (the page), **T310-U** (the files), T101-D (queue order)
 
 ## Objective

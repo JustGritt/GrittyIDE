@@ -97,6 +97,22 @@ back, `blocked` with a reason, and `superseded`. Two rules the tool enforces:
 sessions get the same answer — and **an agent never sets `done`**; you set
 `review` and the reviewer flips it.
 
+**A ticket is an id *and* a short title, and both travel together.** The id
+alone (`T101-D`, `T120-M`, `T130-M`) is not a name — it is a key, and by the
+time three lanes are in flight nobody can tell those three apart or remember
+which is blocked on which. So:
+
+- Give every ticket a `--title` when you `add` it, and a `--link` to its task
+  file so `render --index` can resolve the id to the file. A row with no link is
+  a dead end for whoever reads the index next.
+- **Never write a bare id where a person will read it** — in a block note, a
+  commit message, a completion report, a handover, or a message to another
+  session. Write `T120-M (mount the settings tab)`, not `T120-M`. The id stays
+  the stable key; the title is what makes it legible.
+- `--force` on `add` re-adds rather than edits: it overwrites `label`, `phase`
+  and `depends` with defaults when you omit them, so pass those through. Use
+  `meta --title` to change a title, never `add --force`.
+
 State is an append-only log in the shared git directory, so worktrees see one
 board. It is machine-local and never committed. The committed projection is the
 status column of `docs/tasks/README.md`, which
