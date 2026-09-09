@@ -53,7 +53,15 @@ pub struct GitStatusRequest {
 #[serde(tag = "status", rename_all = "camelCase")]
 pub enum GitStatusResponse {
     /// The repository was read within the budget.
-    Ready { repository: Box<RepositoryStatus> },
+    Ready {
+        repository: Box<RepositoryStatus>,
+        /// Whether the write half is usable, and why not when it is not
+        /// (T102-C). Absent when the probe has not run — never assume "yes"
+        /// from its absence.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        write: Option<GitWriteAvailability>,
+    },
     /// The workspace root is a directory, and not a Git repository. A value,
     /// not an error.
     NotARepository,
@@ -176,4 +184,175 @@ pub enum GitShowResponse {
     Pending {
         operation: Box<Operation>,
     },
+}
+
+// ---------------------------------------------------------------------------
+// The write half (T102-C, behind ADR-029)
+// ---------------------------------------------------------------------------
+//
+// Four commands that move a file between the bands the Changes panel already
+// draws, and one that turns the staged band into a commit. They differ from the
+// four reads above in three ways worth stating once, here, rather than on each
+// type.
+//
+// **The pathspec is always explicit.** There is no "all" flag on any request.
+// Gritty ships a terminal, so the user's own `git` may be running beside this
+// one; a wildcard write would sweep up whatever another process changed a
+// moment ago (ADR-029 decision 3).
+//
+// **The response says what changed**, modelled on `FileOperationResult`: the
+// paths to re-read, and the repository as it now stands, so the panel converges
+// on this response instead of issuing a `git.status` behind it. Nothing emits a
+// new `CoreEvent` — the response is the signal, exactly as `files.rs` decided.
+//
+// **All four share one `OperationKind`, `git.write`**, the way `files.transfer`
+// covers both `files.move` and `files.delete`. A UI matching on the kind should
+// not have to know which of four verbs is running.
+
+/// `git.stage`: copy the worktree content of named paths into the index.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GitStageRequest {
+    pub workspace_id: WorkspaceId,
+    /// Explicit, and never empty. No wildcard, no "stage everything".
+    pub paths: Vec<WorkspacePath>,
+}
+
+/// `git.unstage`: take named paths back out of the index.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GitUnstageRequest {
+    pub workspace_id: WorkspaceId,
+    pub paths: Vec<WorkspacePath>,
+}
+
+/// `git.discard`: throw away the changes to named paths.
+///
+/// The one irreversible corner of the write surface, and the reason it is not
+/// actually irreversible: a tracked path is **stashed** before it is reverted,
+/// and an untracked one goes to the **Trash** (`files.delete`'s disposition).
+/// Both are recoverable, which is recoverability's place in the priority order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GitDiscardRequest {
+    pub workspace_id: WorkspaceId,
+    pub paths: Vec<WorkspacePath>,
+    /// Discard anyway when an open document under one of the paths is dirty.
+    /// Without it that is a `Conflict` carrying `details.dirtyDocuments`
+    /// (hard rule 7), exactly as `files.delete` refuses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub force: Option<bool>,
+}
+
+/// `git.commit`: turn the staged band into a commit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitRequest {
+    pub workspace_id: WorkspaceId,
+    /// Committed verbatim. Empty or whitespace-only is `InvalidInput`: there is
+    /// no such thing as a commit with no message.
+    pub message: String,
+    /// Replace the previous commit rather than adding one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub amend: Option<bool>,
+    /// Append a `Signed-off-by` trailer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub signoff: Option<bool>,
+    /// Skip the repository's own hooks. Running them is what makes a Gritty
+    /// commit a real commit (ADR-029 decision 4), so this is a visible choice
+    /// and never a default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub no_verify: Option<bool>,
+}
+
+/// Where a discard put the work it took away.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct StashRef {
+    /// Full hex id of the stash commit, so it can be named even after further
+    /// stashes push it down the list.
+    pub commit: String,
+    /// What `git stash list` calls it *right now* — `stash@{0}`. Positional,
+    /// and stale as soon as anything else is stashed, which is why `commit` is
+    /// carried beside it.
+    pub name: String,
+}
+
+/// What a write changed. Modelled on `FileOperationResult`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GitWriteResult {
+    /// Paths whose status the write moved. An over-approximation is fine and
+    /// expected — re-reading a row the user cannot see costs nothing.
+    pub changed: Vec<WorkspacePath>,
+    /// The repository as it stands after the write, so the caller converges on
+    /// this response rather than issuing a `git.status` behind it.
+    pub repository: Box<RepositoryStatus>,
+    /// Full hex id of the commit this write created, when it created one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub commit: Option<String>,
+    /// Present when a discard stashed tracked work, so the UI can say where it
+    /// went rather than merely that it is gone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stash: Option<StashRef>,
+    /// Untracked paths sent to the Trash instead of the stash. `git stash` does
+    /// not take untracked files without `-u`, and `-u` would stash *every*
+    /// untracked file rather than the named ones — so these travel the route
+    /// `files.delete` already established.
+    pub trashed: Vec<WorkspacePath>,
+}
+
+/// What all four writes return.
+///
+/// One response type rather than four, because the arms and their meanings are
+/// identical. `Pending` is reachable from any of them, but in practice only a
+/// commit takes it: a `pre-commit` hook can run a whole test suite, while the
+/// other three are index operations that finish in milliseconds.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum GitWriteResponse {
+    Ready {
+        result: Box<GitWriteResult>,
+    },
+    /// The workspace root is a directory and not a Git repository. A value, not
+    /// an error, exactly as for the reads.
+    NotARepository,
+    /// The write outlived its budget and continues as a cancellable operation
+    /// whose `OperationCompleted.result` is the [`GitWriteResult`]. Cancelling
+    /// it kills the hook's process group.
+    Pending {
+        operation: Box<Operation>,
+    },
+}
+
+/// Whether the write half of the git surface can be used at all.
+///
+/// ADR-029 decision 5: a missing or too-old `git` disables staging and
+/// committing **with a stated reason**, never silently. This rides on
+/// `git.status` — which the panel already reads — so the UI learns the verdict
+/// before the user reaches for a button, rather than on the first failed click.
+///
+/// It is deliberately *not* a field of [`RepositoryStatus`]: that type belongs
+/// to `gritty-git`, which must not know that a write adapter exists (ADR-029
+/// decision 2 keeps the two crates independent). Composing them is
+/// `gritty-core::git`'s job, and this is that composition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GitWriteAvailability {
+    pub available: bool,
+    /// `git version 2.50.1 (Apple Git-155)`, when there is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub version: Option<String>,
+    /// Why not, in words meant for the user. Present exactly when
+    /// `available` is false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reason: Option<String>,
 }

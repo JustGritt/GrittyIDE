@@ -103,7 +103,7 @@ file decides.
 | `PROTOCOL_VERSION` | ~~2.20.0~~ | `T042` — the `files.*` command domain. **Spent 2026-09-08**, landed via PR #40. |
 | ADR | ~~ADR-028~~ | `T042` — editing the file tree. Written. |
 | `PROTOCOL_VERSION` | ~~2.21.0~~ | `T101-C` — `git.log` and `git.show`. **Spent 2026-09-09.** No `SCHEMA_VERSION`, no migration, no `CoreEvent` variant: both are reads, and a read that outlives its budget is carried by the existing `Operation*` events. |
-| `PROTOCOL_VERSION` | **2.22.0** | `T102-C` — `git.stage` / `git.unstage` / `git.discard` / `git.commit`. Claimed, not yet spent. |
+| `PROTOCOL_VERSION` | ~~2.22.0~~ | `T102-C` — `git.stage` / `git.unstage` / `git.discard` / `git.commit`. **Spent 2026-09-09.** No `SCHEMA_VERSION`, no migration and no `CoreEvent` variant: a write's response *is* its signal, so the four writes ride the existing `Operation*` events exactly as the reads do. |
 | ADR | ~~ADR-029~~ | Git writes run through the `git` binary. Written, and **accepted 2026-09-09**. |
 
 **`PROTO-W2-GIT` claims 2.17.0 and nothing else.** It spends no migration and

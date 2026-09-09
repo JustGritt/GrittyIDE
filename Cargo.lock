@@ -2444,6 +2444,7 @@ dependencies = [
  "gritty-agent-fake",
  "gritty-agents",
  "gritty-git",
+ "gritty-git-write",
  "gritty-persistence",
  "gritty-search",
  "gritty-terminal",
@@ -2494,6 +2495,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "gritty-git-write"
+version = "0.1.0"
+dependencies = [
+ "gritty-git",
+ "gritty-workspace",
+ "nix 0.31.3",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "gritty-persistence"
 version = "0.1.0"
 dependencies = [
@@ -2516,6 +2529,17 @@ dependencies = [
  "thiserror 2.0.20",
  "tracing",
  "ts-rs",
+]
+
+[[package]]
+name = "gritty-settings"
+version = "0.1.0"
+dependencies = [
+ "gritty-workspace",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tracing",
 ]
 
 [[package]]

@@ -17,6 +17,10 @@ gritty-agent-claude = { workspace = true }
 gritty-agent-fake = { workspace = true }
 gritty-agents = { workspace = true }
 gritty-git = { workspace = true }
+# T102-C: the write half of the git surface. A separate crate from
+# `gritty-git` by ADR-029 decision 2; this module composes both, and is the
+# only place that depends on the two together.
+gritty-git-write = { workspace = true }
 gritty-persistence = { workspace = true }
 gritty-search = { workspace = true }
 gritty-terminal = { workspace = true }

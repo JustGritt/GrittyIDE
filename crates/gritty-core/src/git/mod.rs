@@ -23,13 +23,19 @@
 //! a repository reports `NotARepository`, which is a follow-up (T100's report),
 //! not a silent behaviour.
 //!
-//! ## Nothing here writes
+//! ## Reads and writes run on different mechanisms, deliberately
 //!
-//! Four reads, and no fifth command that stages, commits or discards. That is
-//! not an omission: a write needs the `git` binary rather than `gix`, because
-//! `open.rs` deliberately loads no clean filter and a filterless *write* would
-//! put un-cleaned content in the index. ADR-029 is that decision, and an ADR is
-//! not an agent's to make.
+//! The four reads above are in-process `gix`. The four writes in
+//! [`write`] — `git.stage`, `git.unstage`, `git.discard`, `git.commit` — shell
+//! out to the user's own `git`. ADR-029 is that decision, and the short reason
+//! is that `open.rs` deliberately loads no clean filter: for a read that is
+//! conservative, and for a write it is silent index corruption, because staging
+//! *is* the operation that runs the clean filter. Signing and hooks are the
+//! other two.
+//!
+//! This module is where the two meet. `gritty-git` and `gritty-git-write` never
+//! depend on each other (ADR-029 decision 2), so composing them — a write, then
+//! the read that says what it did — is this module's job and nowhere else's.
 //!
 //! ## What this module is not
 //!
@@ -41,6 +47,7 @@
 //! `workstream/**`.
 
 pub mod wire;
+pub mod write;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -59,6 +66,7 @@ use crate::protocol::actor::Actor;
 use crate::protocol::error::{CoreError, CoreErrorCode};
 use crate::protocol::ids::CorrelationId;
 use crate::workspace::WorkspaceManager;
+use crate::workspace::files::DocumentTreeGuard;
 
 use wire::{
     GitDiffRequest, GitDiffResponse, GitLogRequest, GitLogResponse, GitShowRequest,
@@ -94,11 +102,24 @@ pub const DEFAULT_LOG_PAGE_SIZE: u32 = 50;
 /// orders of magnitude more payload. A caller that wants more can ask.
 pub const DEFAULT_DIFF_PAGE_SIZE: u32 = 100;
 
-/// Reads the repository at the open workspace's root.
+/// Reads — and, since T102-C, writes — the repository at the open workspace's
+/// root.
 pub struct GitService {
     workspaces: Arc<WorkspaceManager>,
     registry: Arc<OperationRegistry>,
     handle: Handle,
+    /// The `git --version` verdict, computed at most once.
+    ///
+    /// One slot rather than one per workspace: the probe asks about the
+    /// *binary*, which does not change when the user opens a different folder.
+    /// ADR-029 decision 5 says "once per workspace"; once per process is
+    /// strictly less work and answers the same question.
+    probe: tokio::sync::OnceCell<gritty_git_write::Availability>,
+    /// Installed by the composition root, so a discard can refuse over a dirty
+    /// open buffer the way `files.delete` does (hard rule 7). A `Weak`, for the
+    /// same reason `FileService` holds one: the document manager and this
+    /// service must not keep each other alive.
+    document_guard: std::sync::Mutex<Option<std::sync::Weak<dyn DocumentTreeGuard>>>,
     /// Tests slow the blocking read down so the budget hand-over and its
     /// cancellation can be exercised deterministically, rather than by racing
     /// a real repository against a short budget. The same hook
@@ -117,6 +138,8 @@ impl GitService {
             workspaces,
             registry,
             handle,
+            probe: tokio::sync::OnceCell::new(),
+            document_guard: std::sync::Mutex::new(None),
             #[cfg(test)]
             read_delay: std::sync::Mutex::new(Duration::ZERO),
         })
@@ -162,9 +185,13 @@ impl GitService {
             })
         };
         match tokio::time::timeout(budget, &mut job).await {
-            Ok(joined) => Ok(GitStatusResponse::Ready {
-                repository: Box::new(finish(joined, "git status")?),
-            }),
+            Ok(joined) => {
+                let repository = Box::new(finish(joined, "git status")?);
+                Ok(GitStatusResponse::Ready {
+                    repository,
+                    write: Some(self.availability().await),
+                })
+            }
             Err(_elapsed) => {
                 tracing::debug!(
                     workspace = %workspace.id,
@@ -610,7 +637,7 @@ mod tests {
             )
             .await
             .expect("status");
-        let GitStatusResponse::Ready { repository } = response else {
+        let GitStatusResponse::Ready { repository, .. } = response else {
             panic!("expected a ready status, got {response:?}");
         };
         assert_eq!(repository.branch.as_deref(), Some("main"));

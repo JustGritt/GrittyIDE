@@ -31,8 +31,9 @@ use crate::document::{
 };
 use crate::event::{CoreEvent, EventMeta};
 use crate::git::wire::{
-    GitDiffRequest, GitDiffResponse, GitLogRequest, GitLogResponse, GitShowRequest,
-    GitShowResponse, GitStatusRequest, GitStatusResponse,
+    GitCommitRequest, GitDiffRequest, GitDiffResponse, GitDiscardRequest, GitLogRequest,
+    GitLogResponse, GitShowRequest, GitShowResponse, GitStageRequest, GitStatusRequest,
+    GitStatusResponse, GitUnstageRequest, GitWriteResponse,
 };
 use crate::health::HealthReport;
 use crate::operation::Operation;
@@ -132,6 +133,14 @@ fn export_bindings() {
     GitLogResponse::export_all(&cfg).expect("export GitLogResponse");
     GitShowRequest::export_all(&cfg).expect("export GitShowRequest");
     GitShowResponse::export_all(&cfg).expect("export GitShowResponse");
+    // T102-C: the write half (ADR-029). `GitWriteResult`, `StashRef` and
+    // `GitWriteAvailability` follow transitively — the last through
+    // `GitStatusResponse`, which now carries the probe verdict.
+    GitStageRequest::export_all(&cfg).expect("export GitStageRequest");
+    GitUnstageRequest::export_all(&cfg).expect("export GitUnstageRequest");
+    GitDiscardRequest::export_all(&cfg).expect("export GitDiscardRequest");
+    GitCommitRequest::export_all(&cfg).expect("export GitCommitRequest");
+    GitWriteResponse::export_all(&cfg).expect("export GitWriteResponse");
     // Search (T080, reaching the shell in PROTO-W3). `SearchMatch`,
     // `SearchSummary`, `SkipCounts`, `MatchKind` and `SearchScope` live in
     // `gritty-search` and come along transitively.

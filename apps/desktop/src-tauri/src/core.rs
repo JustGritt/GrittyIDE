@@ -147,6 +147,13 @@ impl Core {
         // operation registry because a read that outlives its budget continues
         // as a cancellable operation rather than blocking the command.
         let git = GitService::new(workspaces.clone(), registry.clone(), handle.clone());
+        {
+            // The same guard, for the same reason: `git.discard` throws away
+            // worktree content, so it must be able to ask what is unsaved
+            // underneath it before it runs (hard rule 7, T102-C).
+            let as_guard: Arc<dyn DocumentTreeGuard> = documents.clone();
+            git.set_document_guard(Arc::downgrade(&as_guard));
+        }
         // Walks the tree and streams matches (T080). It takes the event bus
         // as well as the registry: `SearchMatchesFound` is its own event, and
         // the batching that bounds it lives on this side of the walk.

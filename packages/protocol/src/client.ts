@@ -38,14 +38,19 @@ import {
   type FileOperationResponse,
   type FileOperationResult,
   type ForgetWorkspaceRequest,
+  type GitCommitRequest,
   type GitDiffRequest,
   type GitDiffResponse,
+  type GitDiscardRequest,
   type GitLogRequest,
   type GitLogResponse,
   type GitShowRequest,
   type GitShowResponse,
+  type GitStageRequest,
   type GitStatusRequest,
   type GitStatusResponse,
+  type GitUnstageRequest,
+  type GitWriteResponse,
   type HealthReport,
   type KillTerminalRequest,
   type LastSession,
@@ -527,10 +532,16 @@ export interface CoreClient {
    *   `Operation`, whose `OperationCompleted.result` carries the payload. No
    *   new event family: the `Operation*` events already report it.
    *
-   * **None of these four writes.** Nothing here stages, commits, discards,
-   * checks out or fetches. A write surface is a later task and a deliberate
-   * decision, not an omission: it needs the `git` binary rather than `gix`, for
-   * reasons ADR-029 sets out, and an ADR is not an agent's to decide.
+   * **Four reads and four writes, on two different mechanisms.** The reads are
+   * in-process `gix`; the writes shell out to the user's own `git`. ADR-029 is
+   * that decision, and the short reason is that a filterless *write* would put
+   * un-cleaned content in the index — plus signing and hooks, which an
+   * in-process commit cannot do at all. A commit Gritty makes should be
+   * indistinguishable from one the user made by hand.
+   *
+   * **Still nothing networked.** No fetch, pull, push or clone: that brings
+   * credentials and transports, and is a further ADR (030) this surface
+   * deliberately does not cover.
    */
   git: {
     /**
@@ -570,6 +581,45 @@ export interface CoreClient {
      * error.
      */
     show(request: GitShowRequest): Promise<GitShowResponse>;
+
+    /**
+     * Move the named paths into the index.
+     *
+     * `paths` is explicit and must not be empty — **there is no "stage all"**.
+     * Gritty ships a terminal, so the user's own `git` may be running beside
+     * this one, and a wildcard write would sweep up whatever another process
+     * changed a moment ago.
+     *
+     * The response carries the repository as it now stands, so the caller
+     * converges on it rather than issuing a `git.status` behind it.
+     */
+    stage(request: GitStageRequest): Promise<GitWriteResponse>;
+    /** Take the named paths back out of the index. Same rules as `stage`. */
+    unstage(request: GitUnstageRequest): Promise<GitWriteResponse>;
+    /**
+     * Throw away the changes to the named paths — and keep them anyway.
+     *
+     * Tracked modifications are **stashed** before being reverted, and the
+     * response's `stash` says where they went; untracked files go to the
+     * **Trash**. Both are recoverable, which is why this is the one destructive
+     * verb here that does not have to be feared.
+     *
+     * Rejects with `Conflict` and `details.dirtyDocuments` when an open buffer
+     * under the selection is dirty, unless `force` is set.
+     */
+    discard(request: GitDiscardRequest): Promise<GitWriteResponse>;
+    /**
+     * Turn the staged band into a commit, using the user's identity, their
+     * signing key and their hooks.
+     *
+     * The one write that can answer `pending`: a `pre-commit` hook can run a
+     * whole test suite, so it continues as a cancellable `Operation`, and
+     * cancelling it kills the hook's process group.
+     *
+     * A hook that refuses is a `Conflict` carrying the hook's own `stderr` in
+     * `details`. The message is not lost — resend it.
+     */
+    commit(request: GitCommitRequest): Promise<GitWriteResponse>;
   };
   /**
    * Find-in-files over the open workspace. One call, and it is always an
@@ -835,6 +885,10 @@ export function createCoreClient(
       diff: (request) => command<GitDiffResponse>('git.diff', { request }),
       log: (request) => command<GitLogResponse>('git.log', { request }),
       show: (request) => command<GitShowResponse>('git.show', { request }),
+      stage: (request) => command<GitWriteResponse>('git.stage', { request }),
+      unstage: (request) => command<GitWriteResponse>('git.unstage', { request }),
+      discard: (request) => command<GitWriteResponse>('git.discard', { request }),
+      commit: (request) => command<GitWriteResponse>('git.commit', { request }),
     },
     files: {
       create: (request) => command<FileOperationResult>('files.create', { request }),

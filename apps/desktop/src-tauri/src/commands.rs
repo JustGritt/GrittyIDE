@@ -29,8 +29,9 @@ use gritty_core::document::{
 };
 use gritty_core::git::DEFAULT_GIT_BUDGET;
 use gritty_core::git::wire::{
-    GitDiffRequest, GitDiffResponse, GitLogRequest, GitLogResponse, GitShowRequest,
-    GitShowResponse, GitStatusRequest, GitStatusResponse,
+    GitCommitRequest, GitDiffRequest, GitDiffResponse, GitDiscardRequest, GitLogRequest,
+    GitLogResponse, GitShowRequest, GitShowResponse, GitStageRequest, GitStatusRequest,
+    GitStatusResponse, GitUnstageRequest, GitWriteResponse,
 };
 use gritty_core::health::ShellInfo;
 use gritty_core::operation::demo::{StartDemoRequest, start_demo};
@@ -1158,6 +1159,79 @@ pub async fn git_show(
     guard("git.show", move |correlation| async move {
         let request: GitShowRequest = parse_request(request)?;
         git.show(request, Actor::User, correlation, DEFAULT_GIT_BUDGET)
+            .await
+    })
+    .await
+}
+
+/// `git.stage`
+///
+/// The pathspec is explicit and never empty: there is no "stage everything" on
+/// this wire, because Gritty ships a terminal and a wildcard write could sweep
+/// up what another process changed a moment ago (ADR-029 decision 3).
+#[tauri::command]
+pub async fn git_stage(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<GitWriteResponse, CoreError> {
+    let git = core.git.clone();
+    guard("git.stage", move |correlation| async move {
+        let request: GitStageRequest = parse_request(request)?;
+        git.stage(request, Actor::User, correlation, DEFAULT_GIT_BUDGET)
+            .await
+    })
+    .await
+}
+
+/// `git.unstage`
+#[tauri::command]
+pub async fn git_unstage(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<GitWriteResponse, CoreError> {
+    let git = core.git.clone();
+    guard("git.unstage", move |correlation| async move {
+        let request: GitUnstageRequest = parse_request(request)?;
+        git.unstage(request, Actor::User, correlation, DEFAULT_GIT_BUDGET)
+            .await
+    })
+    .await
+}
+
+/// `git.discard`
+///
+/// The one destructive write, and the one that is nonetheless recoverable:
+/// tracked work is stashed before it is reverted and untracked files go to the
+/// Trash. A dirty open buffer under the selection is `Conflict` with
+/// `details.dirtyDocuments` unless `force` is set (hard rule 7).
+#[tauri::command]
+pub async fn git_discard(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<GitWriteResponse, CoreError> {
+    let git = core.git.clone();
+    guard("git.discard", move |correlation| async move {
+        let request: GitDiscardRequest = parse_request(request)?;
+        git.discard(request, Actor::User, correlation, DEFAULT_GIT_BUDGET)
+            .await
+    })
+    .await
+}
+
+/// `git.commit`
+///
+/// The write that can outlive its budget, because a `pre-commit` hook can run a
+/// test suite. It then continues as a cancellable operation whose cancellation
+/// kills the hook's process group (ADR-029 decision 6, hard rule 10).
+#[tauri::command]
+pub async fn git_commit(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<GitWriteResponse, CoreError> {
+    let git = core.git.clone();
+    guard("git.commit", move |correlation| async move {
+        let request: GitCommitRequest = parse_request(request)?;
+        git.commit(request, Actor::User, correlation, DEFAULT_GIT_BUDGET)
             .await
     })
     .await
