@@ -1,7 +1,7 @@
 # Task T120-C — The settings contract: `settings.*` and `SettingsChanged`
 
 - **Phase:** 2
-- **Status:** todo
+- **Status:** doing
 - **Depends on:** ADR-031 (the storage decision), T010 (the protocol envelope)
 
 ## Objective

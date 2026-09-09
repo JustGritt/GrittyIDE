@@ -16,6 +16,10 @@ publish = false
 gritty-core = { path = "crates/gritty-core" }
 gritty-workspace = { path = "crates/workspace" }
 gritty-persistence = { path = "crates/persistence" }
+# T120-R: the settings registry, document and file (ADR-031). A domain crate
+# that knows nothing about the core, the way `gritty-persistence` does, so the
+# failure policy can be tested without an event bus.
+gritty-settings = { path = "crates/settings" }
 gritty-terminal = { path = "crates/terminal" }
 gritty-agents = { path = "crates/agents" }
 gritty-agent-hook = { path = "crates/agent-hook" }

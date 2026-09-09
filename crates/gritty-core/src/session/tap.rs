@@ -99,6 +99,13 @@ impl Intent {
             // Ownership writes itself too (T325), in the same transaction that
             // decided the answer.
             | CoreEvent::OwnershipChanged(_)
+            // Settings write themselves, to their own file (ADR-031). The
+            // session database is deliberately not where they live: a settings
+            // file you can repair in any editor when the application will not
+            // start is the whole reason that decision went the way it did, and
+            // persisting a second copy here would give the two somewhere to
+            // disagree.
+            | CoreEvent::SettingsChanged(_)
             // The agent roster (T220) is an observation of other processes,
             // rediscovered from scratch each launch. Persisting it would make
             // Gritty claim on startup that sessions are running which may have

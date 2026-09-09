@@ -53,6 +53,7 @@ pub mod ownership;
 pub mod protocol;
 pub mod search;
 pub mod session;
+pub mod settings;
 pub mod shell;
 pub mod terminal;
 pub mod workspace;

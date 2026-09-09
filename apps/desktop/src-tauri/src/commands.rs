@@ -48,6 +48,9 @@ use gritty_core::session::{
     CandidatesRequest, DiscardSnapshotRequest, LastSession, RecoverSnapshotRequest,
     RecoveryCandidate, SessionRestoreResponse, UpdateSessionRequest,
 };
+use gritty_core::settings::wire::{
+    ResetSettingsRequest, SetSettingsRequest, SettingsSchema, SettingsSnapshot,
+};
 use gritty_core::shell::{OpenExternalRequest, RevealPathRequest};
 use gritty_core::terminal::wire::{
     KillTerminalRequest, ListProfilesRequest, RecolorTerminalRequest, RenameTerminalRequest,
@@ -1233,6 +1236,73 @@ pub async fn git_commit(
         let request: GitCommitRequest = parse_request(request)?;
         git.commit(request, Actor::User, correlation, DEFAULT_GIT_BUDGET)
             .await
+    })
+    .await
+}
+
+/// `settings.describe`
+///
+/// The schema the settings page renders its form from. A build constant: it
+/// reads no file, so it cannot fail and never touches the blocking pool.
+#[tauri::command]
+pub async fn settings_describe(core: State<'_, Core>) -> Result<SettingsSchema, CoreError> {
+    let settings = core.settings.clone();
+    guard("settings.describe", move |_correlation| async move {
+        Ok(settings.describe())
+    })
+    .await
+}
+
+/// `settings.get`
+#[tauri::command]
+pub async fn settings_get(core: State<'_, Core>) -> Result<SettingsSnapshot, CoreError> {
+    let settings = core.settings.clone();
+    guard("settings.get", move |_correlation| async move {
+        settings.get().await
+    })
+    .await
+}
+
+/// `settings.set`
+///
+/// A patch. Every key in it is validated before any of it is applied, so a
+/// refusal leaves the file exactly as it was rather than half-written.
+#[tauri::command]
+pub async fn settings_set(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<SettingsSnapshot, CoreError> {
+    let settings = core.settings.clone();
+    guard("settings.set", move |correlation| async move {
+        let request: SetSettingsRequest = parse_request(request)?;
+        settings.set(request, correlation).await
+    })
+    .await
+}
+
+/// `settings.reset`
+#[tauri::command]
+pub async fn settings_reset(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<SettingsSnapshot, CoreError> {
+    let settings = core.settings.clone();
+    guard("settings.reset", move |correlation| async move {
+        let request: ResetSettingsRequest = parse_request(request)?;
+        settings.reset(request, correlation).await
+    })
+    .await
+}
+
+/// `settings.reveal`
+///
+/// Takes no request, deliberately: the path shown is the core's own, and a
+/// renderer that could name one would be a renderer that can reveal anything.
+#[tauri::command]
+pub async fn settings_reveal(core: State<'_, Core>) -> Result<(), CoreError> {
+    let settings = core.settings.clone();
+    guard("settings.reveal", move |_correlation| async move {
+        settings.reveal().await
     })
     .await
 }

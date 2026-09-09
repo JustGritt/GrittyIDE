@@ -21,6 +21,7 @@ use gritty_core::operation::OperationRegistry;
 use gritty_core::ownership::OwnershipManager;
 use gritty_core::search::SearchManager;
 use gritty_core::session::{SessionService, SessionStore, SessionTap, TAP_CAPACITY, WriterConfig};
+use gritty_core::settings::SettingsService;
 use gritty_core::shell::{ExternalOpener, ShellService};
 use gritty_core::terminal::TerminalManager;
 use gritty_core::workspace::WorkspaceManager;
@@ -65,6 +66,11 @@ pub struct Core {
     pub documents: Arc<DocumentManager>,
     pub shell: Arc<ShellService>,
     pub git: Arc<GitService>,
+    /// User settings (T120, ADR-031). Backed by a `settings.json` beside the
+    /// session database rather than by a row in it: user configuration is not
+    /// application metadata, and a file is what stays repairable when a bad
+    /// value stops the application starting.
+    pub settings: Arc<SettingsService>,
     /// Live searches over the open workspace (T080). Like `git`, it holds the
     /// operation registry because its work is always a cancellable operation
     /// rather than something a command handler waits for.
@@ -140,7 +146,19 @@ impl Core {
         // Takes the workspace manager since T042: `shell.revealPath` resolves a
         // workspace-relative path through the root, so the WebView never names
         // a native one.
+        let opener = options.opener.clone();
         let shell = ShellService::new(handle.clone(), options.opener, workspaces.clone());
+        // Settings (T120). `None` data dir means defaults only and every write
+        // refused with a reason — the editor still works, which is the point.
+        let settings = Arc::new(SettingsService::new(
+            handle.clone(),
+            Arc::new(match options.data_dir.as_deref() {
+                Some(dir) => gritty_settings::SettingsStore::open(dir),
+                None => gritty_settings::SettingsStore::unavailable(),
+            }),
+            events.clone(),
+            opener,
+        ));
         let terminals = TerminalManager::new(events.clone(), workspaces.clone(), options.pty_host);
         let file_drop = FileDropService::new(events.clone(), workspaces.clone());
         // Reads a repository, and owns nothing else (T100). It holds the
@@ -263,6 +281,7 @@ impl Core {
             documents,
             shell,
             git,
+            settings,
             searches,
             files,
             session,

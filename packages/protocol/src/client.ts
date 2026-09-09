@@ -87,6 +87,7 @@ import {
   type RemoveWorkstreamRequest,
   type RenameEntryRequest,
   type RenameTerminalRequest,
+  type ResetSettingsRequest,
   type ResizeTerminalRequest,
   type ResolveConflictRequest,
   type ResolveDecisionRequest,
@@ -97,6 +98,9 @@ import {
   type SearchQueryRequest,
   type SessionRestoreResponse,
   type SetAgentNotificationsRequest,
+  type SetSettingsRequest,
+  type SettingsSchema,
+  type SettingsSnapshot,
   type SpawnTerminalRequest,
   type StartDemoRequest,
   type StartFakeRunRequest,
@@ -651,6 +655,49 @@ export interface CoreClient {
     query(request: SearchQueryRequest): Promise<Operation>;
   };
   /**
+   * User settings (T120, ADR-031).
+   *
+   * Settings live in a `settings.json` the core owns, not in the session
+   * database: ADR-004's SQLite rule governs what the application keeps about
+   * *itself*, and user configuration is a different category — one you must be
+   * able to repair in any editor when a bad value stops Gritty starting.
+   *
+   * `describe` is a build constant, so fetch it once. `get` and every write
+   * answer with the same `SettingsSnapshot`, so a caller converges on the
+   * response rather than issuing a `get` behind it.
+   *
+   * `set` is a **patch**: several keys in one call commit as one atomic file
+   * write, and keys you do not name are untouched — including keys this build
+   * does not declare, which are preserved rather than dropped. `reset` removes
+   * keys so their defaults apply again, rather than writing today's default
+   * into the file where a later build could never change it.
+   *
+   * Both refuse while `storage.writable` is false. The two cases that produce
+   * that — an unparseable file, and no application data directory — are
+   * reported with a reason meant for the user, and an unparseable file is
+   * **never overwritten**: a typo must not cost you the file you were editing.
+   */
+  settings: {
+    /** The schema the settings page renders its form from. */
+    describe(): Promise<SettingsSchema>;
+    /** Effective values, what is modified, and whether they can be saved. */
+    get(): Promise<SettingsSnapshot>;
+    /** Apply a patch. Refused whole if any key or value in it is invalid. */
+    set(request: SetSettingsRequest): Promise<SettingsSnapshot>;
+    /** Return keys to their defaults; omit `keys` to reset every known one. */
+    reset(request: ResetSettingsRequest): Promise<SettingsSnapshot>;
+    /**
+     * Show `settings.json` in the system file manager.
+     *
+     * Its own command rather than `shell.revealPath`, which takes a
+     * `workspaceId` and a `WorkspacePath` and resolves them against the
+     * workspace root — the settings file is outside every workspace, so that
+     * route is `PermissionDenied` by construction. The path here is
+     * core-derived and never renderer-supplied.
+     */
+    reveal(): Promise<void>;
+  };
+  /**
    * Changing the tree (T042, ADR-028). The write half of `workspace.list`.
    *
    * Every command answers with a `FileOperationResult` whose `changed` names
@@ -889,6 +936,13 @@ export function createCoreClient(
       unstage: (request) => command<GitWriteResponse>('git.unstage', { request }),
       discard: (request) => command<GitWriteResponse>('git.discard', { request }),
       commit: (request) => command<GitWriteResponse>('git.commit', { request }),
+    },
+    settings: {
+      describe: () => command<SettingsSchema>('settings.describe'),
+      get: () => command<SettingsSnapshot>('settings.get'),
+      set: (request) => command<SettingsSnapshot>('settings.set', { request }),
+      reset: (request) => command<SettingsSnapshot>('settings.reset', { request }),
+      reveal: () => command<void>('settings.reveal'),
     },
     files: {
       create: (request) => command<FileOperationResult>('files.create', { request }),

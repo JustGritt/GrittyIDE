@@ -21,6 +21,8 @@ tauri-build = { workspace = true }
 # parsing a command line. Already a workspace dependency; no new crate.
 uuid = { workspace = true }
 gritty-core = { workspace = true }
+# T120-R: the settings store the composition root opens over the data dir.
+gritty-settings = { workspace = true }
 gritty-terminal = { workspace = true }
 gritty-persistence = { workspace = true }
 open = { workspace = true }

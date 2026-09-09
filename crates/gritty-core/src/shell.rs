@@ -34,9 +34,16 @@ pub struct OpenExternalRequest {
 pub trait ExternalOpener: Send + Sync {
     fn open(&self, url: &str) -> Result<(), CoreError>;
 
-    /// Show `path` in the system file manager, selecting it (T042). The path
-    /// has already been resolved against the workspace root and proven to be
-    /// inside it, so an implementation may hand it to the platform as it is.
+    /// Show `path` in the system file manager, selecting it (T042).
+    ///
+    /// **The invariant is that the path is core-derived, never
+    /// renderer-supplied** — an implementation may hand it to the platform as
+    /// it is. `shell.revealPath` satisfies that by resolving a `WorkspacePath`
+    /// against the workspace root and proving it inside; `settings.reveal`
+    /// (T120-C) satisfies it differently, by passing the settings file's own
+    /// path, which the WebView never names and cannot influence. The earlier
+    /// wording promised workspace containment specifically, which the second
+    /// caller does not and need not meet.
     fn reveal(&self, path: &std::path::Path) -> Result<(), CoreError>;
 }
 

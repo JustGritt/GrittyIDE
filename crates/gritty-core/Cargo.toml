@@ -22,6 +22,8 @@ gritty-git = { workspace = true }
 # only place that depends on the two together.
 gritty-git-write = { workspace = true }
 gritty-persistence = { workspace = true }
+# T120-C: the settings domain this crate puts on the wire.
+gritty-settings = { workspace = true }
 gritty-search = { workspace = true }
 gritty-terminal = { workspace = true }
 gritty-workspace = { workspace = true }

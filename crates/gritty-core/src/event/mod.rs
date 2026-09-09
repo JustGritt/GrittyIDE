@@ -34,6 +34,7 @@ use crate::protocol::error::CoreError;
 use crate::protocol::ids::{CorrelationId, DocumentId, OperationId, WorkspaceId};
 use crate::search::wire::SearchMatchesFoundPayload;
 use crate::session::wire::PersistenceStatusPayload;
+use crate::settings::wire::SettingsChangedPayload;
 use crate::terminal::wire::{TerminalExitedPayload, TerminalOutputPayload};
 use crate::workspace::watch::WorkspaceEntriesChangedPayload;
 use crate::workspace::{Workspace, WorkspaceClosedReason};
@@ -119,6 +120,15 @@ pub enum CoreEvent {
     /// which is small and bounded, so a consumer that missed an event still
     /// converges on the next one.
     OwnershipChanged(OwnershipMap),
+    /// A user setting changed (T120), by a command or by an edit to
+    /// `settings.json` picked up when the window regained focus.
+    ///
+    /// Carries the whole effective set for the same reason `OwnershipChanged`
+    /// does — a consumer that missed one still converges — plus the list of
+    /// keys that moved, so a consumer can ignore an event that does not
+    /// concern it. Emitted only when the effective values actually differ,
+    /// which is also what keeps an applier that reads it from looping.
+    SettingsChanged(SettingsChangedPayload),
     /// The roster of agent sessions running on this machine changed (T220).
     /// Carries the whole roster and is emitted only when it actually differs
     /// from the last one, never once per poll (rule 8).
@@ -278,6 +288,7 @@ impl CoreEvent {
             Self::AgentRunEventAppended(_) => "AgentRunEventAppended",
             Self::SearchMatchesFound(_) => "SearchMatchesFound",
             Self::OwnershipChanged(_) => "OwnershipChanged",
+            Self::SettingsChanged(_) => "SettingsChanged",
         }
     }
 
@@ -313,7 +324,8 @@ impl CoreEvent {
             | Self::AgentTimelineAppended(_)
             | Self::AgentRunChanged(_)
             | Self::AgentRunEventAppended(_)
-            | Self::OwnershipChanged(_) => None,
+            | Self::OwnershipChanged(_)
+            | Self::SettingsChanged(_) => None,
         }
     }
 

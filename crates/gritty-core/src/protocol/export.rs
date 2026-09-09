@@ -51,6 +51,10 @@ use crate::session::wire::{
     CandidatesRequest, DiscardSnapshotRequest, LastSession, RecoverSnapshotRequest,
     RecoveryCandidate, SessionRestoreResponse, UpdateSessionRequest,
 };
+use crate::settings::wire::{
+    ResetSettingsRequest, SetSettingsRequest, SettingsChangedPayload, SettingsSchema,
+    SettingsSnapshot,
+};
 use crate::shell::{OpenExternalRequest, RevealPathRequest};
 use crate::terminal::wire::{
     KillTerminalRequest, ListProfilesRequest, RecolorTerminalRequest, RenameTerminalRequest,
@@ -141,6 +145,15 @@ fn export_bindings() {
     GitDiscardRequest::export_all(&cfg).expect("export GitDiscardRequest");
     GitCommitRequest::export_all(&cfg).expect("export GitCommitRequest");
     GitWriteResponse::export_all(&cfg).expect("export GitWriteResponse");
+    // Settings (T120-C, ADR-031). `SettingSection`, `SettingSpecWire`,
+    // `SettingKindWire`, `SettingChoice`, `SettingScope`, `SettingApplies`,
+    // `SettingDiagnostic` and `SettingsStorage` follow transitively through the
+    // schema and the snapshot.
+    SettingsSchema::export_all(&cfg).expect("export SettingsSchema");
+    SettingsSnapshot::export_all(&cfg).expect("export SettingsSnapshot");
+    SetSettingsRequest::export_all(&cfg).expect("export SetSettingsRequest");
+    ResetSettingsRequest::export_all(&cfg).expect("export ResetSettingsRequest");
+    SettingsChangedPayload::export_all(&cfg).expect("export SettingsChangedPayload");
     // Search (T080, reaching the shell in PROTO-W3). `SearchMatch`,
     // `SearchSummary`, `SkipCounts`, `MatchKind` and `SearchScope` live in
     // `gritty-search` and come along transitively.
