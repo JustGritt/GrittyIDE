@@ -36,6 +36,19 @@ export interface ExplorerOptions {
 }
 
 /**
+ * An action the core refused with `Conflict` because a document under it is
+ * dirty, held so the notice can replay it with `force`.
+ *
+ * Three commands can earn that refusal — `workspace.open`, `workspace.close`
+ * and `files.delete` — and each replays differently, so the kind travels with
+ * the arguments the replay needs.
+ */
+type Refusal =
+  | { kind: 'open'; path: string | undefined }
+  | { kind: 'close' }
+  | { kind: 'delete'; paths: readonly string[]; mode: DeleteMode };
+
+/**
  * The explorer as its consumers see it. The shell owns the instance (T049):
  * the launcher needs `openFolder` and the top bar needs `state.workspace`, and
  * a second instance would mean a second subscription and a second tree.
@@ -51,10 +64,19 @@ export function useExplorer(options: ExplorerOptions = {}) {
     }
   }, [controlledShowHidden]);
   const [error, setError] = useState<CoreError | null>(null);
-  /** The action the core refused with `Conflict` (dirty documents), replayable with force. */
-  const refused = useRef<{ kind: 'open'; path: string | undefined } | { kind: 'close' } | null>(
-    null,
-  );
+  /**
+   * The action the core refused with `Conflict` (dirty documents), replayable
+   * with `force`.
+   *
+   * **One slot, not one per command.** The notice that offers the replay is a
+   * single button, so it has to replay *the* refusal; two slots meant it had to
+   * guess which, and it guessed wrong — `deleteAnyway` was defined, returned
+   * and never called, while the notice wired the open/close replay for every
+   * `Conflict` including a delete's (EXPLORER-FORCE-REPLAY). Last writer wins,
+   * which is exactly "what the core most recently refused", and every action
+   * clears it on success.
+   */
+  const refused = useRef<Refusal | null>(null);
 
   useEffect(() => {
     // Subscribe before asking for the current workspace so nothing emitted in
@@ -193,14 +215,6 @@ export function useExplorer(options: ExplorerOptions = {}) {
     [run, workspace],
   );
 
-  /** Replay the refused open/close with `force`: the user chose to drop unsaved changes. */
-  const discardAndRetry = useCallback(async () => {
-    const last = refused.current;
-    if (!last) return;
-    if (last.kind === 'close') await closeWorkspace(true);
-    else await openFolder(last.path, true);
-  }, [closeWorkspace, openFolder]);
-
   const cancelListing = useCallback(
     (node: ExplorerNode) =>
       run(async () => {
@@ -306,32 +320,36 @@ export function useExplorer(options: ExplorerOptions = {}) {
     [run, workspace, settleResponse],
   );
 
-  /** The action the dirty-document `Conflict` replays with `force`. */
-  const refusedDelete = useRef<{ paths: readonly string[]; mode: DeleteMode } | null>(null);
-
   const deleteEntries = useCallback(
     (paths: readonly string[], mode: DeleteMode, force = false) =>
       run(async () => {
         if (!workspace || paths.length === 0) return undefined;
-        refusedDelete.current = { paths, mode };
+        refused.current = { kind: 'delete', paths, mode };
         const response = await core.files.delete({
           workspaceId: workspace.id,
           paths: [...paths],
           mode,
           ...(force ? { force: true } : {}),
         });
-        refusedDelete.current = null;
+        refused.current = null;
         return settleResponse(response);
       }),
     [run, workspace, settleResponse],
   );
 
-  /** Replay the refused delete with `force`: the user chose to lose the buffer. */
-  const deleteAnyway = useCallback(async () => {
-    const last = refusedDelete.current;
+  /**
+   * Replay whichever action the core refused, with `force`: the user chose to
+   * drop the unsaved changes.
+   *
+   * Declared after every action it can replay, because it calls them.
+   */
+  const discardAndRetry = useCallback(async () => {
+    const last = refused.current;
     if (!last) return;
-    await deleteEntries(last.paths, last.mode, true);
-  }, [deleteEntries]);
+    if (last.kind === 'close') await closeWorkspace(true);
+    else if (last.kind === 'open') await openFolder(last.path, true);
+    else await deleteEntries(last.paths, last.mode, true);
+  }, [closeWorkspace, openFolder, deleteEntries]);
 
   /** Show an entry in the system file manager. Resolved core-side. */
   const revealInFileManager = useCallback(
@@ -395,7 +413,6 @@ export function useExplorer(options: ExplorerOptions = {}) {
     renameEntry,
     transfer,
     deleteEntries,
-    deleteAnyway,
     revealInFileManager,
     paste,
     undo,

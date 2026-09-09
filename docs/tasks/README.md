@@ -84,7 +84,7 @@ the workflow below are hand-maintained.
 | [CI-RUNNER-GC](CI-RUNNER-GC-disk-retention.md) | Self-hosted runner never cleans up: target/ and stale bundles grow unbounded on the dev Mac |  | – | review |
 | CONFIRM-DIALOG | Extract a shared confirm dialog before a third copy is written | 2 | – | unspec |
 | [EVENT-LISTEN-GAP](EVENT-LISTEN-GAP-startup-events.md) | An event emitted before the WebView is listening reaches nobody | 1 | T010 | review |
-| EXPLORER-FORCE-REPLAY | deleteAnyway is dead code and the notice replays the wrong action | 2 | – | todo |
+| [EXPLORER-FORCE-REPLAY](EXPLORER-FORCE-REPLAY-dirty-document-replay.md) | deleteAnyway is dead code and the notice replays the wrong action | 2 | – | review |
 | MARKDOWN-BENCH | A markdown benchmark with a recorded baseline, if a perf gate is wanted | 3 | MARKDOWN-BUDGET-FLAKE | unspec |
 | MARKDOWN-BUDGET-FLAKE | render.test.ts 2000ms wall-clock budget fails under concurrent-build load | 3 | – | review |
 | MONACO-JSDOM-FLAKE | model-eol.dom.test.ts times out its 10s beforeAll under load | 3 | JSDOM-VITEST | review |
