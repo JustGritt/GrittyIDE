@@ -39,6 +39,15 @@ export interface QuickOpenBarProps {
   readonly onDismiss: () => void;
   /** Focus the field on mount. The mount opens the bar, so this is per-open. */
   readonly autoFocus?: boolean;
+  /**
+   * Bump to focus and select the field again (T130-M §5).
+   *
+   * ⌘P while the bar is already open focuses and selects rather than toggling
+   * it shut, so a second press is "let me retype this" and never "close it".
+   * A signal rather than an imperative handle, so the mount stays declarative
+   * and the behaviour is assertable without a ref.
+   */
+  readonly focusSignal?: number;
 }
 
 /** The structural half of a `KeyboardEvent` the keymap reads. */
@@ -69,6 +78,7 @@ export function QuickOpenBar({
   onAccept,
   onDismiss,
   autoFocus = true,
+  focusSignal = 0,
 }: QuickOpenBarProps) {
   const container = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -102,6 +112,17 @@ export function QuickOpenBar({
       restoreTo.current?.focus();
     };
   }, [autoFocus]);
+
+  // A second ⌘P: take the focus back and select what is there, so the next
+  // keystroke replaces the query. Skipped on the first render, where the mount
+  // effect above has already focused an empty field.
+  const firstSignal = useRef(focusSignal);
+  useEffect(() => {
+    if (focusSignal === firstSignal.current) return;
+    const element = input.current;
+    element?.focus();
+    element?.select();
+  }, [focusSignal]);
 
   // Dismiss on a click outside, on resize and on scroll — the same three the
   // menu takes, and for the same reason. Capture, so the thing underneath does

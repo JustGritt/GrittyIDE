@@ -46,6 +46,17 @@ export interface EditorHost {
   focus(): void;
   /** Cmd/Ctrl+S while the editor has focus. */
   onSave(callback: () => void): void;
+  /**
+   * Cmd/Ctrl+P while the editor has focus, and its shifted form (`commands`).
+   *
+   * Registered with Monaco rather than left to the window listener, which is
+   * the case a naive one gets wrong: Monaco puts a `<textarea>` under the
+   * cursor, and the shell's listener deliberately yields to a `<textarea>` so
+   * that a live terminal keeps `Ctrl+P` for readline. Quick open's primary
+   * case is opening it *while editing*, so without this it would be the one
+   * place the chord does not fire.
+   */
+  onQuickOpen(callback: (commands: boolean) => void): void;
   onCursorChange(callback: (position: CursorPosition) => void): () => void;
   /** Every selection change (a plain cursor move included): anchor and head as plain numbers. */
   onSelectionChange(callback: (selection: SelectionState) => void): () => void;
@@ -98,6 +109,16 @@ export function createEditorHost(container: HTMLElement): EditorHost {
     },
     onSave(callback) {
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, callback);
+    },
+    onQuickOpen(callback) {
+      // Both forms, so ⌘⇧P reaches the command mode from inside a buffer as
+      // well. `addCommand` takes precedence over Monaco's own bindings for
+      // these two, which is intended: Gritty's palette is the one with a
+      // workspace behind it.
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP, () => callback(false));
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyP, () =>
+        callback(true),
+      );
     },
     onCursorChange(callback) {
       const subscription = editor.onDidChangeCursorPosition((event) => {

@@ -5246,3 +5246,141 @@ textarea:focus-visible {
   font-size: var(--text-micro);
   white-space: nowrap;
 }
+
+/* Quick open (T130-M).
+ *
+ * Anchored, never in flow: the slot is a zero-size positioning context in the
+ * bar, so opening the overlay moves no other pixel. Same layer as the island
+ * sheet (z-index 30) and the same shape, because both hang off the app bar and
+ * a second visual language for the same relationship would be noise. */
+.quick-open-slot {
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+.quick-open {
+  position: absolute;
+  top: calc(100% + 6px);
+  /* Centred on the window rather than on the slot: the field is about the
+     workspace, not about the thing it happens to be anchored to. */
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  width: 560px;
+  max-width: calc(100vw - 24px);
+  border-radius: var(--radius-lg);
+  background: var(--surface-chrome);
+  box-shadow:
+    0 20px 48px rgb(0 0 0 / 45%),
+    inset 0 0 0 1px var(--border);
+}
+
+.quick-open-field {
+  width: 100%;
+  padding: var(--gap-sm) var(--gap);
+  border: 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-body);
+}
+
+.quick-open-field::placeholder {
+  color: var(--fg-faint);
+}
+
+.quick-open-field:focus-visible {
+  outline: none;
+  box-shadow: inset 0 -1px 0 var(--accent);
+}
+
+.quick-open-list {
+  display: flex;
+  flex-direction: column;
+  /* Bounded so a full list never runs past the window; the row cap is the
+     model's, this is the viewport's. */
+  max-height: calc(100vh - var(--bar-h) - var(--status-h) - 48px);
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+}
+
+.quick-open-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  min-height: var(--row-h);
+  padding: 0 var(--gap);
+  cursor: default;
+}
+
+.quick-open-row[data-active="true"] {
+  background: var(--surface-active);
+}
+
+.quick-open-title {
+  color: var(--fg);
+  font-size: var(--text-control);
+  white-space: nowrap;
+}
+
+.quick-open-row[aria-disabled="true"] .quick-open-title {
+  color: var(--fg-muted);
+}
+
+.quick-open-detail {
+  overflow: hidden;
+  color: var(--fg-dim);
+  font-size: var(--text-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-open-group,
+.quick-open-reason {
+  color: var(--fg-faint);
+  font-size: var(--text-micro);
+}
+
+.quick-open-reason {
+  margin-inline-start: auto;
+}
+
+/* The spans the scorer matched. `mark`'s default is a yellow highlight, which
+   is not this palette's; the accent says the same thing in it. */
+.quick-open-match {
+  background: transparent;
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.quick-open-symbol::before {
+  color: var(--fg-gutter);
+  content: "#";
+  font-family: var(--font-mono);
+}
+
+.quick-open-note {
+  margin: 0;
+  padding: var(--gap-sm) var(--gap);
+  color: var(--fg-dim);
+  font-size: var(--text-meta);
+}
+
+.quick-open-truncated {
+  border-top: 1px solid var(--border);
+  color: var(--warn-text);
+}
+
+.quick-open-error {
+  color: var(--error-text);
+}
+
+.quick-open-error-code {
+  margin-inline-end: var(--gap-xs);
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+}

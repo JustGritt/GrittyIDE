@@ -1,4 +1,4 @@
-import { type SessionTab, toCoreError } from '@gritty/protocol';
+import { type SessionTab, toCoreError, type WorkspacePath } from '@gritty/protocol';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Splitter } from './components/splitter';
 import { boundsWithin } from './components/splitter-geometry';
@@ -12,7 +12,7 @@ import {
 import { rosterRows } from './features/agents/roster-model';
 import { useAgentConsole } from './features/agents/use-agent-console';
 import { useAgents } from './features/agents/use-agents';
-import { activeTab } from './features/documents/documents-reducer';
+import { activeTab, displayText, isUnsaved } from './features/documents/documents-reducer';
 import { useDocuments } from './features/documents/use-documents';
 import { DropOverlay } from './features/drop/drop-overlay';
 import { useFileDrop } from './features/drop/use-file-drop';
@@ -35,7 +35,7 @@ import { useRuns } from './features/runs/use-runs';
 import { DEFAULT_LAYOUT, type Layout, PANE_LIMITS } from './features/session/persisted-layout';
 import { SessionNotices } from './features/session/session-notices';
 import { useSession } from './features/session/use-session';
-import { AppBar, type HealthState } from './features/shell/app-bar';
+import { AppBar, type HealthState, type QuickOpenMount } from './features/shell/app-bar';
 import { type Accelerator, acceleratorForOs } from './features/shell/open-shortcuts';
 import { useOpenShortcuts } from './features/shell/use-open-shortcuts';
 import { cwdForDocument } from './features/terminal/terminal-cwd';
@@ -223,6 +223,55 @@ export function App() {
     onOpenPath: workspace ? undefined : () => setPathOpen(true),
   });
 
+  // Quick open (T130-M). The *data* is assembled here, because the workspace,
+  // the active buffer and the terminal are here; the bar, and whether it is
+  // showing, are `AppBar`'s.
+  const quickOpenTab = activeTab(documents.state);
+  const quickOpenDocument = useMemo(() => {
+    if (quickOpenTab === null) return null;
+    const path = quickOpenTab.document.path;
+    const separator = path.lastIndexOf('/');
+    // The buffer as the editing surface has it, so `@` outlines what is on
+    // screen rather than what was last saved.
+    const text = displayText(quickOpenTab) ?? '';
+    return {
+      name: separator === -1 ? path : path.slice(separator + 1),
+      dirty: isUnsaved(quickOpenTab),
+      languageId: quickOpenTab.document.languageId,
+      text,
+      lineCount: text === '' ? 1 : text.split('\n').length,
+    };
+  }, [quickOpenTab]);
+
+  const quickOpen: QuickOpenMount = {
+    deps: {
+      workspaceId: workspace?.id ?? null,
+      hasWorkspace: workspace !== null,
+      document: quickOpenDocument,
+      terminalVisible: terminalOpen,
+      openFolder: () => openFolder(),
+      saveDocument: () => {
+        const id = documents.state.activeId;
+        if (id !== null) void documents.save(id);
+      },
+      toggleTerminal: () => setTerminalOpen((visible) => !visible),
+      // There is no settings *page* yet (T120-U/T120-M), so this reveals
+      // `settings.json` in the file manager — the command `settings.reveal`
+      // T120-C landed. A real action rather than an inert row; it becomes the
+      // page when there is one.
+      openSettings: () => void core.settings.reveal(),
+      openFile: (path, options) => {
+        if (workspace) void documents.openFile(workspace.id, path as WorkspacePath, options);
+      },
+      revealLine: (line, column) => {
+        const id = documents.state.activeId;
+        if (id !== null) editor.revealPosition(id, { lineNumber: line, column });
+      },
+    },
+    accelerator,
+    subscribeEditorChord: editor.subscribeQuickOpen,
+  };
+
   /**
    * Open a workspace and, when asked, put its persisted tabs back. The startup
    * restore runs once per WebView, so a workspace opened from the rail cannot
@@ -275,6 +324,7 @@ export function App() {
       <AppBar
         health={state}
         workspace={workspace}
+        quickOpen={quickOpen}
         island={
           workspace ? (
             <AgentIsland

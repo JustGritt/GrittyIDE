@@ -31,6 +31,15 @@ export interface EditorBinding {
   /** Line endings of each open document as last received from the core. */
   readonly eols: Readonly<Record<string, Eol>>;
   subscribeCursor(listener: (position: CursorPosition) => void): () => void;
+  /**
+   * ⌘P / ⌘⇧P pressed *inside* a buffer (T130-M §2).
+   *
+   * Monaco puts a `<textarea>` under the cursor and the shell's window
+   * listener deliberately yields to one, so that a live terminal keeps
+   * `Ctrl+P` for readline. Without this registration the chord would fail in
+   * quick open's primary case — opening it while you are editing.
+   */
+  subscribeQuickOpen(listener: (commands: boolean) => void): () => void;
   subscribeScroll(listener: (state: ScrollState) => void): () => void;
   /**
    * Notified on every content change of the document's model, and once when
@@ -94,6 +103,7 @@ export function useEditorBinding(
   const applied = useRef(new Map<DocumentId, number>());
   const detachers = useRef(new Map<DocumentId, () => void>());
   const cursorListeners = useRef(new Set<(position: CursorPosition) => void>());
+  const quickOpenListeners = useRef(new Set<(commands: boolean) => void>());
   const scrollListeners = useRef(new Set<(state: ScrollState) => void>());
   const contentListeners = useRef(new Map<DocumentId, Set<() => void>>());
   const contentSubscriptions = useRef(new Map<DocumentId, { dispose(): void }>());
@@ -160,6 +170,9 @@ export function useEditorBinding(
       host.onSave(() => {
         const activeId = documentsRef.current.state.activeId;
         if (activeId !== null) void documentsRef.current.save(activeId);
+      });
+      host.onQuickOpen((commands) => {
+        for (const listener of [...quickOpenListeners.current]) listener(commands);
       });
       const unsubscribeCursor = host.onCursorChange((position) => {
         for (const listener of [...cursorListeners.current]) listener(position);
@@ -301,6 +314,13 @@ export function useEditorBinding(
     };
   }, []);
 
+  const subscribeQuickOpen = useCallback((listener: (commands: boolean) => void) => {
+    quickOpenListeners.current.add(listener);
+    return () => {
+      quickOpenListeners.current.delete(listener);
+    };
+  }, []);
+
   const subscribeScroll = useCallback((listener: (state: ScrollState) => void) => {
     scrollListeners.current.add(listener);
     return () => {
@@ -364,6 +384,7 @@ export function useEditorBinding(
     containerRef,
     eols,
     subscribeCursor,
+    subscribeQuickOpen,
     subscribeScroll,
     subscribeContent,
     readText,
