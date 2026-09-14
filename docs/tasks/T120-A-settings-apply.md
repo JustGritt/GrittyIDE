@@ -1,7 +1,7 @@
 # Task T120-A — Make the editor and terminal obey their settings, then delete the popovers
 
 - **Phase:** 2
-- **Status:** doing
+- **Status:** review
 - **Depends on:** T120-M (mount the settings tab)
 
 Written after the fact: the ticket was specified in its board note and in the
