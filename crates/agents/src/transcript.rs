@@ -490,12 +490,25 @@ fn turn_boundary(record: &serde_json::Map<String, Value>) -> Option<TurnState> {
     {
         return None;
     }
-    if record.get("type").and_then(Value::as_str) == Some("system") {
-        return matches!(
-            record.get("subtype").and_then(Value::as_str),
-            Some("turn_duration" | "stop_hook_summary")
-        )
-        .then_some(TurnState::Ended);
+    match record.get("type").and_then(Value::as_str) {
+        Some("system") => {
+            return matches!(
+                record.get("subtype").and_then(Value::as_str),
+                Some("turn_duration" | "stop_hook_summary")
+            )
+            .then_some(TurnState::Ended);
+        }
+        // The CLI handing queued input to the model. Usually the input's own
+        // record follows within milliseconds and says the same thing, but a
+        // peer session's message or a usage-limit "continue" arrives as a meta
+        // record, which is not a boundary — and the model answered all 18 of
+        // those in the corpus TURN-START-DEQUEUE measured. Enqueue, `remove`
+        // and `popAll` hand nothing over.
+        Some("queue-operation") => {
+            return (record.get("operation").and_then(Value::as_str) == Some("dequeue"))
+                .then_some(TurnState::InProgress);
+        }
+        _ => {}
     }
     let message = record.get("message").and_then(Value::as_object)?;
     match message.get("role").and_then(Value::as_str)? {
@@ -532,16 +545,21 @@ fn user_turn_boundary(content: &Value) -> Option<TurnState> {
 /// What a line of user text says about the turn.
 ///
 /// Text the CLI writes on the user's behalf is tagged (`<command-name>`,
-/// `<local-command-stdout>`, `<bash-input>`, …) and, measured over 30 days of
-/// real transcripts, almost never starts a turn — a `/model` or a `!ls` is the
-/// user talking to the CLI. The one tagged record that does is
-/// `<task-notification>` (119 of 121 were answered), a background task
-/// reporting back to the agent.
+/// `<local-command-stdout>`, …) and, measured over 30 days of real
+/// transcripts, almost never starts a turn — a `/model` is the user talking to
+/// the CLI. Two tagged records do:
+///
+/// - `<task-notification>` (119 of 121 were answered), a background task
+///   reporting back to the agent;
+/// - `<bash-input>`, a `!` shell command, whose output the model answers
+///   (10 of 11, and the eleventh was interrupted while it may have been
+///   generating). Its `<bash-stdout>` is not a boundary: the input already
+///   started the turn.
 fn prompt_boundary(text: &str) -> Option<TurnState> {
     let text = text.trim_start();
     if text.starts_with(INTERRUPT_PREFIX) {
         Some(TurnState::Ended)
-    } else if text.starts_with("<task-notification>") {
+    } else if text.starts_with("<task-notification>") || text.starts_with("<bash-input>") {
         Some(TurnState::InProgress)
     } else if text.is_empty() || text.starts_with('<') {
         None
@@ -1880,8 +1898,11 @@ mod tests {
                 4,
                 "<local-command-stdout>Set model to opus</local-command-stdout>",
             ),
-            prompt(5, "<bash-input>ls</bash-input>"),
-            prompt(6, "<bash-stdout>README.md</bash-stdout>"),
+            prompt(
+                5,
+                "<bash-stdout>README.md</bash-stdout><bash-stderr></bash-stderr>",
+            ),
+            prompt(6, "<bash-stderr>ls: nope</bash-stderr>"),
             record(
                 7,
                 serde_json::json!({"type": "user", "isMeta": true, "message": {"role": "user", "content": "caveat"}}),
@@ -1915,6 +1936,51 @@ mod tests {
                 "<task-notification><task-id>b1</task-id></task-notification>",
             ),
         ]);
+        assert_eq!(turn, mark(TurnState::InProgress, 2));
+    }
+
+    fn queue(second: u32, operation: &str) -> String {
+        record(
+            second,
+            serde_json::json!({"type": "queue-operation", "operation": operation}),
+        )
+    }
+
+    #[test]
+    fn a_dequeue_starts_a_turn() {
+        // What TURN-START-DEQUEUE found: a peer's message delivered as a meta
+        // record, which is not a boundary, with only the dequeue in front of it.
+        let (turn, _) = turn_of(&[
+            system(1, "turn_duration"),
+            queue(2, "enqueue"),
+            queue(3, "dequeue"),
+            record(
+                3,
+                serde_json::json!({"type": "user", "isMeta": true, "message": {"role": "user", "content": "Another Claude session sent a message"}}),
+            ),
+        ]);
+        assert_eq!(turn, mark(TurnState::InProgress, 3));
+    }
+
+    #[test]
+    fn only_a_dequeue_hands_input_over() {
+        for operation in ["enqueue", "remove", "popAll"] {
+            let (turn, _) = turn_of(&[system(1, "turn_duration"), queue(2, operation)]);
+            assert_eq!(turn, mark(TurnState::Ended, 1), "{operation}");
+        }
+    }
+
+    #[test]
+    fn a_shell_command_starts_a_turn() {
+        let (turn, _) = turn_of(&[
+            system(1, "turn_duration"),
+            prompt(2, "<bash-input>npm run build</bash-input>"),
+            prompt(
+                9,
+                "<bash-stdout>built</bash-stdout><bash-stderr></bash-stderr>",
+            ),
+        ]);
+        // The input, not the output, is the start.
         assert_eq!(turn, mark(TurnState::InProgress, 2));
     }
 

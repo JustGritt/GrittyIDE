@@ -70,6 +70,7 @@ moves back. Never move a task file by hand.
 | T400-R | Worktree create and remove | 5 | T100 | unspec |
 | [TREE-DISCLOSURE](docs/tasks/TREE-DISCLOSURE-chevron-transition.md) | Tree chevron and expand/collapse transition | 2 | FILE-ICONS | review |
 | [TURN-START-DEQUEUE](docs/tasks/TURN-START-DEQUEUE-measure.md) | Measure whether a dequeued message should start a turn | maintenance | AGENT-TURN-END | review |
+| [TURN-START-QUEUED](docs/tasks/TURN-START-QUEUED-dequeue-and-shell.md) | A dequeued message or a ! command starts a turn | maintenance | TURN-START-DEQUEUE, AGENT-TURN-END | review |
 | [WATCH-FLAKE](WATCH-FLAKE-load-sensitive.md) | Two load-sensitive tests fail in the full-workspace run, pass alone |  | – | todo |
 <!-- board:table end -->
 

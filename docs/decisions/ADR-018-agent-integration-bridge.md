@@ -280,6 +280,17 @@ progress but shown Done** fell from **56.4 h to 1.3 h**; ended-but-Working is
 0.2 h; Alive covers 4.7 h, mostly sessions that have not received a first
 prompt. Failed and rate-limited turns all wrote `turn_duration` (41 of 41).
 
+**Two more starts (TURN-START-QUEUED, 2026-09-14).** A
+`queue-operation`/`dequeue` record and a `<bash-input>` user record (a `!`
+command) are in-progress boundaries too. The rules stay the same; only the list
+of records grows. Measured first (TURN-START-DEQUEUE) on the same corpus: the
+dequeue is the only marker in front of queue-delivered meta input (a peer
+session's message, a usage-limit "continue"), and the model answered `!`
+commands, which the AGENT-TURN-END classifier had assumed it did not. Together
+they remove about 20 minutes per 30 days of in-progress-shown-Done, for 22 s of
+ended-shown-Working. A dequeue that no turn follows reads Working for at most the
+idle threshold, then decays like any in-progress mark.
+
 ## Amendment (ADR-018A, 2026-09-14): the hook may refuse a write on ground another workstream holds
 
 - **Status:** Accepted

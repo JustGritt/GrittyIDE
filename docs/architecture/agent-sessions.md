@@ -89,7 +89,7 @@ in its tail, with the record's own timestamp:
 
 | Boundary | Records |
 |---|---|
-| in progress | a user prompt (not meta, not a subagent's, not CLI-tagged text such as `<command-name>` or `<bash-input>` — except `<task-notification>`, which starts a turn), a `tool_result`, any model record |
+| in progress | a user prompt (not meta, not a subagent's, not CLI-tagged text such as `<command-name>` — except `<task-notification>` and `<bash-input>`, a `!` command the model answers, which start a turn), a `tool_result`, any model record, a `queue-operation` `dequeue` (TURN-START-QUEUED) |
 | ended | `system/turn_duration`, `system/stop_hook_summary`, `[Request interrupted by user…]` |
 
 An interrupt is an end in its own right: most interrupted turns write no
