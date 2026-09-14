@@ -266,9 +266,11 @@ the exports, and one test literal), plus `docs/architecture/agent-runs.md` and
   `DENY` sent as an allowance (2 failures); the echo of a quietly denied ask not
   swallowed (2); the textarea keystroke guard removed (1). The immediate abort on
   cancel failed 2 process tests before it was fixed.
-- **Not run:** full `pnpm check` as one command (the tree carries W-turn-end's
-  uncommitted `AgentRoster.ts`, so `check:generated` cannot pass until they
-  commit it; every other stage above was run separately). **The manual pass in
+- **`pnpm check` — exit 0**, run as one command after W-turn-end committed
+  `AgentRoster.ts` (`3f96c66`): Biome, tsc, vitest 126 files / 1346 tests,
+  `cargo fmt --check`, clippy `-D warnings`, `cargo test --workspace`, generated
+  types fresh.
+- **Not run:** **the manual pass in
   `pnpm dev` was not run** — no screen — so a real edit allowed and denied
   through the UI against a real `claude` has not been seen. The wire facts it
   depends on were exercised against the real binary as described above.
