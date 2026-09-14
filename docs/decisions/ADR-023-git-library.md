@@ -1,7 +1,15 @@
 # ADR-023: Git is read in-process through `gix`, with no `git` process and no configuration that can run one
 
-- **Status:** Proposed
+- **Status:** Accepted (implemented by T100), amended by ADR-029
 - **Date:** 2026-09-06
+- **Accepted:** 2026-09-14 by Alexis, **as amended by ADR-029**, which was
+  accepted first (2026-09-09) and replaces decision 4. Read the title and
+  decision 1's "no `git` subprocess" as applying to *reads*: status, diff, log
+  and show go through `gix` in `crates/git`, while writes run the `git` binary
+  inside `crates/git-write` under ADR-029's rules. Decision 2 holds as written
+  and is asserted by `no_program_named_by_the_repository_can_run`
+  (`crates/git/src/open.rs:245`); decision 3 holds, since `gritty-core` names
+  `gix` only in comments.
 
 ## Context
 

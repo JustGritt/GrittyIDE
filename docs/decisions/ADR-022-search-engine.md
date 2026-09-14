@@ -1,7 +1,13 @@
 # ADR-022: Search runs in-process on ripgrep's own crates, and "ignored" keeps its current, narrower meaning
 
-- **Status:** Proposed
+- **Status:** Accepted (implemented by T080)
 - **Date:** 2026-09-06
+- **Accepted:** 2026-09-14 by Alexis, as drafted, after T080 had already built
+  on it. Checked against the tree that day: the walker turns every ignore
+  source off (`crates/search/src/walk.rs:228-233`), search filters with the
+  shared `is_ignored`, the `grep` facade is not a dependency, and nothing in
+  Gritty reads a `.gitignore` for its meaning, so decision 3's separate
+  decision is still unmade.
 
 ## Context
 

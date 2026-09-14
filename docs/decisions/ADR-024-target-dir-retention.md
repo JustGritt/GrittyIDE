@@ -1,11 +1,17 @@
 # ADR-024: One `target/` per checkout, swept by budget and age — not a shared `CARGO_TARGET_DIR`
 
-- **Status:** Proposed
+- **Status:** Accepted (implemented by CI-RUNNER-GC and T140-SWEEP)
 - **Date:** 2026-09-06
-- **Decided by:** nobody yet. Drafted by the agent that implemented
-  CI-RUNNER-GC; `docs/plans/execution-board.md` reserves every ADR verdict for
-  lane H, so this stays `Proposed` until Alexis records one, exactly as
-  ADR-017, ADR-022 and ADR-023 do.
+- **Accepted:** 2026-09-14 by Alexis. The decision stands — one `target/` per
+  checkout, swept per directory, no shared `CARGO_TARGET_DIR` — **with one of
+  its arguments withdrawn**: ADR-033 (accepted the same day) showed that
+  sharing would *not* corrupt `packages/protocol/src/generated/`, because
+  those types are written into each worktree's own source tree. The
+  build-lock argument carries the decision on its own, and ADR-033 adds that
+  sharing saves one baseline build per worktree while the accumulated
+  generations grow either way. Also since drafting: the sweeper fires locally
+  as well as from CI (T140-SWEEP), and `--cache-budget-gb`'s default wants
+  re-deriving against ADR-033's smaller builds.
 - **Motivated by:** CI-RUNNER-GC (`docs/tasks/completed/CI-RUNNER-GC-disk-retention.md`),
   itself downstream of CI-COST (self-hosted `macos` runner is the dev Mac) and
   CI-LINUX-DARK (no fallback while it's blocked)

@@ -27,12 +27,12 @@ requires updating the relevant ADR.
 | [ADR-019](ADR-019-workspace-ownership.md) | Write ownership is a logical lease held by a workstream, and it is observed rather than enforced | Accepted |
 | [ADR-020](ADR-020-agent-permission-verdicts.md) | A hook may wait for Gritty's verdict on a permission prompt, bounded and fail-open | Accepted |
 | [ADR-021](ADR-021-agent-run-persistence.md) | A run Gritty owns is persisted as an account of itself, never as something to resume | Accepted |
-| [ADR-022](ADR-022-search-engine.md) | Search runs in-process on ripgrep's own crates, and "ignored" keeps its current, narrower meaning | Proposed |
-| [ADR-023](ADR-023-git-library.md) | Git is read in-process through `gix`, with no `git` process and no configuration that can run one | Proposed |
-| [ADR-024](ADR-024-target-dir-retention.md) | One `target/` per checkout, swept by budget and age — not a shared `CARGO_TARGET_DIR` | Proposed |
-| [ADR-025](ADR-025-filesystem-watching.md) | Filesystem watching is one coalesced, bounded, directory-grained signal | Proposed |
+| [ADR-022](ADR-022-search-engine.md) | Search runs in-process on ripgrep's own crates, and "ignored" keeps its current, narrower meaning | Accepted |
+| [ADR-023](ADR-023-git-library.md) | Git is read in-process through `gix`, with no `git` process and no configuration that can run one | Accepted, amended by ADR-029 |
+| [ADR-024](ADR-024-target-dir-retention.md) | One `target/` per checkout, swept by budget and age — not a shared `CARGO_TARGET_DIR` | Accepted |
+| [ADR-025](ADR-025-filesystem-watching.md) | Filesystem watching is one coalesced, bounded, directory-grained signal | Accepted |
 | [ADR-026](ADR-026-agent-console-tab.md) | An agent console is a tab in the editor, and the agent rail is retired | Accepted |
-| [ADR-028](ADR-028-explorer-file-operations.md) | Editing the file tree is a `files.*` command domain, and the Trash is the recovery | Proposed |
+| [ADR-028](ADR-028-explorer-file-operations.md) | Editing the file tree is a `files.*` command domain, and the Trash is the recovery | Accepted |
 | [ADR-029](ADR-029-git-write-backend.md) | Git writes run through the `git` binary, while reads stay in-process on `gix` | Accepted |
 | [ADR-031](ADR-031-settings-storage.md) | Settings are a core-owned JSON file, and user configuration is not application metadata | Accepted |
 | [ADR-032](ADR-032-ui-framework.md) | The UI framework is React 19, and it renders chrome rather than content | Accepted |

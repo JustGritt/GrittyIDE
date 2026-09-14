@@ -1,7 +1,15 @@
 # ADR-028: Editing the file tree is a `files.*` command domain, and the Trash is the recovery
 
-- **Status:** Proposed (implemented by T042)
+- **Status:** Accepted (implemented by T042)
 - **Date:** 2026-09-08
+- **Accepted:** 2026-09-14 by Alexis, as drafted. Checked against the tree that
+  day: `trash` 5.2.8, the 32-entry journal (`workspace/journal.rs:21`),
+  `rehome` announcing `MOVED`, `dragDropEnabled: true`, and a capability file
+  that grants the WebView no filesystem access. One *Revisit when* trigger has
+  moved closer: ADR-018A (accepted the same day) lets the hook refuse an
+  *agent's* write into another workstream's lease once T330 ships, and says
+  nothing about a *user's* `files.*` mutation there. That question is still
+  this ADR's to answer when T330 lands.
 - **Amends:** ADR-011 §"identity" — a document's path may now change without the
   document closing
 

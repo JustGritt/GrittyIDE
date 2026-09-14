@@ -1,7 +1,14 @@
 # ADR-025: Filesystem watching is one coalesced, bounded, directory-grained signal
 
-- **Status:** Proposed
+- **Status:** Accepted (implemented by T070)
 - **Date:** 2026-09-06
+- **Accepted:** 2026-09-14 by Alexis, as drafted. Checked against the tree that
+  day: the timings and the cap match `crates/workspace/src/watch.rs:47-54`, and
+  a watcher batch reaches documents only through the existing status check
+  (`use-documents.ts:206`). Context's "ADR-001 is still `Proposed`" is
+  historical: ADR-001 has since been accepted, and the reason for a domain crate
+  stands anyway. Linux remains the documented risk in *Consequences*: no inotify
+  descriptor has been consumed, and Linux CI is dark.
 
 ## Context
 
