@@ -38,7 +38,8 @@ moves back. Never move a task file by hand.
 | T410 | Attention queue | 5 | T210, T325, T335 | unspec |
 | [AGENT-TURN-END](AGENT-TURN-END-roster-done-while-generating.md) | The agent roster says Done while the model is still generating | 3 | T220, T221, T223, T231 | review |
 | BOARD-ARCHIVE | Done and superseded tickets move to a generated archive, so the index lists open work | tools | – | review |
-| BOARD-STALE-REASON | A block reason outlives its block, and show prints it as present tense | tools | – | todo |
+| BOARD-DROP-DONE | drop --to done skips the reviewer rule move enforces | tools | – | unspec |
+| [BOARD-STALE-REASON](BOARD-STALE-REASON-labelled-reasons.md) | A block reason outlives its block, and show prints it as present tense | tools | – | review |
 | [CARGO-FLAKE](CARGO-FLAKE-desktop-command-tests.md) | Three desktop command tests fail under a loaded machine | 2 | – | todo |
 | CI-LINUX-DARK | Linux CI is dark until the minute allowance resets (1 Oct) or a spending limit is set |  | – | blocked |
 | CONFIRM-DIALOG | Extract a shared confirm dialog before a third copy is written | 2 | – | unspec |

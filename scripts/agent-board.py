@@ -290,7 +290,13 @@ def blank_ticket(ticket_id: str) -> dict:
         "branch": None,
         "pr": None,
         "note": None,
+        "note_ts": None,
+        "note_status": None,
         "reason": None,
+        "reason_ts": None,
+        # Whether `reason` still explains the ticket's status. A reason is
+        # written by `block` and outlives it; only this says it is current.
+        "reason_live": False,
         "by": None,
         "updated": None,
     }
@@ -306,6 +312,21 @@ def resolve(events: list[dict]) -> dict[str, dict]:
     one in the file. That is the whole concurrency design; there is no lock.
     """
     tickets: dict[str, dict] = {}
+
+    def set_status(ticket: dict, status: str) -> None:
+        # Leaving BLOCKED retires the reason without erasing it: `show` still
+        # prints it, marked as history, so the context survives the unblock.
+        ticket["status"] = status
+        if status != "blocked":
+            ticket["reason_live"] = False
+
+    def set_note(ticket: dict, event: dict) -> None:
+        # A note is written against a status and read later against another;
+        # the stamp lets `show` say which, so an old note is not present tense.
+        ticket["note"] = event["note"]
+        ticket["note_ts"] = event.get("ts")
+        ticket["note_status"] = ticket["status"]
+
     for event in events:
         op = event.get("op")
         ticket_id = event.get("id")
@@ -323,7 +344,7 @@ def resolve(events: list[dict]) -> dict[str, dict]:
             if event.get("order") is not None:
                 ticket["order"] = event["order"]
             if event.get("status"):
-                ticket["status"] = event["status"]
+                set_status(ticket, event["status"])
 
         elif op == "take":
             held = ticket.get("holder")
@@ -339,16 +360,16 @@ def resolve(events: list[dict]) -> dict[str, dict]:
                 ticket["branch"] = event["branch"]
             if event.get("scope"):
                 ticket["scope"] = list(event["scope"])
-            ticket["status"] = "doing"
+            set_status(ticket, "doing")
 
         elif op == "move":
             to = event.get("to")
             if to:
-                ticket["status"] = to
+                set_status(ticket, to)
             if event.get("pr") is not None:
                 ticket["pr"] = event["pr"]
             if event.get("note"):
-                ticket["note"] = event["note"]
+                set_note(ticket, event)
             if event.get("by"):
                 ticket["by"] = event["by"]
             if to in TERMINAL or to in ("todo", "unspec", "blocked"):
@@ -360,13 +381,15 @@ def resolve(events: list[dict]) -> dict[str, dict]:
             ticket["holder"] = None
             ticket["branch"] = None
             ticket["pr"] = None
-            ticket["status"] = event.get("to") or "todo"
+            set_status(ticket, event.get("to") or "todo")
             if event.get("note"):
-                ticket["note"] = event["note"]
+                set_note(ticket, event)
 
         elif op == "block":
-            ticket["status"] = "blocked"
+            set_status(ticket, "blocked")
             ticket["reason"] = event.get("reason")
+            ticket["reason_ts"] = event.get("ts")
+            ticket["reason_live"] = True
             ticket["holder"] = None
 
         elif op == "session-end":
@@ -727,7 +750,7 @@ def render_view(tickets: dict[str, dict], now: datetime, compact: bool) -> str:
                 bits.append("[%s]" % ticket["branch"])
             if ticket.get("pr"):
                 bits.append("#%s" % ticket["pr"])
-            if ticket.get("reason"):
+            if ticket.get("reason") and ticket.get("reason_live"):
                 bits.append("(%s)" % ticket["reason"])
             out.append("  " + "  ".join(str(b) for b in bits if b))
         if compact and state in ("review", "todo") and len(buckets[state]) > 6:
@@ -822,9 +845,18 @@ def cmd_show(args) -> int:
     print("  depends  %s" % ticket.get("depends", "–"))
     print("  scope    %s" % (", ".join(ticket.get("scope") or []) or "–"))
     if ticket.get("reason"):
-        print("  reason   %s" % ticket["reason"])
+        if ticket.get("reason_live"):
+            print("  reason   %s" % ticket["reason"])
+        else:
+            print(
+                "  reason   (history: blocked %s, since unblocked) %s"
+                % (ticket.get("reason_ts") or "?", ticket["reason"])
+            )
     if ticket.get("note"):
-        print("  note     %s" % ticket["note"])
+        print(
+            "  note     (%s, moving to %s) %s"
+            % (ticket.get("note_ts") or "?", ticket.get("note_status") or "?", ticket["note"])
+        )
     return 0
 
 
