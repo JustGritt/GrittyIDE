@@ -440,7 +440,7 @@ impl Fold {
     }
 
     fn set_prompt(&mut self, prompt: String) {
-        if !is_command_echo(&prompt) && !is_shell_echo(&prompt) {
+        if !is_command_echo(&prompt) && !is_cli_delivered(&prompt) {
             self.last_prompt = Some(prompt);
         }
     }
@@ -595,14 +595,17 @@ fn is_command_echo(text: &str) -> bool {
     text.starts_with("<command-name>") || text.starts_with("<local-command")
 }
 
-/// A `!` shell command and its output, as the CLI writes them. Not "the task"
-/// either, but kept out of the prompt preview only: the model reads the output
-/// and usually answers it (10 of 11 in a 30-day corpus), so the timeline keeps
-/// the command that its reply is about.
-fn is_shell_echo(text: &str) -> bool {
+/// Input the CLI hands the model that the user did not type as a request: a
+/// `!` shell command and its output, and a background task reporting back
+/// (`<task-notification>`). Not "the task" either, but kept out of the prompt
+/// preview only: the model answers both (10 of 11 shell commands, 119 of 121
+/// notifications, in a 30-day corpus), so the timeline keeps the record its
+/// reply is about.
+fn is_cli_delivered(text: &str) -> bool {
     text.starts_with("<bash-input>")
         || text.starts_with("<bash-stdout>")
         || text.starts_with("<bash-stderr>")
+        || text.starts_with("<task-notification>")
 }
 
 /// Collapses whitespace and truncates to `limit` characters. Both matter: the
@@ -1247,6 +1250,35 @@ mod tests {
             &read.entries[..],
             [FollowedEntry { record: FollowedRecord::UserPrompt { text }, .. }]
                 if text == "<bash-input>ls</bash-input>"
+        ));
+    }
+
+    #[test]
+    fn a_task_notification_is_not_the_last_prompt() {
+        for notification in [
+            r#"{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>"}}"#,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"<task-notification><task-id>b2</task-id></task-notification>"}]}}"#,
+        ] {
+            let found =
+                parse(&format!("{}\n{notification}", transcript_lines())).expect("evidence");
+            assert_eq!(
+                found.last_prompt.as_deref(),
+                Some("rename the terminal"),
+                "{notification}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_task_notification_stays_on_the_timeline() {
+        // The model answers it, so its reply needs the notification.
+        let read = followed(
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"<task-notification><task-id>b1</task-id></task-notification>\"}}\n",
+        );
+        assert!(matches!(
+            &read.entries[..],
+            [FollowedEntry { record: FollowedRecord::UserPrompt { text }, .. }]
+                if text.starts_with("<task-notification>")
         ));
     }
 

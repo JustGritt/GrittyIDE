@@ -140,7 +140,9 @@ inference:
   slash command is not one, and neither is a `!` shell command: the CLI writes
   that here with its `!` prefix and in messages as `<bash-input>`/`<bash-stdout>`,
   and all three are skipped so the previous real prompt stands
-  (LAST-PROMPT-SHELL).
+  (LAST-PROMPT-SHELL). A background task's `<task-notification>` is skipped
+  the same way (LAST-PROMPT-NOTIFY). Both stay on the timeline, because the
+  model answers them.
 
 So the tail contains everything needed. The cost is the *first* prompt of a long
 session, which `ai-title` covers better anyway. Last-active time comes from the

@@ -43,7 +43,7 @@ moves back. Never move a task file by hand.
 | CI-LINUX-DARK | Linux CI is dark until the minute allowance resets (1 Oct) or a spending limit is set |  | – | blocked |
 | CONFIRM-DIALOG | Extract a shared confirm dialog before a third copy is written | 2 | – | unspec |
 | [FILE-ICONS](docs/tasks/FILE-ICONS-file-type-icons.md) | File-type icons in the explorer tree and Changes list | 2 | – | review |
-| [LAST-PROMPT-NOTIFY](docs/tasks/LAST-PROMPT-NOTIFY-task-notifications.md) | A task notification is not a session's last prompt | maintenance | LAST-PROMPT-SHELL | doing |
+| [LAST-PROMPT-NOTIFY](docs/tasks/LAST-PROMPT-NOTIFY-task-notifications.md) | A task notification is not a session's last prompt | maintenance | LAST-PROMPT-SHELL | review |
 | [LAST-PROMPT-SHELL](docs/tasks/LAST-PROMPT-SHELL-bang-commands.md) | A ! shell command is not a session's last prompt | maintenance | AGENT-TURN-END | review |
 | [LEASE-NOTIFY](docs/tasks/LEASE-NOTIFY-lease-change-notices.md) | Tell a session when the lease registry changes under it | tooling | – | review |
 | MARKDOWN-BENCH | A markdown benchmark with a recorded baseline, if a perf gate is wanted | 3 | MARKDOWN-BUDGET-FLAKE | unspec |
