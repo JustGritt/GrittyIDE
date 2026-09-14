@@ -253,3 +253,134 @@ describe('useExplorer after a move that stopped part-way', () => {
     expect(listed).toEqual([]);
   });
 });
+
+/**
+ * EXPLORER-RELIST-QUEUE: stale directories re-list a few at a time.
+ *
+ * Listings are held until the test releases them, so "how many are in flight"
+ * is a fact the test can read rather than a race it can lose.
+ */
+describe('useExplorer re-listing many stale directories', () => {
+  afterEach(cleanup);
+
+  const FOLDERS = Array.from({ length: 10 }, (_, index) => `d${index}`);
+  /** Listings waiting for `releaseOne`, in the order they were asked for. */
+  const held: { path: string; release: () => void }[] = [];
+  let holding = false;
+  let active = 0;
+  let maxActive = 0;
+
+  beforeEach(() => {
+    seam.handlers.clear();
+    listed.length = 0;
+    held.length = 0;
+    holding = false;
+    active = 0;
+    maxActive = 0;
+    seam.handlers.set('workspace_current', (): Workspace => WORKSPACE);
+    seam.handlers.set('workspace_list', (args) => {
+      const path = (args?.request as { path?: string } | undefined)?.path ?? '';
+      const entries = path === '' ? FOLDERS.map(dir) : [file(`${path}.txt`)];
+      const response: ListDirectoryResponse = {
+        status: 'ready',
+        page: { path: path as WorkspacePath, entries, total: entries.length, truncated: false },
+      };
+      if (!holding) return response;
+      listed.push(path);
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      return new Promise<ListDirectoryResponse>((resolve) => {
+        held.push({
+          path,
+          release: () => {
+            active -= 1;
+            resolve(response);
+          },
+        });
+      });
+    });
+  });
+
+  /** Root and all ten folders loaded; then every listing is held. */
+  async function openedWideTree() {
+    const rendered = renderHook(() => useExplorer());
+    await waitFor(() => expect(rendered.result.current.state.nodes['']?.children).toHaveLength(10));
+    for (const folder of FOLDERS) {
+      const node = rendered.result.current.state.nodes[folder];
+      if (!node) throw new Error(`no ${folder} node`);
+      await act(async () => {
+        rendered.result.current.toggle(node);
+      });
+    }
+    await waitFor(() =>
+      expect(FOLDERS.every((f) => rendered.result.current.state.nodes[f]?.children)).toBe(true),
+    );
+    holding = true;
+    return rendered;
+  }
+
+  /** Release held listings one at a time until none are left or waiting. */
+  async function drain() {
+    for (let guard = 0; guard < 100; guard += 1) {
+      const next = held.shift();
+      if (!next) {
+        // A freed slot starts the next listing on a later render.
+        await act(async () => {
+          await Promise.resolve();
+        });
+        if (held.length === 0) return;
+        continue;
+      }
+      await act(async () => {
+        next.release();
+        await Promise.resolve();
+      });
+    }
+    throw new Error('the queue never drained');
+  }
+
+  it('never runs more than four at once, and lists each directory once', async () => {
+    await openedWideTree();
+
+    await act(async () => {
+      emitEntriesChanged([], true);
+    });
+    await waitFor(() => expect(held.length).toBeGreaterThan(0));
+    expect(active).toBe(4);
+
+    await drain();
+    expect(maxActive).toBe(4);
+    expect([...listed].sort()).toEqual(['', ...FOLDERS].sort());
+  });
+
+  it('lists the root before any folder under it, whatever order the batch named them in', async () => {
+    await openedWideTree();
+
+    await act(async () => {
+      emitEntriesChanged(['d3', 'd1', '']);
+    });
+    await waitFor(() => expect(held.length).toBe(3));
+    expect(listed[0]).toBe('');
+    await drain();
+  });
+
+  it('lists a directory again when a batch names it while its listing is in flight', async () => {
+    await openedWideTree();
+
+    await act(async () => {
+      emitEntriesChanged(['d3']);
+    });
+    await waitFor(() => expect(held.map((entry) => entry.path)).toEqual(['d3']));
+    await act(async () => {
+      emitEntriesChanged(['d3']);
+    });
+    // Still one in flight: the second naming waits for the first to settle.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(held.map((entry) => entry.path)).toEqual(['d3']);
+
+    await drain();
+    expect(listed).toEqual(['d3', 'd3']);
+  });
+});

@@ -21,6 +21,20 @@ import {
 import type { Selection } from './explorer-selection';
 
 /**
+ * How many stale directories the explorer re-lists at once
+ * (EXPLORER-RELIST-QUEUE). Enough that a handful of expanded folders refresh
+ * together; few enough that a checkout with a hundred of them expanded does
+ * not become a hundred concurrent listings.
+ */
+export const RELIST_CONCURRENCY = 4;
+
+/** `paths` ordered root first, then by depth; ties keep their order. */
+function shallowestFirst(paths: readonly string[]): string[] {
+  const depth = (path: string) => (path === '' ? 0 : path.split('/').length);
+  return [...paths].sort((left, right) => depth(left) - depth(right));
+}
+
+/**
  * What a cut or copy is holding (T042). `MOVE` empties itself on paste, the way
  * a cut does everywhere; `COPY` stays, so one copy can be pasted repeatedly.
  */
@@ -197,19 +211,51 @@ export function useExplorer(options: ExplorerOptions = {}) {
    * reload makes. The reducer named the nodes; this runs them, and takes them
    * off the list first so a batch arriving mid-flight is not lost with them.
    *
+   * **A few at a time** (EXPLORER-RELIST-QUEUE). An `overflowed` batch, or a
+   * file operation that stopped part-way, marks every loaded directory stale at
+   * once; listing them all in one tick was one IPC call and one directory read
+   * per expanded folder, competing. At most `RELIST_CONCURRENCY` run, the
+   * shallowest first — a parent's listing can drop a child that no longer
+   * exists before the child is listed — and each settled one frees a slot.
+   *
+   * A path named again while its listing is in flight stays stale and is
+   * listed once more after that listing settles: never twice at once, never
+   * dropped.
+   *
    * Nothing new is subscribed to: `WorkspaceEntriesChanged` already reaches
    * the reducer through the one `subscribeAll` above.
    */
   const stale = state.stale;
-  const refreshing = useRef<readonly string[] | null>(null);
+  const inFlight = useRef(new Set<string>());
+  const [slotsFreed, setSlotsFreed] = useState(0);
+  const openId = workspace?.id;
   useEffect(() => {
-    if (!workspace || stale.length === 0 || refreshing.current === stale) return;
-    // React may run this effect twice for one state (StrictMode); the identity
-    // guard keeps that from listing every directory twice.
-    refreshing.current = stale;
-    dispatch({ type: 'refreshing', paths: stale });
-    for (const path of stale) void load(workspace.id, path, null);
-  }, [workspace, stale, load]);
+    // A new workspace starts with a new set: the old one's listings still
+    // settle into the set they were counted in, and cannot hold this one's
+    // slots.
+    void openId;
+    inFlight.current = new Set();
+  }, [openId]);
+  useEffect(() => {
+    void slotsFreed;
+    if (!workspace || stale.length === 0) return;
+    const flight = inFlight.current;
+    const room = RELIST_CONCURRENCY - flight.size;
+    if (room <= 0) return;
+    // In-flight paths are skipped, not taken: that is also what keeps a
+    // second run of this effect for the same state (StrictMode) from listing
+    // anything twice.
+    const taken = shallowestFirst(stale.filter((path) => !flight.has(path))).slice(0, room);
+    if (taken.length === 0) return;
+    for (const path of taken) flight.add(path);
+    dispatch({ type: 'refreshing', paths: taken });
+    for (const path of taken) {
+      void load(workspace.id, path, null).finally(() => {
+        flight.delete(path);
+        setSlotsFreed((count) => count + 1);
+      });
+    }
+  }, [workspace, stale, load, slotsFreed]);
 
   /** Runs an action, reporting a refusal instead of throwing. `undefined` on failure. */
   const run = useCallback(async <T>(action: () => Promise<T>): Promise<T | undefined> => {
