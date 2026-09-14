@@ -83,6 +83,23 @@ fails open — unclaimed paths, advisory rows and leases older than 8h are not
 enforced — so it catches recorded conflicts and nothing more. Coverage of shell
 writes is a best-effort heuristic, which is why the convention still matters.
 
+**You are told when the registry changes under you; do not poll it.** A
+reminder headed "Lease registry changed" arrives mid-turn (guard and
+`UserPromptSubmit` hooks), or wakes an idle session (a `Stop` hook with
+`asyncRewake`). It arrives in three cases:
+
+- A path you were refused, by `claim` or by the guard, is free. Claim it
+  before you edit.
+- A new foreign lease covers files you edited and have not committed. Stop
+  editing them, and commit or tell the user.
+- Someone force-claimed over your lease.
+
+Act on the notice. It is advisory, so claim as usual. The uncommitted check is
+per file, so a file that also carries another session's uncommitted hunk can
+report edits you already committed. State lives in
+`.git/agent-lease-notify/`. `SendMessage` is still how you ask another
+session for something, such as a release.
+
 ## Picking up work
 
 A lease answers *may I write this file* — a question about a working tree, and

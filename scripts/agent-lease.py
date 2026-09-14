@@ -15,7 +15,18 @@ all allowed. The only thing it refuses is a recorded, live, foreign lease.
                          --scope 'apps/desktop/src/features/terminal/**'
     agent-lease.py release --agent T097-blocks
     agent-lease.py guard          # PreToolUse hook, payload on stdin
+    agent-lease.py notify         # UserPromptSubmit hook, payload on stdin
+    agent-lease.py watch          # Stop hook (asyncRewake), payload on stdin
     agent-lease.py session-end    # SessionEnd hook, payload on stdin
+
+Notices (LEASE-NOTIFY). A session is told, without polling, when the registry
+changes in a way that concerns it: a path it was refused is free again, a new
+foreign lease covers files it edited and has not committed, or a new foreign
+lease overlaps one of its own. `guard` and `notify` deliver mid-turn through
+`additionalContext`; `watch` runs in the background after each turn and wakes
+an idle session by exiting 2. Each session's state — the rows it has seen, the
+paths it touched, the paths it waits on — is machine-local, under the
+checkout's git directory.
 """
 
 from __future__ import annotations
@@ -24,14 +35,29 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
+import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # not POSIX: notices run unlocked rather than not at all
+    fcntl = None
 
 LEASE_FILENAME = "AGENT-LEASES.md"
 HELD_HEADING = "## held now"
 TTL_HOURS = 8
 MIN_SESSION_PREFIX = 8
+
+NOTIFY_DIRNAME = "agent-lease-notify"
+TOUCH_LIMIT = 400
+WATCH_POLL_SECONDS = 2.0
+# Stale leases stop being enforced by the clock alone, with no file change, so
+# a waiting watcher re-reads the registry at least this often.
+WATCH_RECHECK_SECONDS = 60.0
 
 HEADER = """# Agent leases (git-ignored, machine-local)
 
@@ -197,6 +223,20 @@ class Lease:
         return "live"
 
 
+def row_key(lease: Lease) -> str:
+    return "|".join((lease.agent, lease.session, lease.scope_cell, lease.claimed_raw))
+
+
+def overlaps(scope: str, lease: Lease) -> bool:
+    """Whether a path or scope pattern and a lease's scope can name the same file."""
+    rx = compile_scope(scope)
+    probe = literal_prefix(scope) or scope
+    return bool(
+        lease.match(probe.rstrip("/") or scope)
+        or (rx and any(rx.match(p) for p in lease.patterns))
+    )
+
+
 def read_text(root: Path) -> str:
     path = lease_file(root)
     try:
@@ -232,6 +272,217 @@ def ensure_file(root: Path) -> Path:
     if not path.exists():
         path.write_text(HEADER, encoding="utf-8")
     return path
+
+
+# --------------------------------------------------------------------------- #
+# notices (LEASE-NOTIFY)
+# --------------------------------------------------------------------------- #
+
+
+def git_dir(root: Path):
+    """The checkout's own git directory, without spawning git: hooks run often."""
+    dot = root / ".git"
+    if dot.is_dir():
+        return dot
+    if dot.is_file():
+        text = dot.read_text(encoding="utf-8").strip()
+        if text.startswith("gitdir:"):
+            path = Path(text[len("gitdir:"):].strip())
+            return (path if path.is_absolute() else root / path).resolve()
+    return None
+
+
+def notify_dir(root: Path):
+    base = git_dir(root)
+    return base / NOTIFY_DIRNAME if base else None
+
+
+def state_name(directory: Path, session: str) -> str:
+    """The state file for a session. A claim may give a prefix of the id the
+    hooks see, so a file named by either one is the same session's."""
+    if len(session) >= MIN_SESSION_PREFIX and directory.is_dir():
+        for entry in directory.glob("*.json"):
+            name = entry.stem
+            if len(name) >= MIN_SESSION_PREFIX and (
+                name.startswith(session) or session.startswith(name)
+            ):
+                return name
+    return session
+
+
+class NoticeState:
+    """One session's view: rows seen, paths touched, paths waited on.
+
+    Used as a context manager, it holds an exclusive lock for the read-modify-
+    write, so the guard and the watcher never deliver the same notice twice."""
+
+    def __init__(self, root: Path, session: str):
+        self.root = root
+        directory = notify_dir(root)
+        if directory is None or not session:
+            raise OSError("no git directory or session to keep notice state in")
+        directory.mkdir(parents=True, exist_ok=True)
+        name = state_name(directory, session)
+        self.path = directory / ("%s.json" % name)
+        self.lock_path = directory / ("%s.lock" % name)
+        self.data = {}
+        self.dirty = False
+        self._lock = None
+
+    def __enter__(self):
+        self._lock = self.lock_path.open("a")
+        if fcntl is not None:
+            fcntl.flock(self._lock, fcntl.LOCK_EX)
+        try:
+            self.data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            self.data = {}
+        self.data.setdefault("seen", None)
+        self.data.setdefault("touches", {})
+        self.data.setdefault("waits", {})
+        return self
+
+    def __exit__(self, *exc):
+        try:
+            if self.dirty:
+                tmp = self.path.with_suffix(".tmp")
+                tmp.write_text(json.dumps(self.data, indent=1), encoding="utf-8")
+                tmp.replace(self.path)
+        finally:
+            if fcntl is not None:
+                fcntl.flock(self._lock, fcntl.LOCK_UN)
+            self._lock.close()
+        return False
+
+
+def fresh(raw: str, now: datetime) -> bool:
+    when = parse_stamp(raw or "")
+    return when is not None and now - when <= timedelta(hours=TTL_HOURS)
+
+
+def remember_waits(root: Path, session: str, conflicts, now: datetime) -> None:
+    with NoticeState(root, session) as state:
+        for scope, lease in conflicts:
+            state.data["waits"][scope] = {"at": stamp(now), "holder": lease.agent}
+        state.dirty = True
+
+
+def uncommitted(root: Path, paths):
+    """The paths git reports as changed or untracked; None when git cannot say."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=all", "--"]
+            + list(paths),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    changed = set()
+    for line in out.splitlines():
+        entry = line[3:]
+        if " -> " in entry:
+            entry = entry.split(" -> ", 1)[1]
+        changed.add(entry.strip().strip('"'))
+    return [p for p in paths if p in changed]
+
+
+def describe_lease(lease: Lease) -> str:
+    return "%s (task: %s, claimed %s)" % (lease.agent, lease.task or "-", lease.claimed_raw)
+
+
+def compute_notices(root: Path, session: str, state: NoticeState, now: datetime, changed=uncommitted):
+    """What this session should be told now, updating what it has been told.
+
+    Nothing is reported about rows that already existed when the session first
+    looked: the guard enforces those, and a session that just started has no
+    edits for them to cover."""
+    data = state.data
+    rows = parse_rows(read_text(root))
+    live = [r for r in rows if r.enforceable(now)]
+    foreign = [r for r in live if not r.owned_by(session)]
+    own = [r for r in live if r.owned_by(session)]
+    notices = []
+
+    for target, info in sorted(data["waits"].items()):
+        if not fresh(info.get("at", ""), now):
+            del data["waits"][target]
+            state.dirty = True
+            continue
+        if any(overlaps(target, r) for r in foreign):
+            continue
+        del data["waits"][target]
+        state.dirty = True
+        if any(overlaps(target, r) for r in own):
+            continue  # this session holds it now; nothing to announce
+        notices.append(
+            "`%s` is free: no live lease from another session covers it any more "
+            "(%s held it when you were refused at %s). Claim it before you edit it."
+            % (target, info.get("holder", "another session"), info.get("at", "?"))
+        )
+
+    touches = {p: t for p, t in data["touches"].items() if fresh(t, now)}
+    if len(touches) != len(data["touches"]):
+        data["touches"] = touches
+        state.dirty = True
+
+    keys = sorted(row_key(r) for r in rows)
+    if data["seen"] is not None:
+        seen = set(data["seen"])
+        for lease in foreign:
+            if row_key(lease) in seen:
+                continue
+            mine = [r for r in own if any(overlaps(p, r) for p in lease.patterns)]
+            if mine:
+                notices.append(
+                    "%s now leases `%s`, overlapping your own lease %s on `%s`. One of "
+                    "the two was claimed with --force. Neither of you should edit the "
+                    "overlap until the user sequences the two sessions."
+                    % (describe_lease(lease), lease.scope_cell, mine[0].agent, mine[0].scope_cell)
+                )
+            covered = sorted(p for p in touches if lease.match(p))
+            if covered:
+                dirty = changed(root, covered)
+                if dirty is None:
+                    dirty = covered
+                if dirty:
+                    notices.append(
+                        "%s now leases `%s`, which covers files this session edited and "
+                        "has not committed: %s. Do not edit them again. Commit them if "
+                        "that work is finished, or tell the user so they can sequence "
+                        "the two sessions."
+                        % (describe_lease(lease), lease.scope_cell, ", ".join(dirty))
+                    )
+    if data["seen"] != keys:
+        data["seen"] = keys
+        state.dirty = True
+    return notices
+
+
+def format_notices(notices) -> str:
+    return "Lease registry changed (agent-lease.py, LEASE-NOTIFY):\n" + "\n".join(
+        "- " + n for n in notices
+    )
+
+
+def collect_notices(root: Path, session: str, now: datetime, touch=None, wait=None):
+    """Record this call's touch or wait, then compute notices, under one lock."""
+    with NoticeState(root, session) as state:
+        if touch:
+            previous = parse_stamp(state.data["touches"].get(touch, ""))
+            if previous is None or now - previous > timedelta(minutes=1):
+                state.data["touches"][touch] = stamp(now)
+                if len(state.data["touches"]) > TOUCH_LIMIT:
+                    ordered = sorted(state.data["touches"].items(), key=lambda kv: kv[1])
+                    state.data["touches"] = dict(ordered[-TOUCH_LIMIT:])
+                state.dirty = True
+        if wait:
+            target, holder = wait
+            state.data["waits"][target] = {"at": stamp(now), "holder": holder}
+            state.dirty = True
+        return compute_notices(root, session, state, now)
 
 
 # --------------------------------------------------------------------------- #
@@ -271,19 +522,27 @@ def relativize(raw: str, root: Path):
         return None
 
 
-def deny(reason: str) -> None:
-    print(
-        json.dumps(
-            {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": reason,
-                }
-            }
-        )
-    )
-    sys.exit(0)
+class Denied(Exception):
+    def __init__(self, reason: str, lease: Lease, target: str):
+        super().__init__(reason)
+        self.reason = reason
+        self.lease = lease
+        self.target = target
+
+
+def deny(reason: str, lease: Lease, target: str) -> None:
+    raise Denied(reason, lease, target)
+
+
+def hook_output(event: str, context: str = "", denial: str = "") -> None:
+    specific = {"hookEventName": event}
+    if denial:
+        specific["permissionDecision"] = "deny"
+        specific["permissionDecisionReason"] = denial
+    if context:
+        specific["additionalContext"] = context
+    if len(specific) > 1:
+        print(json.dumps({"hookSpecificOutput": specific}))
 
 
 def explain(lease: Lease, pattern: str, target: str, session_id: str) -> str:
@@ -305,6 +564,41 @@ def explain(lease: Lease, pattern: str, target: str, session_id: str) -> str:
     )
 
 
+def check_guard(root: Path, session_id: str, tool: str, tool_input, now: datetime):
+    """The file this call writes inside the repository, if the guard can tell;
+    raises `Denied` when that write lands in a live foreign lease."""
+    live = [r for r in parse_rows(read_text(root)) if r.enforceable(now)]
+    foreign = [r for r in live if not r.owned_by(session_id)]
+
+    if tool == "Bash":
+        command = tool_input.get("command") or ""
+        if not foreign or not command_writes(command):
+            return None
+        for lease in foreign:
+            for pattern, _ in lease.regexes:
+                head = literal_prefix(pattern)
+                if len(head) >= 4 and head in command:
+                    deny(
+                        explain(lease, pattern, head, session_id)
+                        + " (Matched the path inside a shell command that appears "
+                        "to write; if this command only reads, say so and use a "
+                        "read-only form.)",
+                        lease,
+                        pattern,
+                    )
+        return None
+
+    target = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
+    rel = relativize(target, root)
+    if rel is None or rel == LEASE_FILENAME:
+        return None
+    for lease in foreign:
+        pattern = lease.match(rel)
+        if pattern:
+            deny(explain(lease, pattern, rel, session_id), lease, rel)
+    return rel
+
+
 def cmd_guard() -> None:
     payload = json.loads(sys.stdin.read() or "{}")
     session_id = payload.get("session_id") or ""
@@ -317,35 +611,79 @@ def cmd_guard() -> None:
     root = repo_root()
     now = now_utc()
 
-    live = [r for r in parse_rows(read_text(root)) if r.enforceable(now)]
-    foreign = [r for r in live if not r.owned_by(session_id)]
-    if not foreign:
-        return
+    denial, touch, wait = "", None, None
+    try:
+        touch = check_guard(root, session_id, tool, tool_input, now)
+    except Denied as refused:
+        denial, wait = refused.reason, (refused.target, refused.lease.agent)
 
-    if tool == "Bash":
-        command = tool_input.get("command") or ""
-        if not command_writes(command):
-            return
-        for lease in foreign:
-            for pattern, _ in lease.regexes:
-                head = literal_prefix(pattern)
-                if len(head) >= 4 and head in command:
-                    deny(
-                        explain(lease, pattern, head, session_id)
-                        + " (Matched the path inside a shell command that appears "
-                        "to write; if this command only reads, say so and use a "
-                        "read-only form.)"
-                    )
-        return
+    context = ""
+    try:
+        notices = collect_notices(root, session_id, now, touch=touch, wait=wait)
+        if notices:
+            context = format_notices(notices)
+    except Exception:  # notices are a courtesy; the decision above stands alone
+        pass
+    hook_output("PreToolUse", context=context, denial=denial)
 
-    target = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
-    rel = relativize(target, root)
-    if rel is None or rel == LEASE_FILENAME:
+
+def cmd_notify() -> None:
+    """UserPromptSubmit: whatever changed while the user was typing."""
+    payload = json.loads(sys.stdin.read() or "{}")
+    session_id = payload.get("session_id") or ""
+    if not session_id:
         return
-    for lease in foreign:
-        pattern = lease.match(rel)
-        if pattern:
-            deny(explain(lease, pattern, rel, session_id))
+    notices = collect_notices(repo_root(), session_id, now_utc())
+    if notices:
+        hook_output("UserPromptSubmit", context=format_notices(notices))
+
+
+def cmd_watch(max_seconds: float) -> int:
+    """Stop hook with `asyncRewake`: wait in the background for a notice.
+
+    Exit 2 with the notice on stderr wakes the session even when it is idle.
+    Every other ending is exit 0 and silent: superseded by the watcher the next
+    turn started, the session ended, or `max_seconds` passed — the next prompt
+    or tool call still delivers anything that arrived after that."""
+    payload = json.loads(sys.stdin.read() or "{}")
+    session_id = payload.get("session_id") or ""
+    if not session_id:
+        return 0
+    root = repo_root()
+    token = uuid.uuid4().hex
+    handle = NoticeState(root, session_id)
+    with handle as state:
+        state.data["watcher"] = token
+        state.dirty = True
+
+    registry = lease_file(root)
+    # Claude Code runs the hook as its direct child. A session killed without a
+    # SessionEnd leaves the watcher re-parented, and it must not poll for hours.
+    parent = os.getppid()
+    started = last_check = time.monotonic()
+    last_mtime = None
+    while time.monotonic() - started < max_seconds:
+        if os.getppid() != parent:
+            return 0  # the session is gone
+        if not handle.path.exists():
+            return 0  # session-end removed the state
+        try:
+            mtime = registry.stat().st_mtime_ns
+        except OSError:
+            mtime = None
+        due = time.monotonic() - last_check >= WATCH_RECHECK_SECONDS
+        with handle as state:
+            if state.data.get("watcher") != token:
+                return 0  # a later turn's watcher took over
+            notices = []
+            if mtime != last_mtime or due:
+                last_mtime, last_check = mtime, time.monotonic()
+                notices = compute_notices(root, session_id, state, now_utc())
+        if notices:
+            print(format_notices(notices), file=sys.stderr)
+            return 2
+        time.sleep(WATCH_POLL_SECONDS)
+    return 0
 
 
 def cmd_session_end() -> None:
@@ -354,6 +692,15 @@ def cmd_session_end() -> None:
     if not session_id:
         return
     root = repo_root()
+    try:
+        # Its notice state goes with it, which also stops its watcher.
+        directory = notify_dir(root)
+        if directory is not None and directory.is_dir():
+            name = state_name(directory, session_id)
+            for suffix in (".json", ".lock", ".tmp"):
+                (directory / (name + suffix)).unlink(missing_ok=True)
+    except OSError:
+        pass
     path = lease_file(root)
     if not path.exists():
         return
@@ -387,14 +734,10 @@ def cmd_claim(args) -> int:
     if not args.force:
         conflicts = []
         for scope in scopes:
-            rx = compile_scope(scope)
-            probe = literal_prefix(scope) or scope
             for lease in existing:
                 if lease.agent == args.agent or not lease.enforceable(now):
                     continue
-                if lease.match(probe.rstrip("/") or scope) or (
-                    rx and any(rx.match(p) for p in lease.patterns)
-                ):
+                if overlaps(scope, lease):
                     conflicts.append((scope, lease))
         if conflicts:
             for scope, lease in conflicts:
@@ -404,6 +747,16 @@ def cmd_claim(args) -> int:
                     file=sys.stderr,
                 )
             print("nothing claimed; --force to override", file=sys.stderr)
+            if args.session and args.session != "-":
+                try:
+                    remember_waits(root, args.session, conflicts, now)
+                    print(
+                        "you will be told when it frees (LEASE-NOTIFY): mid-turn, or by "
+                        "a wake-up if this session is idle",
+                        file=sys.stderr,
+                    )
+                except Exception:
+                    pass
             return 1
 
     row = "| %s | %s | %s | %s | %s |\n" % (
@@ -476,6 +829,14 @@ def main(argv) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("guard", help="PreToolUse hook; payload on stdin")
+    sub.add_parser("notify", help="UserPromptSubmit hook; payload on stdin")
+    watch = sub.add_parser("watch", help="Stop hook with asyncRewake; payload on stdin")
+    watch.add_argument(
+        "--max-seconds",
+        type=float,
+        default=TTL_HOURS * 3600,
+        help="give up silently after this long (keep it under the hook's timeout)",
+    )
     sub.add_parser("session-end", help="SessionEnd hook; payload on stdin")
     sub.add_parser("list", help="show current leases")
 
@@ -498,6 +859,17 @@ def main(argv) -> int:
         except Exception:  # fail open: never block an edit because of this script
             pass
         return 0
+    if args.cmd == "notify":
+        try:
+            cmd_notify()
+        except Exception:
+            pass
+        return 0
+    if args.cmd == "watch":
+        try:
+            return cmd_watch(args.max_seconds)
+        except Exception:  # a broken watcher must never wake a session
+            return 0
     if args.cmd == "session-end":
         try:
             cmd_session_end()
