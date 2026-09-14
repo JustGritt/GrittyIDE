@@ -238,7 +238,7 @@ been performed; the reducer under it is unit-tested and the *gestures* are not.
 | 2.22 | Open a binary file | Placeholder, not garbage, not a hang |
 | 2.23 | Open `one-line-100k.txt` | Opens; scrolling stays usable |
 | 2.24 | Open `large-text.txt` (12 MiB) | Read-only degraded view with "Enable editing" |
-| 2.25 | **§C typing responsiveness:** Enable editing on `large-text.txt`, start a Web Inspector *Timelines* recording, type continuously for 30 s, stop | Report the number of frames over 16 ms and the worst frame. Repeat briefly in `small-repo/src/*.ts` for comparison |
+| 2.25 | **§C typing responsiveness:** Enable editing on `large-text.txt`, start a Web Inspector *Timelines* recording, type continuously for 30 s, stop. Repeat briefly in `small-repo/src/*.ts` for comparison | Report the number of frames over 16 ms and the worst frame — **and, for the worst of them, what the recording attributes the time to**: Monaco, layout/paint, the WebView, or React reconciliation. Frame counts alone cannot tell those apart, and ADR-032's first reopening criterion turns on the attribution rather than on the count. This is the measurement §C has owed since 2026-09-04 |
 
 **Conflict and close**
 

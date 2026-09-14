@@ -2,6 +2,10 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-09
+- **Accepted:** 2026-09-09 by Alexis, with the amendments below: React is
+  recorded as the *current shell* rather than a permanent commitment,
+  *Revisit when* is restated as explicit reopening criteria, and the
+  measurement those criteria turn on is commissioned rather than only named.
 - **Amends:** ADR-001, which asserted "a React + Monaco frontend" while its
   Context compared only Electron against Tauri. The runtime half of that
   sentence is argued there and still open; the frontend half was never argued
@@ -144,6 +148,14 @@ decision rather than an inheritance:
 - **Svelte 5** is the same trade with additional tooling churn: a new file
   format changes the Vitest, Testing Library and Biome setup that
   `pnpm check` is built on. Rejected for the same reason as Solid, plus cost.
+  **SvelteKit is rejected separately, and more firmly than Svelte itself.** It
+  is a meta-framework whose value is SSR, filesystem routing, server endpoints
+  and form actions; a Tauri application runs it under `adapter-static` with
+  `ssr: false`, which is adopting a server framework in order to switch its
+  server off. Gritty also has nothing for the routing half to describe — there
+  is no router in the tree, and an IDE's state is panes, tabs and workstreams,
+  not URLs. If this decision reopens it reopens on **Svelte 5 + Vite**, which
+  is the only form of the candidate worth weighing.
 - **Vanilla TypeScript over the DOM** is what VS Code does, and it is the honest
   answer to "what if we were starting over" — the highest ceiling and the fullest
   control, at the price of rebuilding a component and lifecycle model. Gritty is
@@ -170,19 +182,92 @@ decision rather than an inheritance:
   discipline is why a migration would be a UI-shell rewrite rather than an
   application rewrite, and it is worth keeping deliberately: framework-coupled
   code stays out of `packages/*`, and state logic stays in plain reducers.
+- **The styling layer is already framework-portable, and deliberately plain.**
+  ADR-016 puts the palette, the type scale and the geometry scale in
+  `apps/desktop/src/styles/tokens.css` as CSS custom properties, consumed as
+  `var(--…)`; there is no Tailwind, no PostCSS and no CSS-in-JS anywhere in the
+  workspace. Tokens in CSS are what would actually survive a framework change,
+  and they are load-bearing well beyond styling, because Monaco's theme and
+  xterm's `ITheme` read the computed values back off the document root
+  (ADR-016). A utility-class layer would add nothing to that portability and
+  would work against those two surfaces, which need values they can read at
+  runtime rather than classes they cannot. Keep the tokens in CSS.
 - What this ADR does *not* claim: that rendering is fast. It claims that
   rendering is not where the cost is, on the evidence available, and that the
   measurement which would test that claim is named and still owed.
 
+## The limit of this evidence
+
+Decision 1 rests on a claim about *today's* traffic: the framework carries
+almost nothing, because the three surfaces that move fastest were deliberately
+routed around it. That claim has an expiry, and naming it belongs in the
+decision rather than in whoever reopens it.
+
+The application this ADR was written inside is an editor shell. The one it is
+being built toward is an orchestration cockpit, in which workstreams, agent
+statuses, run consoles, workspace ownership, decisions, task progress, command
+streams, diffs, review states and an attention queue all update concurrently,
+from many sources, with no user driving any of them. That is a materially more
+reactive UI than an editor, and it is the load under which fine-grained
+reactivity would first earn its cost. So *"Svelte optimises a path carrying
+almost nothing"* is true on the evidence available and must not be quoted
+forward as though it were durable.
+
+Two things in the tree were where that pressure landed first, and both are
+ordinary work rather than framework evidence: `RUNS-EVENT-FILTER` (`useRuns`
+dispatched *every* domain event of *every* kind into `runsReducer`) and the
+absence of any `React.memo` or list virtualization, held in check today only by
+ring caps and server-side pagination. Neither is a framework problem — both
+would be identical under Solid or Svelte — which is exactly why they have to be
+fixed *before* any measurement here can be read as a framework signal rather
+than as render pressure we chose.
+
+*Corrected 2026-09-14, before this amendment was committed:* the first is fixed —
+`RUNS-EVENT-FILTER` landed as `04ff0ca`, and `useRuns` now takes two typed
+subscriptions, the pattern `use-agents.ts` already used. The second is still
+true, and the 9 September text called it ticketed when it is not: virtualization
+is recorded only as a known limitation of T210 (the workstream UI), and nothing
+on the board owns it.
+
 ## Revisit when
 
-The Phase 0 §C typing measurement is finally taken against the current UI and
-records frames over 16 ms that profiling attributes to reconciliation rather
-than to Monaco, layout or the WebView — the attribution matters, because the
-first two are the expected dominant terms and neither is fixed by a framework
-change; or a streaming surface arrives that cannot be kept out of React state by
-decision 2, and stays outside budget after virtualization and rule-8 batching
-have both been applied; or the React-coupled surface stops being contained —
-if framework code reaches `packages/*`, or reducers stop being pure, the
-migration cost this ADR treats as bounded is no longer bounded, and the
-trade changes.
+React is the current shell, not a settled architectural commitment. The rule:
+
+> **Keep React unless the framework itself is demonstrably contributing to
+> Gritty's responsiveness problems, after the non-framework causes have been
+> ruled out.**
+
+Reopen on any of the following, in writing:
+
+1. **Measured typing cost, attributed.** Phase 0 §C step 2.25 is taken against
+   the current UI and records sustained editing outside frame budget, *and*
+   profiling attributes a meaningful share of it to reconciliation rather than
+   to Monaco, layout or the WebView. The attribution is the whole criterion:
+   those three are the expected dominant terms and none of them is fixed by
+   changing framework.
+2. **Orchestration render pressure.** The workstream, agent and attention
+   surfaces show measurable render pressure under realistic concurrent load —
+   measured after `RUNS-EVENT-FILTER`, virtualization and rule-8 batching have
+   each been applied, so that what remains is the framework and not a
+   subscription we picked badly.
+3. **Escalating workarounds.** Holding a surface inside budget starts to need
+   increasingly elaborate machinery to route around React. Decision 2 is the
+   cheap version of that pattern — a ref and a DOM node — and it stops being
+   cheap when new surfaces need bespoke work instead.
+4. **Containment lost.** Framework code reaches `packages/*`, or reducers stop
+   being pure. The migration cost this ADR treats as bounded is bounded only by
+   that discipline. It is measurable, so measure it: 2026-09-09, 70 of 557
+   TS/TSX files import React, 16 860 React-coupled lines against 35 495
+   framework-free — 32.2 %, against 32.1 % when this ADR was drafted the same
+   day at 486 files. The tree grew about a quarter and the ratio did not move;
+   that is the number to re-take, and a rising ratio is the signal.
+
+**Criterion 1 is owed, not optional.** It is the one measurement that could
+implicate React, it has never been taken, and until it exists both sides of
+this question argue from priors. It belongs to the `Phase 0 tests` ticket
+(`docs/plans/phase-0-spike.md` §C; manual pass step 2.25) and it needs a person
+at the keyboard — the agent sessions cannot type into the window, which is why
+that row has read "pending the human pass" since 2026-09-04. Step 2.25 has been
+amended alongside this ADR to require the attribution criterion 1 turns on: as
+written it asked only for frame counts, and a frame count cannot tell
+reconciliation from layout.

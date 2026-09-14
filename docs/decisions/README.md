@@ -6,7 +6,7 @@ requires updating the relevant ADR.
 
 | ADR | Title | Status |
 |---|---|---|
-| [ADR-001](ADR-001-desktop-runtime.md) | Desktop runtime: Tauri 2 | Proposed (decided by Phase 0) |
+| [ADR-001](ADR-001-desktop-runtime.md) | Desktop runtime: Tauri 2 | Accepted |
 | [ADR-002](ADR-002-platform-order.md) | Platform order: macOS, Linux, Windows deferred | Accepted |
 | [ADR-003](ADR-003-ui-core-boundary.md) | UI/core boundary through a typed protocol | Accepted |
 | [ADR-004](ADR-004-persistence.md) | SQLite for app metadata; repository files stay authoritative | Accepted |

@@ -32,6 +32,7 @@ a reopened ticket moves back the same way. Do not move files in or out by hand.
 | [T096](T096-terminal-chrome.md) | Terminal chrome from design artboard 8a | 0/2 | T047, T048, T090, T095 | done |
 | [T098](T098-terminal-colours-and-rooting.md) | Terminal session colours, and starting where you work | 0/2 | T047, T090, T095, T096 | done |
 | [PTY-FLAKE](PTY-FLAKE-process-tree-kill.md) | `pty.rs::kill_terminates_the_whole_process_tree` is flaky under load | 2 | T090 | done |
+| ADR-001 | Confirm or reject Tauri | 0 | Phase 0 tests | done |
 | MANUAL-PASS-COVERAGE | The manual pass covers every task sitting at review (review-findings finding 6) | 0 | T041, T045, T051, T210, T220, T221, T231, T232, T325 | done |
 | [T070](T070-file-watcher.md) | File watcher | 1A/2 | T020, T030, ADR-001 | done |
 | [T080](T080-search.md) | Search: the walk, the match, the streamed result (the core half) | 2 | T020, T070, ADR-001 | done |
