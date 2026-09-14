@@ -1,7 +1,7 @@
 # Task AGENT-TURN-END — The agent roster says Done while the model is still generating
 
 - **Phase:** 3
-- **Status:** doing
+- **Status:** review
 - **Depends on:** T220 (agent session discovery), T221 (agent hook bridge:
   earning `BLOCKED`), T223 (attention notifications), T231 (the agent rail).
   All four are on `main`.
