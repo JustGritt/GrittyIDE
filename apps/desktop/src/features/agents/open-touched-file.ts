@@ -22,10 +22,11 @@ export interface TouchedFileDocuments {
  * Open a file the agent touched, in the editor beside the agent that touched it
  * (T232 §11, §12).
  *
- * **`documents.status` first.** External modification is checked on demand
- * today — T070's watcher does not exist — so a file the agent rewrote a second
- * ago would otherwise open from a buffer the core last read before the write,
- * or reuse an already-open tab whose contents are older still. Checking first
+ * **`documents.status` first.** The watcher (T070) makes that check fire on
+ * its own, but only after a debounce of up to a second — so a file the agent
+ * rewrote a moment ago would otherwise open from a buffer the core last read
+ * before the write, or reuse an already-open tab whose contents are older
+ * still. Checking first
  * turns that into the ordinary external-change flow the document contract
  * already defines: the tab's `externalModificationState` moves, the banner the
  * editor already draws appears, and hard rule 7 holds because nothing is

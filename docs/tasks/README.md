@@ -43,6 +43,7 @@ moves back. Never move a task file by hand.
 | [CARGO-FLAKE](CARGO-FLAKE-desktop-command-tests.md) | Three desktop command tests fail under a loaded machine | 2 | – | todo |
 | CI-LINUX-DARK | Linux CI is dark until the minute allowance resets (1 Oct) or a spending limit is set |  | – | blocked |
 | CONFIRM-DIALOG | Extract a shared confirm dialog before a third copy is written | 2 | – | unspec |
+| [DOCS-TREE-FOLLOWUPS](docs/tasks/DOCS-TREE-FOLLOWUPS-stale-tree-docs.md) | Docs that still describe the tree before T070 and T042 | maintenance | FILES-PARTIAL, TRASH-FALLBACK, EXPLORER-RELIST-QUEUE | review |
 | [EXPLORER-DISCARD-NOTICE](docs/tasks/EXPLORER-DISCARD-NOTICE-dirty-documents-only.md) | The discard notice replays only a dirty-document refusal | maintenance | T042, EXPLORER-FORCE-REPLAY | review |
 | [EXPLORER-RELIST-QUEUE](docs/tasks/EXPLORER-RELIST-QUEUE-bounded-relists.md) | Stale directories re-list a few at a time | maintenance | T070, FILES-PARTIAL | review |
 | [FILE-ICONS](docs/tasks/FILE-ICONS-file-type-icons.md) | File-type icons in the explorer tree and Changes list | 2 | – | review |

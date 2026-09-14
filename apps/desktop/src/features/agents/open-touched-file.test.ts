@@ -83,15 +83,15 @@ function store() {
 
 describe('opening a file the agent touched', () => {
   it('checks the disk before it opens anything', async () => {
-    // External modification is checked on demand today (T070 does not exist),
-    // so a file the agent rewrote a second ago would otherwise open from a
-    // buffer the core last read before the write.
+    // The watcher's own check trails a write by up to a debounce, so a file
+    // the agent rewrote a moment ago would otherwise open from a buffer the
+    // core last read before the write.
     const { documents, calls } = store();
     await openTouchedFile(documents, WS, 'src/main.rs');
     expect(calls).toEqual(['status', 'open src/main.rs (quiet)']);
   });
 
-  it('checks again on the next open, because nothing is watching the disk', async () => {
+  it('checks again on the next open, rather than trusting the watcher to have caught up', async () => {
     const { documents, statusChecks } = store();
     await openTouchedFile(documents, WS, 'src/main.rs');
     await openTouchedFile(documents, WS, 'src/main.rs');

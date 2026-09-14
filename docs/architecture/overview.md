@@ -30,13 +30,13 @@ module that imports `@tauri-apps/api`.
 
 | Convention | Shape |
 |---|---|
-| Command names | `<domain>.<verb>` in TypeScript ↔ `<domain>_<snake_verb>` in Rust; one `request` object per command (`core.health`, `operations.list`, `operations.cancel`, `operations.startDemo`, `workspace.open`, `workspace.close`, `workspace.current`, `workspace.list`, `documents.open`, `documents.close`, `documents.update`, `documents.save`, `documents.reload`, `documents.status`, `documents.list`, `shell.openExternal`, `session.restore`, `session.candidates`, `session.recover`, `session.discard`, `session.update`) |
+| Command names | `<domain>.<verb>` in TypeScript ↔ `<domain>_<snake_verb>` in Rust; one `request` object per command. The complete list is `COMMANDS` in `packages/protocol/src/commands.ts`, and it is not copied here: a copy is what went stale |
 | Error envelope | `CoreError { code, message, details?, retryable, correlationId? }`, `code ∈ InvalidInput, NotFound, PermissionDenied, Conflict, Cancelled, Timeout, Io, Internal, ProtocolMismatch` |
 | Event envelope | one channel `gritty://core/event`, payload `{ name, seq, workspaceId?, correlationId?, actor, payload }`; `seq` strictly increasing per process |
 | Identifiers | UUID v7 strings (`WorkspaceId`, `OperationId`, `DocumentId`, `AgentRunId`, `CorrelationId`), branded in TypeScript |
 | Timestamps | milliseconds since the Unix epoch, exported as `number` |
 | Actor | `{ type: "USER" } \| { type: "SYSTEM" } \| { type: "AGENT", runId } \| { type: "EXTERNAL" }` |
-| Versioning | `PROTOCOL_VERSION` (`MAJOR.MINOR.PATCH`, currently `1.3.0`) reported by `core.health`; the client refuses a different MAJOR with `ProtocolMismatch` |
+| Versioning | `PROTOCOL_VERSION` (`MAJOR.MINOR.PATCH`, defined in `crates/gritty-core/src/protocol/mod.rs`, next free value claimed in `docs/merge-queue.md`) reported by `core.health`; the client refuses a different MAJOR with `ProtocolMismatch` |
 
 Every command adapter runs its body behind a guard that creates a correlation id,
 opens a tracing span and converts a panic into `Internal`; a promise never hangs.
@@ -75,9 +75,13 @@ opened by `workspace.open` (the native directory picker runs on the Rust side
 when no path is given; `null` means the picker was dismissed), closed by
 `workspace.close`, replaced when another root is opened (`WorkspaceClosed` with
 reason `REPLACED`), and closed with reason `ROOT_MISSING` when its root
-disappears; the command that notices fails with `NotFound`. `workspace.current`
-rehydrates the UI after a reload. Events: `WorkspaceOpened { workspace }` and
-`WorkspaceClosed { workspaceId, root, reason }`.
+disappears — noticed by the watch within about a second (T070), or by the next
+command that touches it, which then fails with `NotFound`. `workspace.current`
+rehydrates the UI after a reload. Events: `WorkspaceOpened { workspace }`,
+`WorkspaceClosed { workspaceId, root, reason }`, and the watch's
+`WorkspaceEntriesChanged { workspaceId, directories, overflowed }`. The domain
+has its own page, [`workspace.md`](workspace.md): paths, listing, `files.*`
+and the watch.
 
 Paths on the wire are `WorkspacePath` strings: relative to the root,
 `/`-separated, no `.`/`..`, validated while the request is deserialized; the

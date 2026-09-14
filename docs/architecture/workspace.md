@@ -1,4 +1,4 @@
-# The workspace (T020, T049, T070)
+# The workspace (T020, T042, T049, T070)
 
 One workspace is open at a time. It is a canonicalized root directory, a path
 policy that everything crossing the UI/core boundary obeys, a lister that reads
@@ -79,7 +79,7 @@ removed, and a rename moves the link rather than its target. **A new entry needs
 only its deepest existing ancestor to resolve**, which is what lets one call
 create a nested path.
 
-Three properties worth knowing:
+Four properties worth knowing:
 
 - **The response carries the directories to re-list**, and the shell marks them
   stale through the same path a watcher batch uses. The watch below is
@@ -89,10 +89,22 @@ Three properties worth knowing:
   a rename by construction (ADR-025), so the command tells the document layer
   itself, through the `DocumentTreeGuard` seam and
   `DocumentChanged { cause: MOVED }`. `documents.md` has the detail.
-- **Nothing is atomic across entries.** A copy or delete that outlives its
-  budget continues as a cancellable operation; cancelling stops before the next
-  entry, and what was already written stays and is counted in
-  `cancelledAfter`. There is no rollback and none is implied.
+- **Nothing is atomic across entries, and what happened is settled anyway.** A
+  move or delete that outlives its budget continues as a cancellable operation.
+  Cancelling stops before the next entry, and a failure stops at the entry that
+  failed. Either way, what was already done stays, with no rollback and none
+  implied. The blocking job itself journals it and rehomes its documents
+  (FILES-PARTIAL): the registry aborts a cancelled operation's body and drops its
+  result, so the body cannot be where that happens. A failure keeps its error
+  code and adds `details.completed` and `details.requested`; a cancelled
+  operation carries no result, so `cancelledAfter` is never set. On either one,
+  the explorer re-lists every loaded directory, because nothing told it which
+  moved.
+- **A Trash refusal is a question, not an error** (TRASH-FALLBACK). `trash`
+  failing, most often on a volume with no Trash, is `Io` with
+  `details.reason: "TRASH_REFUSED"`. The explorer answers it with the
+  permanent-delete dialog, for the entries the Trash did not take, and sends
+  nothing until the user confirms.
 
 ## Watching (T070)
 
@@ -122,7 +134,10 @@ The renderer's side of the bargain is in `explorer-reducer.ts`: a named
 directory is re-listed only when it is a loaded node, and `overflowed` re-lists
 every loaded node. Either way the work is bounded by what the user expanded,
 not by the size of the change — which is what lets a storm converge without
-being forwarded.
+being forwarded. The re-lists themselves run at most four at a time, root and
+shallow directories first (EXPLORER-RELIST-QUEUE), so a hundred expanded
+folders are a queue rather than a hundred concurrent reads; a directory named
+again while its listing is in flight is listed once more after it.
 
 How the tree is handed to the backend is a platform choice and a runtime value
 (`WatchStrategy`), not a `cfg`, so the branch this machine does not run is
