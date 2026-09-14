@@ -22,11 +22,11 @@ requires updating the relevant ADR.
 | [ADR-014](ADR-014-session-persistence.md) | Session persistence and crash recovery: SQLite schema, snapshot writer, restore protocol, failure policy | Accepted |
 | [ADR-015](ADR-015-terminal-pty.md) | Terminal sessions over a PTY: portable-pty, output batching, process-tree termination, shell and environment policy | Accepted |
 | [ADR-016](ADR-016-design-tokens.md) | Design tokens: CSS custom properties are the single source of truth; Monaco and xterm read them back | Accepted |
-| [ADR-017](ADR-017-terminal-command-blocks.md) | Terminal command blocks are a renderer-side view of xterm's scrollback | Proposed |
+| [ADR-017](ADR-017-terminal-command-blocks.md) | Terminal command blocks are a renderer-side view of xterm's scrollback | Accepted |
 | [ADR-018](ADR-018-agent-integration-bridge.md) | Gritty may install a hook into another tool's configuration, additively and with consent | Accepted |
 | [ADR-019](ADR-019-workspace-ownership.md) | Write ownership is a logical lease held by a workstream, and it is observed rather than enforced | Accepted |
 | [ADR-020](ADR-020-agent-permission-verdicts.md) | A hook may wait for Gritty's verdict on a permission prompt, bounded and fail-open | Accepted |
-| [ADR-021](ADR-021-agent-run-persistence.md) | A run Gritty owns is persisted as an account of itself, never as something to resume | Proposed |
+| [ADR-021](ADR-021-agent-run-persistence.md) | A run Gritty owns is persisted as an account of itself, never as something to resume | Accepted |
 | [ADR-022](ADR-022-search-engine.md) | Search runs in-process on ripgrep's own crates, and "ignored" keeps its current, narrower meaning | Proposed |
 | [ADR-023](ADR-023-git-library.md) | Git is read in-process through `gix`, with no `git` process and no configuration that can run one | Proposed |
 | [ADR-024](ADR-024-target-dir-retention.md) | One `target/` per checkout, swept by budget and age — not a shared `CARGO_TARGET_DIR` | Proposed |

@@ -1,12 +1,14 @@
 # ADR-021: A run Gritty owns is persisted as an account of itself, never as something to resume
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-08
-- **Decided by:** nobody yet. Drafted by an agent session that yielded T310 to
-  another live session and picked this up instead;
-  `docs/plans/execution-board.md` reserves every ADR verdict for lane H, so this
-  stays `Proposed` until Alexis records one — exactly as ADR-017, ADR-022,
-  ADR-023, ADR-024 and ADR-025 do.
+- **Accepted:** 2026-09-14 by Alexis, as drafted. Nothing implements it yet:
+  `SCHEMA_VERSION` is still 4 and §8's migration `0005` and version 5 are still
+  named rather than claimed, so the ticket that writes the migration claims them
+  in `docs/merge-queue.md` in the ordinary way. Checked against the tree that
+  day, after T310-ANSWER: the facts in *Context* still hold, and a run
+  interrupted at shutdown with an ask outstanding has that ask denied first,
+  which §2's write-back does not need to know about.
 - **Motivated by:** T300-C, T300-CORE and T300-CMD, which each closed with the
   same known limitation in almost the same words, and T310, which turns it from
   a correct simplification into a real gap

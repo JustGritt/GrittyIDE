@@ -1,7 +1,12 @@
 # ADR-017: Command blocks are a renderer-side view of xterm's scrollback
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-05
+- **Accepted:** 2026-09-14 by Alexis, as drafted. T097 (shell integration and
+  command blocks) may start; it builds blocks in the renderer and adds no core
+  registry, no event and no `TerminalOutput` change. Checked against the tree
+  that day: nothing outside the renderer yet needs to know what a terminal ran,
+  so *Revisit when* has not fired.
 
 ## Context
 

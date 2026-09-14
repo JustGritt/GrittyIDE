@@ -37,8 +37,7 @@ moves back. Never move a task file by hand.
 | T400 | Worktree isolation | 5 | T100, T325 | unspec |
 | T405 | Ownership-aware scheduler | 5 | T325, T300 | unspec |
 | T410 | Attention queue | 5 | T210, T325, T335 | unspec |
-| ADR-017 | Decide the terminal command-block contract (drafted, undecided) | 2 | – | todo |
-| ADR-018A | ADR-018 amendment: a hook that may refuse a write | 4 | T326 | todo |
+| ADR-018A | ADR-018 amendment: a hook that may refuse a write | 4 | T326 | doing |
 | [AGENT-TURN-END](AGENT-TURN-END-roster-done-while-generating.md) | The agent roster says Done while the model is still generating | 3 | T220, T221, T223, T231 | review |
 | BOARD-ARCHIVE | Done and superseded tickets move to a generated archive, so the index lists open work | tools | – | review |
 | BOARD-STALE-REASON | A block reason outlives its block, and show prints it as present tense | tools | – | todo |
@@ -46,11 +45,13 @@ moves back. Never move a task file by hand.
 | CI-LINUX-DARK | Linux CI is dark until the minute allowance resets (1 Oct) or a spending limit is set |  | – | blocked |
 | CONFIRM-DIALOG | Extract a shared confirm dialog before a third copy is written | 2 | – | unspec |
 | [FILE-ICONS](docs/tasks/FILE-ICONS-file-type-icons.md) | File-type icons in the explorer tree and Changes list | 2 | – | review |
+| [LAST-PROMPT-SHELL](docs/tasks/LAST-PROMPT-SHELL-bang-commands.md) | A ! shell command is not a session's last prompt | maintenance | AGENT-TURN-END | doing |
 | [LEASE-NOTIFY](docs/tasks/LEASE-NOTIFY-lease-change-notices.md) | Tell a session when the lease registry changes under it | tooling | – | review |
 | MARKDOWN-BENCH | A markdown benchmark with a recorded baseline, if a perf gate is wanted | 3 | MARKDOWN-BUDGET-FLAKE | unspec |
 | MARKDOWN-BUDGET-FLAKE | render.test.ts 2000ms wall-clock budget fails under concurrent-build load | 3 | – | review |
 | MONACO-JSDOM-FLAKE | model-eol.dom.test.ts times out its 10s beforeAll under load | 3 | JSDOM-VITEST | review |
 | MONACO-PREBUNDLE | Pre-bundle monaco-editor so the 9s transform is not paid every run | 3 | MONACO-JSDOM-FLAKE | unspec |
+| [NOTIFY-SETTING-ORPHAN](docs/tasks/NOTIFY-SETTING-ORPHAN-delete.md) | Delete the notification switch nothing mounts | maintenance | T120-U, T120-M | doing |
 | PROTO-W2 | Wave 2 wire, in one PR: watcher, git, terminal blocks, diagnostics, violations | 2 | ADR-001, ADR-017, ADR-023 | todo |
 | [RUNS-EVENT-FILTER](RUNS-EVENT-FILTER-subscription.md) | use-runs.ts subscribes to every event of every kind |  | – | review |
 | [SIDEBAR-ICONS](docs/tasks/SIDEBAR-ICONS-section-tab-icons.md) | Sidebar section tabs as icons, for horizontal room | 2 | – | review |
@@ -70,6 +71,7 @@ moves back. Never move a task file by hand.
 | T300-PANEL | A run belongs on its workstream's island row, not a fourth roster | 4 | T300-WIRE | unspec |
 | T400-R | Worktree create and remove | 5 | T100 | unspec |
 | [TREE-DISCLOSURE](docs/tasks/TREE-DISCLOSURE-chevron-transition.md) | Tree chevron and expand/collapse transition | 2 | FILE-ICONS | review |
+| [TURN-START-DEQUEUE](docs/tasks/TURN-START-DEQUEUE-measure.md) | Measure whether a dequeued message should start a turn | maintenance | AGENT-TURN-END | doing |
 | [WATCH-FLAKE](WATCH-FLAKE-load-sensitive.md) | Two load-sensitive tests fail in the full-workspace run, pass alone |  | – | todo |
 <!-- board:table end -->
 

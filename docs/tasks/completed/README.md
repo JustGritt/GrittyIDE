@@ -56,6 +56,7 @@ a reopened ticket moves back the same way. Do not move files in or out by hand.
 | [T325](T325-workspace-ownership.md) | Workspace ownership registry | 4 | T200, T210, ADR-019 | done |
 | [T326](T326-ownership-violations.md) | Observed ownership violations | 4 | T223, T230, T325 | done |
 | [T335](T335-agent-permissions.md) | Permissions: asked in place, answered in a queue (12a/12b) | 4 | T210, T221, T232, ADR-020 | done |
+| ADR-017 | Decide the terminal command-block contract (drafted, undecided) | 2 | – | done |
 | ADR-021 | Persistence for a run Gritty owns | 4 | T300-C | done |
 | ADR-022 | Search engine: in-process grep/ignore, or spawn ripgrep | 2 | – | done |
 | ADR-023 | Git library: gix, git2, or porcelain | 2 | – | done |
