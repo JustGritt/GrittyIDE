@@ -135,7 +135,10 @@ export function ExplorerPanel({
       {explorer.error && (
         <>
           <ErrorEnvelope error={explorer.error} onDismiss={explorer.clearError} />
-          {explorer.error.code === 'Conflict' && (
+          {/* Only a dirty-document refusal: every other `Conflict` (a taken
+              name, an empty undo) is not about unsaved work, and the button
+              would replay something with `force` (EXPLORER-DISCARD-NOTICE). */}
+          {explorer.canDiscardAndRetry && (
             <p className="explorer__notice" role="status">
               Documents have unsaved changes. Save or close them first, or
               <button type="button" onClick={() => void explorer.discardAndRetry()}>

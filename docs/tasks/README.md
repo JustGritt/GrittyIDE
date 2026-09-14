@@ -44,7 +44,7 @@ moves back. Never move a task file by hand.
 | [CARGO-FLAKE](CARGO-FLAKE-desktop-command-tests.md) | Three desktop command tests fail under a loaded machine | 2 | – | todo |
 | CI-LINUX-DARK | Linux CI is dark until the minute allowance resets (1 Oct) or a spending limit is set |  | – | blocked |
 | CONFIRM-DIALOG | Extract a shared confirm dialog before a third copy is written | 2 | – | unspec |
-| [EXPLORER-DISCARD-NOTICE](docs/tasks/EXPLORER-DISCARD-NOTICE-dirty-documents-only.md) | The discard notice replays only a dirty-document refusal | maintenance | T042, EXPLORER-FORCE-REPLAY | doing |
+| [EXPLORER-DISCARD-NOTICE](docs/tasks/EXPLORER-DISCARD-NOTICE-dirty-documents-only.md) | The discard notice replays only a dirty-document refusal | maintenance | T042, EXPLORER-FORCE-REPLAY | review |
 | [FILE-ICONS](docs/tasks/FILE-ICONS-file-type-icons.md) | File-type icons in the explorer tree and Changes list | 2 | – | review |
 | [GC-BUDGET](GC-BUDGET-sweeper-defaults.md) | Re-derive the sweeper's cache budget and disk floor for ADR-033's smaller builds | tools | ADR-024, ADR-033 | review |
 | GC-DEV-SKIP | A running tauri dev stops every sweep of its checkout: the process scan outranks a free .cargo-lock | tools | GC-BUDGET | todo |

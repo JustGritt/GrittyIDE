@@ -49,6 +49,22 @@ type Refusal =
   | { kind: 'delete'; paths: readonly string[]; mode: DeleteMode };
 
 /**
+ * Whether `error` is the core refusing because documents under the action are
+ * dirty — the one `Conflict` that replaying with `force` answers.
+ *
+ * `Conflict` alone is not enough: a move onto a taken name, an empty undo and
+ * every `AlreadyExists` are `Conflict` too, and none of them is about unsaved
+ * work (EXPLORER-DISCARD-NOTICE).
+ */
+export function isDirtyDocumentRefusal(error: CoreError | null): boolean {
+  if (error?.code !== 'Conflict') return false;
+  const details = error.details;
+  if (typeof details !== 'object' || details === null || Array.isArray(details)) return false;
+  const dirty = (details as { dirtyDocuments?: unknown }).dirtyDocuments;
+  return Array.isArray(dirty) && dirty.length > 0;
+}
+
+/**
  * The explorer as its consumers see it. The shell owns the instance (T049):
  * the launcher needs `openFolder` and the top bar needs `state.workspace`, and
  * a second instance would mean a second subscription and a second tree.
@@ -73,10 +89,29 @@ export function useExplorer(options: ExplorerOptions = {}) {
    * guess which, and it guessed wrong — `deleteAnyway` was defined, returned
    * and never called, while the notice wired the open/close replay for every
    * `Conflict` including a delete's (EXPLORER-FORCE-REPLAY). Last writer wins,
-   * which is exactly "what the core most recently refused", and every action
-   * clears it on success.
+   * which is exactly "what the core most recently refused".
+   *
+   * **Written only by a dirty-document refusal.** It used to be written before
+   * sending and cleared on success, so a delete that failed for any other
+   * reason stayed armed, and the next unrelated `Conflict` offered to replay it
+   * with `force` (EXPLORER-DISCARD-NOTICE). See `refusable`.
    */
   const refused = useRef<Refusal | null>(null);
+
+  /**
+   * Send an action the core may refuse over dirty documents, and hold it for
+   * the notice only when that is the answer. Success and every other failure
+   * leave nothing to replay.
+   */
+  const refusable = useCallback(async <T>(refusal: Refusal, send: () => Promise<T>) => {
+    refused.current = null;
+    try {
+      return await send();
+    } catch (cause: unknown) {
+      if (isDirtyDocumentRefusal(toCoreError(cause))) refused.current = refusal;
+      throw cause;
+    }
+  }, []);
 
   useEffect(() => {
     // Subscribe before asking for the current workspace so nothing emitted in
@@ -194,25 +229,25 @@ export function useExplorer(options: ExplorerOptions = {}) {
   const openFolder = useCallback(
     (path?: string, force = false) =>
       run(async () => {
-        refused.current = { kind: 'open', path };
-        const opened = await core.workspace.open(path, force ? { force } : undefined);
-        refused.current = null;
+        const opened = await refusable({ kind: 'open', path }, () =>
+          core.workspace.open(path, force ? { force } : undefined),
+        );
         if (opened) dispatch({ type: 'workspace', workspace: opened });
         return opened;
       }),
-    [run],
+    [run, refusable],
   );
 
   const closeWorkspace = useCallback(
     (force = false) =>
       run(async () => {
         if (!workspace) return;
-        refused.current = { kind: 'close' };
-        await core.workspace.close(workspace.id, force ? { force } : undefined);
-        refused.current = null;
+        await refusable({ kind: 'close' }, () =>
+          core.workspace.close(workspace.id, force ? { force } : undefined),
+        );
         dispatch({ type: 'workspace', workspace: null });
       }),
-    [run, workspace],
+    [run, workspace, refusable],
   );
 
   const cancelListing = useCallback(
@@ -324,18 +359,26 @@ export function useExplorer(options: ExplorerOptions = {}) {
     (paths: readonly string[], mode: DeleteMode, force = false) =>
       run(async () => {
         if (!workspace || paths.length === 0) return undefined;
-        refused.current = { kind: 'delete', paths, mode };
-        const response = await core.files.delete({
-          workspaceId: workspace.id,
-          paths: [...paths],
-          mode,
-          ...(force ? { force: true } : {}),
-        });
-        refused.current = null;
+        const response = await refusable({ kind: 'delete', paths, mode }, () =>
+          core.files.delete({
+            workspaceId: workspace.id,
+            paths: [...paths],
+            mode,
+            ...(force ? { force: true } : {}),
+          }),
+        );
         return settleResponse(response);
       }),
-    [run, workspace, settleResponse],
+    [run, workspace, settleResponse, refusable],
   );
+
+  /**
+   * Whether "discard them and continue" means something right now: the error
+   * showing is a dirty-document refusal, and the slot holds the action that
+   * earned it. Every action that can write the slot empties it before sending,
+   * and only those three can earn this error, so the two cannot disagree.
+   */
+  const canDiscardAndRetry = isDirtyDocumentRefusal(error) && refused.current !== null;
 
   /**
    * Replay whichever action the core refused, with `force`: the user chose to
@@ -345,11 +388,14 @@ export function useExplorer(options: ExplorerOptions = {}) {
    */
   const discardAndRetry = useCallback(async () => {
     const last = refused.current;
-    if (!last) return;
+    // Only while the refusal is the error on screen: a replay reached for any
+    // other reason would force an action the user did not just see refused.
+    if (!last || !canDiscardAndRetry) return;
+    refused.current = null;
     if (last.kind === 'close') await closeWorkspace(true);
     else if (last.kind === 'open') await openFolder(last.path, true);
     else await deleteEntries(last.paths, last.mode, true);
-  }, [closeWorkspace, openFolder, deleteEntries]);
+  }, [canDiscardAndRetry, closeWorkspace, openFolder, deleteEntries]);
 
   /** Show an entry in the system file manager. Resolved core-side. */
   const revealInFileManager = useCallback(
@@ -399,6 +445,7 @@ export function useExplorer(options: ExplorerOptions = {}) {
     openFolder,
     adoptWorkspace,
     closeWorkspace,
+    canDiscardAndRetry,
     discardAndRetry,
     cancelListing,
     setShowHidden,

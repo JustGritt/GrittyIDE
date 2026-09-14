@@ -7,10 +7,10 @@ import type {
   WorkspaceId,
   WorkspacePath,
 } from '@gritty/protocol';
-import { PROTOCOL_VERSION } from '@gritty/protocol';
+import { CoreError, type JsonValue, PROTOCOL_VERSION } from '@gritty/protocol';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useExplorer } from './use-explorer';
+import { isDirtyDocumentRefusal, useExplorer } from './use-explorer';
 
 /**
  * EXPLORER-FORCE-REPLAY: the dirty-document `Conflict` replays *the* refused
@@ -243,5 +243,152 @@ describe('the dirty-document Conflict replay', () => {
     // A succeeded delete is not a refusal to replay; replaying it would delete
     // a second time on a button the user reached for a different reason.
     expect(calls).toHaveLength(1);
+  });
+});
+
+/**
+ * EXPLORER-DISCARD-NOTICE: only a dirty-document refusal arms the replay.
+ *
+ * `Conflict` is also a taken name, an empty undo and every `AlreadyExists`. The
+ * bug this stands against: the slot was written *before* sending and cleared
+ * only on success, so a delete that failed for another reason stayed armed, and
+ * the next unrelated `Conflict` showed "discard them and continue" over it.
+ */
+describe('which errors offer the replay', () => {
+  afterEach(cleanup);
+
+  beforeEach(() => {
+    seam.handlers.clear();
+    calls.length = 0;
+    seam.handlers.set('workspace_current', (): Workspace => WORKSPACE);
+    seam.handlers.set(
+      'workspace_list',
+      (args): ListDirectoryResponse => ({
+        status: 'ready',
+        page: {
+          path: ((args?.request as { path?: string })?.path ?? '') as WorkspacePath,
+          entries: [],
+          total: 0,
+          truncated: false,
+        },
+      }),
+    );
+  });
+
+  async function opened() {
+    const rendered = renderHook(() => useExplorer());
+    await waitFor(() => expect(rendered.result.current.state.workspace).not.toBeNull());
+    return rendered;
+  }
+
+  function takenName(): never {
+    throw { code: 'Conflict', message: 'src/b.ts already exists', retryable: false };
+  }
+
+  it('does not offer it for a Conflict that is not about dirty documents', async () => {
+    seam.handlers.set('files_rename', (args) => {
+      record('files_rename', args);
+      takenName();
+    });
+
+    const rendered = await opened();
+    await act(async () => {
+      await rendered.result.current.renameEntry('src/a.ts', 'b.ts');
+    });
+    expect(rendered.result.current.error?.code).toBe('Conflict');
+    expect(rendered.result.current.canDiscardAndRetry).toBe(false);
+  });
+
+  it('never forces a delete that failed for another reason', async () => {
+    seam.handlers.set('files_delete', (args) => {
+      record('files_delete', args);
+      throw {
+        code: 'Io',
+        message: 'notes.md could not be moved to the trash',
+        retryable: false,
+      };
+    });
+    seam.handlers.set('files_rename', (args) => {
+      record('files_rename', args);
+      takenName();
+    });
+
+    const rendered = await opened();
+    await act(async () => {
+      await rendered.result.current.deleteEntries(['notes.md'], 'PERMANENT');
+    });
+    await act(async () => {
+      await rendered.result.current.renameEntry('src/a.ts', 'b.ts');
+    });
+    expect(rendered.result.current.canDiscardAndRetry).toBe(false);
+
+    await act(async () => {
+      await rendered.result.current.discardAndRetry();
+    });
+    // The regression: the failed delete was still in the slot, and this sent
+    // it again with `force: true`.
+    expect(calls.map((call) => call.command)).toEqual(['files_delete', 'files_rename']);
+    expect(calls.some((call) => call.request.force === true)).toBe(false);
+  });
+
+  it('offers it for a dirty-document refusal', async () => {
+    seam.handlers.set('files_delete', (args) => {
+      record('files_delete', args);
+      conflict();
+    });
+
+    const rendered = await opened();
+    await act(async () => {
+      await rendered.result.current.deleteEntries(['notes.md'], 'TRASH');
+    });
+    expect(rendered.result.current.canDiscardAndRetry).toBe(true);
+  });
+
+  it('stops offering it once another error replaces the refusal', async () => {
+    seam.handlers.set('files_delete', (args) => {
+      record('files_delete', args);
+      conflict();
+    });
+    seam.handlers.set('files_rename', (args) => {
+      record('files_rename', args);
+      takenName();
+    });
+
+    const rendered = await opened();
+    await act(async () => {
+      await rendered.result.current.deleteEntries(['notes.md'], 'TRASH');
+    });
+    await act(async () => {
+      await rendered.result.current.renameEntry('src/a.ts', 'b.ts');
+    });
+    expect(rendered.result.current.canDiscardAndRetry).toBe(false);
+    await act(async () => {
+      await rendered.result.current.discardAndRetry();
+    });
+    expect(calls).toHaveLength(2);
+  });
+});
+
+describe('isDirtyDocumentRefusal', () => {
+  const refusal = (shape: { code?: 'Conflict' | 'Io'; details?: unknown }) =>
+    new CoreError({
+      code: shape.code ?? 'Conflict',
+      message: 'x',
+      retryable: false,
+      ...(shape.details === undefined ? {} : { details: shape.details as JsonValue }),
+    });
+
+  it('needs a Conflict naming at least one dirty document', () => {
+    expect(isDirtyDocumentRefusal(refusal({ details: { dirtyDocuments: [{ path: 'a' }] } }))).toBe(
+      true,
+    );
+    expect(isDirtyDocumentRefusal(refusal({}))).toBe(false);
+    expect(isDirtyDocumentRefusal(refusal({ details: { dirtyDocuments: [] } }))).toBe(false);
+    expect(isDirtyDocumentRefusal(refusal({ details: [{ dirtyDocuments: ['a'] }] }))).toBe(false);
+    expect(isDirtyDocumentRefusal(refusal({ details: 'dirtyDocuments' }))).toBe(false);
+    expect(
+      isDirtyDocumentRefusal(refusal({ code: 'Io', details: { dirtyDocuments: [{ path: 'a' }] } })),
+    ).toBe(false);
+    expect(isDirtyDocumentRefusal(null)).toBe(false);
   });
 });
