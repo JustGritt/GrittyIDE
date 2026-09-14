@@ -1,4 +1,4 @@
-import type { AgentPermissionRequest, AgentPermissionVerdict } from '@gritty/protocol';
+import type { AgentPermissionVerdict } from '@gritty/protocol';
 import { useEffect } from 'react';
 import { PERMISSION_CHORD_HINT, permissionVerdictFor } from './permission-chords';
 import {
@@ -7,6 +7,7 @@ import {
   changeSummary,
   diffSign,
   diffText,
+  type PermissionCard,
   scopeLabel,
   verbLabel,
 } from './permission-model';
@@ -34,8 +35,9 @@ export function PermissionPrompt({
   onAnswer,
   onReveal,
 }: {
-  request: AgentPermissionRequest;
-  /** How the row above names this session — `t090`, or its id. */
+  /** A session's request, or a run's ask phrased for the card (T310-ANSWER). */
+  request: PermissionCard;
+  /** How the row above names who is asking — `t090`, a workstream, or an id. */
   sessionLabel: string;
   /** Injected so the age is a value a test can fix, not `Date.now()`. */
   now: number;
@@ -161,11 +163,17 @@ export function PermissionPrompt({
 /**
  * Whether a keystroke belongs to something the user is typing in.
  *
- * The same check `island.tsx` makes, and for the same reason it only names
- * `INPUT`: Monaco's own editing surface is a hidden `textarea`, so excluding
- * textareas wholesale would hand every chord to the editor.
+ * `INPUT`, content-editable, and every `textarea` **except Monaco's**. Monaco's
+ * editing surface is a hidden `textarea`, and T335 chose to let the card's
+ * chords work while the editor has focus, so that one is still not excluded.
+ *
+ * Every other `textarea` is (T310-ANSWER). `⏎` on this card *allows*, and it
+ * listens on the window: a run's console draws its prompt box directly under
+ * the card, and the terminal's own hidden `textarea` lets its keys bubble, so
+ * a newline typed into either would otherwise let a tool run.
  */
-function isTypingInField(target: EventTarget | null): boolean {
+export function isTypingInField(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
-  return target.tagName === 'INPUT' || target.isContentEditable;
+  if (target.tagName === 'INPUT' || target.isContentEditable) return true;
+  return target.tagName === 'TEXTAREA' && target.closest('.monaco-editor') === null;
 }

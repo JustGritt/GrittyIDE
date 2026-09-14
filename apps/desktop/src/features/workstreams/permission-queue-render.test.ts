@@ -1,13 +1,17 @@
 import type {
   AgentPermissionAnswer,
+  AgentRun,
+  AgentRunId,
   AgentSession,
   OwnershipMap,
   Workstream,
+  WorkstreamId,
 } from '@gritty/protocol';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { AgentsController } from '../agents/use-agents';
+import type { RunsController } from '../runs/use-runs';
 import { AttentionQueue } from './attention-queue';
 import type { WorkstreamsController } from './use-workstreams';
 
@@ -29,12 +33,12 @@ const NO_OWNERSHIP: OwnershipMap = { leases: [], conflicts: [] };
 /** Everything an attacker-controlled tool input might try. */
 const HOSTILE = '<script>alert(1)</script><img src=x onerror=alert(2)>';
 
-function controller(): WorkstreamsController {
+function controller(workstreams: Workstream[] = []): WorkstreamsController {
   const refuse = () => {
     throw new Error('no command should run while rendering');
   };
   return {
-    workstreams: [] as Workstream[],
+    workstreams,
     decisions: [],
     loaded: true,
     error: null,
@@ -109,11 +113,28 @@ function agentsWith(
   } as AgentsController;
 }
 
-function render(agents: AgentsController): string {
+function runsWith(runs: readonly AgentRun[]): RunsController {
+  return {
+    runs: [...runs],
+    loaded: true,
+    error: null,
+    answering: null,
+    answerPermission: async () => {
+      throw new Error('no command should run while rendering');
+    },
+  } as unknown as RunsController;
+}
+
+function render(
+  agents: AgentsController,
+  runs: RunsController = runsWith([]),
+  workstreams: Workstream[] = [],
+): string {
   return renderToStaticMarkup(
     createElement(AttentionQueue, {
-      controller: controller(),
+      controller: controller(workstreams),
       agents,
+      runs,
       onClose: () => {
         throw new Error('nothing should close while rendering');
       },
@@ -197,5 +218,75 @@ describe('the queue answers a background agent’s ask', () => {
     );
     expect(denied).toContain('denied');
     expect(denied).not.toContain('Undo the standing rule');
+  });
+});
+
+/**
+ * An owned run's ask joins the same queue and the same card (T310-ANSWER). A
+ * user should not have to learn which lane an ask came from to answer it — but
+ * the one thing that does differ, that nothing else is holding this prompt open,
+ * has to be said.
+ */
+describe('the queue answers a run Gritty owns', () => {
+  const ship: Workstream = {
+    id: 'w-ship' as WorkstreamId,
+    workspaceId: 'ws-1' as Workstream['workspaceId'],
+    title: 'Ship the permission verdict',
+    state: 'IN_PROGRESS',
+    allowedTransitions: [],
+    openDecisions: 0,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const blocked: AgentRun = {
+    id: 'run-1' as AgentRunId,
+    workstreamId: ship.id,
+    workspaceId: 'ws-1' as AgentRun['workspaceId'],
+    provider: 'CLAUDE_CODE',
+    state: 'BLOCKED',
+    startedAt: 0,
+    updatedAt: 0,
+    cancellationRequested: false,
+    correlationId: 'c1' as AgentRun['correlationId'],
+    pending: {
+      askId: 'run-ask-1',
+      tool: 'Bash',
+      verb: 'RUN_COMMAND',
+      target: `touch probe.txt ${HOSTILE}`,
+      askedAt: 0,
+    },
+  };
+  const markup = render(agentsWith([]), runsWith([blocked]), [ship]);
+
+  it('lists the ask under its workstream, with its verb and target', () => {
+    expect(markup).toContain('Permission');
+    expect(markup).toContain('Ship the permission verdict');
+    expect(markup).toContain('run command');
+    expect(markup).toContain('touch probe.txt');
+  });
+
+  it('draws Allow once and Deny, and no answer that would remember', () => {
+    expect(markup).toContain('Allow once');
+    expect(markup).toContain('Deny');
+    expect(markup).not.toContain('for this run');
+  });
+
+  it('says the run is held on this answer alone', () => {
+    expect(markup).toContain('held until you answer');
+    // The session's line would be false here: a run's child has no terminal.
+    expect(markup).not.toContain('whichever comes first wins');
+  });
+
+  it('renders the agent’s own tool input as text', () => {
+    for (const tag of markup.match(/<[^>]*>/g) ?? []) {
+      expect(tag).not.toMatch(/^<\/?(script|img|iframe|object|embed)\b/i);
+      expect(tag).not.toMatch(/\son\w+=/i);
+    }
+    expect(markup).toContain('&lt;script&gt;');
+  });
+
+  it('counts the run’s ask beside a session’s under one Permissions filter', () => {
+    const both = render(agentsWith([asking()]), runsWith([blocked]), [ship]);
+    expect(both).toMatch(/Permissions<span class="queue__filter-count">2</);
   });
 });

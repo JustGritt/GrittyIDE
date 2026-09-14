@@ -1,6 +1,12 @@
-import type { AgentSession } from '@gritty/protocol';
+import type {
+  AgentRun,
+  AgentRunId,
+  AgentSession,
+  Workstream,
+  WorkstreamId,
+} from '@gritty/protocol';
 import { describe, expect, it } from 'vitest';
-import { askingSessions, isPermissionQueueChord } from './permission-banner';
+import { askingSessions, isPermissionQueueChord, waitingAsks } from './permission-banner';
 
 function session(id: string, askedAt: number | null): AgentSession {
   return {
@@ -77,5 +83,36 @@ describe('the chord that opens the queue', () => {
     // ⌥A on macOS produces `å`; `code` is what survives that.
     expect(isPermissionQueueChord(chord({ code: 'KeyB' }))).toBe(false);
     expect(isPermissionQueueChord(chord({ shiftKey: true }))).toBe(false);
+  });
+});
+
+describe('every ask waiting, from either lane (T310-ANSWER)', () => {
+  const run: AgentRun = {
+    id: 'run-12345678' as AgentRunId,
+    workstreamId: 'w1' as WorkstreamId,
+    workspaceId: 'ws1' as AgentRun['workspaceId'],
+    provider: 'CLAUDE_CODE',
+    state: 'BLOCKED',
+    startedAt: 0,
+    updatedAt: 0,
+    cancellationRequested: false,
+    correlationId: 'c1' as AgentRun['correlationId'],
+    pending: { askId: 'run-ask', tool: 'Bash', verb: 'RUN_COMMAND', target: 'ls', askedAt: 1_500 },
+  };
+  const ship = { id: 'w1', title: 'Ship it' } as Workstream;
+
+  it('merges sessions and runs into one list, oldest ask first', () => {
+    const asks = waitingAsks([session('a', 1_000), session('b', 2_000)], [run], [ship]);
+    expect(asks.map((ask) => ask.askId)).toEqual(['ask-a', 'run-ask', 'ask-b']);
+  });
+
+  it('names a run by its workstream, or by its short id while that is loading', () => {
+    expect(waitingAsks([], [run], [ship])[0]?.who).toBe('Ship it');
+    expect(waitingAsks([], [run], [])[0]?.who).toBe('run-1234');
+  });
+
+  it('is what the status bar counts, so a run’s ask is not left out of it', () => {
+    expect(waitingAsks([session('a', 1)], [run]).length).toBe(2);
+    expect(waitingAsks([session('busy', null)], [{ ...run, pending: undefined }]).length).toBe(0);
   });
 });

@@ -140,11 +140,14 @@ still **4** and migration **`0005` is free** — T326 needed neither.
 **The next free values are `PROTOCOL_VERSION` 2.28.0, `SCHEMA_VERSION` 5 and
 migration `0005`; the next free ADR number is 034.** (2.23.0–2.26.0 and
 ADR-030/031/032/033 were taken on 2026-09-09 — see the blocks at the end of
-this section. **2.27.0 is claimed by `T310-ANSWER`** (arm the host permission
-verdict for an owned run) on 2026-09-14: one command, `runs.answerPermission`,
-and an optional `pending` ask on `AgentRun`. Additive; no `CoreEvent` variant,
-no `SCHEMA_VERSION`, no migration — an ask lives as long as its run and a run
-is not persisted.) ADR-027 is not free:
+this section. **2.27.0 was claimed by `T310-ANSWER`** (arm the host permission
+verdict for an owned run) on 2026-09-14 and **spent the same day** (`084cafe`):
+one command, `runs.answerPermission`, and an optional `pending` ask on
+`AgentRun`. Additive; no `CoreEvent` variant, no `SCHEMA_VERSION`, no
+migration — an ask lives as long as its run and a run is not persisted. Its
+seams: `protocol/{mod,export}.rs`, `packages/protocol/src/{commands,client,types}.ts`,
+the generated directory, `src-tauri/src/{commands,lib}.rs`, and one `AgentRun`
+literal in `event/mod.rs`'s tests.) ADR-027 is not free:
 `HANDOFF.md:102` reserves it for T310's "the feed comes from the run event ring,
 not the transcript" decision. That reservation was never written here, which is
 rule 2's failure mode again — it is written here now.

@@ -2,8 +2,10 @@ import type { AgentRun } from '@gritty/protocol';
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
 import { isPinnedToBottom } from '../agents/agent-timeline-model';
+import { PermissionPrompt } from '../agents/permission-prompt';
 import { runStatus } from '../agents/run-status';
 import { promptGate, type RunFeedRow, runFeedRows } from './run-console-model';
+import { runAskCard, runVerdict } from './run-permission';
 import type { RunsController } from './use-runs';
 
 /**
@@ -19,7 +21,7 @@ import type { RunsController } from './use-runs';
  * |---|---|---|
  * | Who started it | some other terminal | Gritty |
  * | Where the feed comes from | a transcript the core follows | the event ring the core recorded |
- * | What the user may do to it | answer a permission ask (ADR-020) | say something to it |
+ * | What the user may do to it | answer a permission ask (ADR-020) | say something to it, and answer its ask (T310-ANSWER) |
  *
  * The prompt box is the point of the surface, and it is the one control in the
  * app that speaks *to* an agent. It is drawn only where there is a channel
@@ -52,6 +54,7 @@ export function RunConsole({
   const log = controller.logFor(run.id);
   const rows = useMemo(() => runFeedRows(log), [log]);
   const gate = promptGate(run);
+  const ask = run.pending ?? null;
 
   return (
     <section className="agent-console" aria-label={`Agent run ${run.id}`}>
@@ -119,6 +122,22 @@ export function RunConsole({
         ) : (
           <RunFeed key={run.id} rows={rows} />
         )}
+
+        {/* The ask lands where the work is — the same card, chords and
+            answers an observed session's ask gets (artboard 12a, T310-ANSWER).
+            Gone the moment the answer is accepted, not when the run moves on. */}
+        {ask && (
+          <PermissionPrompt
+            request={runAskCard(ask)}
+            sessionLabel={title ?? run.id.slice(0, 8)}
+            now={Date.now()}
+            busy={controller.answering === ask.askId || run.cancellationRequested}
+            onAnswer={(verdict) => {
+              const answer = runVerdict(verdict);
+              if (answer) void controller.answerPermission(run.id, ask.askId, answer);
+            }}
+          />
+        )}
       </section>
 
       {/* Below the feed (§9). Nothing optimistic lives above it: what the user
@@ -132,10 +151,10 @@ export function RunConsole({
 /**
  * The feed itself, oldest event last, in its own scroll container.
  *
- * `AgentTimelinePanel`'s `Feed`, with the permission re-pin removed — a run's
- * ask is a `PERMISSION_REQUESTED` row like any other until T310-ANSWER gives it
- * something to be answered with, and re-pinning to a row nobody can act on
- * would be yanking the view for nothing.
+ * `AgentTimelinePanel`'s `Feed`, without the permission re-pin. A run's ask is
+ * answered on the card *below* this container rather than on a row inside it,
+ * so there is no row to pull into view: the `PERMISSION_REQUESTED` row stays
+ * what it is, a line of history.
  */
 function RunFeed({ rows }: { rows: readonly RunFeedRow[] }) {
   const feed = useRef<HTMLDivElement | null>(null);

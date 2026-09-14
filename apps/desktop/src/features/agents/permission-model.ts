@@ -12,6 +12,30 @@ import type { AgentPermissionRequest, AgentPermissionVerb } from '@gritty/protoc
  * This only phrases it.
  */
 
+/**
+ * What a permission card reads, and nothing about who asked.
+ *
+ * An observed session's `AgentPermissionRequest` is one of these, and so is an
+ * owned run's ask once `runAskCard` has phrased it (T310-ANSWER). The card and
+ * its chords are the same for both — "a user should not have to learn that an
+ * ask came from a run rather than a session in order to answer it" — so the
+ * type the card takes names the fields the card draws, and the session id stays
+ * with the caller that needs it.
+ */
+export type PermissionCard = Pick<
+  AgentPermissionRequest,
+  | 'verb'
+  | 'target'
+  | 'detail'
+  | 'diff'
+  | 'added'
+  | 'removed'
+  | 'outsideRoot'
+  | 'sensitive'
+  | 'askedAt'
+  | 'suggestedScope'
+>;
+
 /** The verb, as a person reads it. */
 const VERB_LABEL: Record<AgentPermissionVerb, string> = {
   WRITE_FILE: 'write file',
@@ -33,7 +57,7 @@ export function verbLabel(verb: AgentPermissionVerb): string {
  * so out loud, because a card with no diff and no explanation reads as a card
  * with nothing to show.
  */
-export function blastRadius(request: AgentPermissionRequest): string[] {
+export function blastRadius(request: PermissionCard): string[] {
   const parts: string[] = [];
   if (request.outsideRoot) parts.push('outside its worktree');
   if (request.detail) parts.push(request.detail);
@@ -49,14 +73,14 @@ export function blastRadius(request: AgentPermissionRequest): string[] {
  * happening, and their disagreement with the visible lines says you are not
  * seeing all of it.
  */
-export function changeSummary(request: AgentPermissionRequest): string | null {
+export function changeSummary(request: PermissionCard): string | null {
   if (request.verb !== 'WRITE_FILE') return null;
   if (request.added === 0 && request.removed === 0) return null;
   return `+${request.added} −${request.removed} · 1 file`;
 }
 
 /** What the middle answer offers, or `null` when there is no honest scope. */
-export function scopeLabel(request: AgentPermissionRequest): string | null {
+export function scopeLabel(request: PermissionCard): string | null {
   if (!request.suggestedScope) return null;
   return request.verb === 'WRITE_FILE'
     ? `Allow writes in ${request.suggestedScope} for this run`

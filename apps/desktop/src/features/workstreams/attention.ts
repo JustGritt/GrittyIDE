@@ -1,5 +1,6 @@
 import type {
   AgentPermissionRequest,
+  AgentRun,
   AgentSession,
   Decision,
   OwnershipConflict,
@@ -7,6 +8,8 @@ import type {
   Workstream,
   WorkstreamState,
 } from '@gritty/protocol';
+import type { PermissionCard } from '../agents/permission-model';
+import { type AskingRun, askingRuns, runAskCard } from '../runs/run-permission';
 import { waitingConflicts } from './ownership';
 
 /**
@@ -47,21 +50,40 @@ export type AttentionItem =
     }
   | {
       readonly kind: 'permission';
+      readonly source: 'session';
       readonly id: string;
       /** The session that is stopped, so the row can name and reach it. */
       readonly session: AgentSession;
       readonly request: AgentPermissionRequest;
       readonly since: number;
+    }
+  | {
+      /**
+       * An ask from a run Gritty owns (T310-ANSWER). The same kind, the same
+       * filter and the same card as a session's: a user should not have to
+       * learn which lane an ask came from in order to answer it. `source` is
+       * for the one thing that does differ — where the answer is sent.
+       */
+      readonly kind: 'permission';
+      readonly source: 'run';
+      readonly id: string;
+      readonly run: AskingRun;
+      /** The run's workstream, which is what names it; `null` while loading. */
+      readonly workstream: Workstream | null;
+      /** The ask, phrased for the card. The id to answer is `run.pending.askId`. */
+      readonly request: PermissionCard;
+      readonly since: number;
     };
 
 /**
- * The one kind with no workstream, and deliberately so (T335).
+ * The one kind with no workstream required, and deliberately so (T335).
  *
  * The other three are all *about* a workstream — the domain object Gritty owns.
- * A permission prompt is about a session Gritty merely observes, and the link
- * between the two (T223's `workstream_agent_link`) is opt-in and usually
- * absent. Requiring one would mean the most urgent item in the queue were the
- * one most likely to be missing from it.
+ * A session's permission prompt is about a session Gritty merely observes, and
+ * the link between the two (T223's `workstream_agent_link`) is opt-in and
+ * usually absent. Requiring one would mean the most urgent item in the queue
+ * were the one most likely to be missing from it. A run's ask does have a
+ * workstream, and carries it when it is loaded, but is not dropped when not.
  */
 export function isPermission(
   item: AttentionItem,
@@ -75,15 +97,16 @@ export function isPermission(
  *
  * Four kinds, because four are all the domain can honestly produce: open
  * decisions, work handed back for review, ownership refusals (T325), and
- * permission prompts an agent is stopped at (T335). Failures still arrive with
- * agent runs (T300); inventing them now would mean showing the user a category
- * that can never have anything in it.
+ * permission prompts an agent is stopped at — an observed session's (T335) or
+ * an owned run's (T310-ANSWER). Failures are not a kind yet; inventing one
+ * would mean showing the user a category nothing puts anything in.
  */
 export function attentionItems(
   workstreams: readonly Workstream[],
   decisions: readonly Decision[],
   ownership: OwnershipMap,
   sessions: readonly AgentSession[] = [],
+  runs: readonly AgentRun[] = [],
 ): AttentionItem[] {
   const byId = new Map(workstreams.map((workstream) => [workstream.id as string, workstream]));
   const items: AttentionItem[] = [];
@@ -131,10 +154,24 @@ export function attentionItems(
     if (!session.pending) continue;
     items.push({
       kind: 'permission',
+      source: 'session',
       id: `permission:${session.pending.askId}`,
       session,
       request: session.pending,
       since: Number(session.pending.askedAt),
+    });
+  }
+  for (const run of askingRuns(runs)) {
+    items.push({
+      kind: 'permission',
+      source: 'run',
+      // Its own prefix: the two lanes mint ask ids independently, and an item
+      // id has to be unique across both.
+      id: `permission-run:${run.pending.askId}`,
+      run,
+      workstream: byId.get(run.workstreamId as string) ?? null,
+      request: runAskCard(run.pending),
+      since: Number(run.pending.askedAt),
     });
   }
   return items.sort((left, right) => left.since - right.since || left.id.localeCompare(right.id));
@@ -146,8 +183,9 @@ export function attentionCount(
   decisions: readonly Decision[],
   ownership: OwnershipMap,
   sessions: readonly AgentSession[] = [],
+  runs: readonly AgentRun[] = [],
 ): number {
-  return attentionItems(workstreams, decisions, ownership, sessions).length;
+  return attentionItems(workstreams, decisions, ownership, sessions, runs).length;
 }
 
 /** The queue's filter tabs, with their counts. */

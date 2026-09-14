@@ -4,6 +4,7 @@ import { ErrorEnvelope } from '../../components/error-envelope';
 import { AgentsSection, agentsPillLabel } from '../agents/agents-panel';
 import { verbLabel } from '../agents/permission-model';
 import type { AgentsController } from '../agents/use-agents';
+import type { RunsController } from '../runs/use-runs';
 import { AgentLinkSection, linkedRowLabel } from './agent-link-panel';
 import {
   type AttentionItem,
@@ -35,6 +36,7 @@ import type { WorkstreamsController } from './use-workstreams';
 export function AgentIsland({
   controller,
   agents,
+  runs,
   open,
   onOpenChange,
   onOpenQueue,
@@ -42,13 +44,21 @@ export function AgentIsland({
   controller: WorkstreamsController;
   /** Sessions other terminals are running (T220), read-only. */
   agents: AgentsController;
+  /** Runs Gritty owns, whose permission asks count here too (T310-ANSWER). */
+  runs: RunsController;
   open: boolean;
   onOpenChange(open: boolean): void;
   /** Show the whole queue instead — more room than the sheet has. */
   onOpenQueue(): void;
 }) {
   const { workstreams, decisions, ownership } = controller;
-  const items = attentionItems(workstreams, decisions, ownership, agents.roster.sessions);
+  const items = attentionItems(
+    workstreams,
+    decisions,
+    ownership,
+    agents.roster.sessions,
+    runs.runs,
+  );
   const sheet = useRef<HTMLDivElement | null>(null);
   const island = useRef<HTMLDivElement | null>(null);
   const labelId = useId();

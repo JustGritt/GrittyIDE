@@ -205,3 +205,72 @@ describe('useRuns subscribes by name', () => {
     expect(result.current.logFor(RUN).events.map((e) => e.seq)).toEqual([1]);
   });
 });
+
+/**
+ * `answerPermission` reaches the core and the run it answers with replaces the
+ * one on screen (T310-ANSWER), over the same real client as above.
+ */
+describe('useRuns answers a permission ask', () => {
+  afterEach(cleanup);
+
+  const ask = {
+    askId: 'ask-1',
+    tool: 'Bash',
+    verb: 'RUN_COMMAND',
+    target: 'ls',
+    askedAt: 1,
+  } as const;
+
+  beforeEach(() => {
+    seam.handlers.clear();
+    seam.handlers.set(
+      'core_health',
+      (): HealthReport => ({
+        protocolVersion: PROTOCOL_VERSION,
+        coreVersion: '0.1.0',
+        os: 'macos',
+        arch: 'aarch64',
+        debug: true,
+        shell: { appVersion: '0.1.0', runtime: 'tauri', runtimeVersion: '2.11.5' },
+      }),
+    );
+    seam.handlers.set('runs_list', (): AgentRun[] => [
+      run({ state: 'BLOCKED', pending: { ...ask } }),
+    ]);
+  });
+
+  it('sends the run, the ask and the verdict, and takes the ask off the run', async () => {
+    const sent: unknown[] = [];
+    seam.handlers.set('runs_answer_permission', (args) => {
+      sent.push(args?.request);
+      return run({ state: 'BLOCKED', updatedAt: 1_800_000_000_001 });
+    });
+    const { result } = renderHook(() => useRuns(WS));
+    await waitFor(() => expect(result.current.runs[0]?.pending?.askId).toBe('ask-1'));
+
+    await act(async () => {
+      await result.current.answerPermission(RUN, 'ask-1', 'DENY');
+    });
+
+    expect(sent).toEqual([{ runId: RUN, askId: 'ask-1', verdict: 'DENY' }]);
+    expect(result.current.runs[0]?.pending).toBeUndefined();
+    expect(result.current.answering).toBeNull();
+    expect(result.current.error).toBeNull();
+  });
+
+  it('keeps the ask and says why when the core refuses', async () => {
+    seam.handlers.set('runs_answer_permission', () => {
+      throw { code: 'Conflict', message: 'its driver has stopped', retryable: false };
+    });
+    const { result } = renderHook(() => useRuns(WS));
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+
+    await act(async () => {
+      await result.current.answerPermission(RUN, 'ask-1', 'ALLOW_ONCE');
+    });
+
+    expect(result.current.error?.code).toBe('Conflict');
+    expect(result.current.runs[0]?.pending?.askId).toBe('ask-1');
+    expect(result.current.answering).toBeNull();
+  });
+});

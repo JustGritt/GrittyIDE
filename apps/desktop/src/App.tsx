@@ -5,9 +5,9 @@ import { boundsWithin } from './components/splitter-geometry';
 import { core } from './core/client';
 import { SidebarAgents } from './features/agents/agents-section';
 import {
-  askingSessions,
   isPermissionQueueChord,
   PermissionBanner,
+  waitingAsks,
 } from './features/agents/permission-banner';
 import { rosterRows } from './features/agents/roster-model';
 import { useAgentConsole } from './features/agents/use-agent-console';
@@ -411,6 +411,7 @@ export function App() {
             <AgentIsland
               controller={workstreams}
               agents={agents}
+              runs={runs}
               open={islandOpen}
               onOpenChange={setIslandOpen}
               onOpenQueue={() => {
@@ -429,6 +430,8 @@ export function App() {
       {workspace && !queueOpen && (
         <PermissionBanner
           sessions={agents.roster.sessions}
+          runs={runs.runs}
+          workstreams={workstreams.workstreams}
           onOpenQueue={() => {
             setIslandOpen(false);
             setQueueOpen(true);
@@ -445,6 +448,7 @@ export function App() {
           <AttentionQueue
             controller={workstreams}
             agents={agents}
+            runs={runs}
             onClose={() => setQueueOpen(false)}
           />
         </div>
@@ -611,7 +615,7 @@ export function App() {
         subscribeCursor={editor.subscribeCursor}
         documents={documents}
         onClose={closeFlow.request}
-        permissionsWaiting={askingSessions(agents.roster.sessions).length}
+        permissionsWaiting={waitingAsks(agents.roster.sessions, runs.runs).length}
         // While a console has the pane, the bar describes the agent rather
         // than the document that is still the active one underneath it.
         agentConsole={surfaceFacts}

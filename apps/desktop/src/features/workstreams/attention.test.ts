@@ -323,3 +323,54 @@ describe('a permission prompt is something waiting on you', () => {
     expect(attentionItems([], [], NO_OWNERSHIP)).toEqual([]);
   });
 });
+
+describe('a run Gritty owns asking permission is waiting on you too (T310-ANSWER)', () => {
+  function blockedRun(id: string, askedAt: number): import('@gritty/protocol').AgentRun {
+    return {
+      id: id as import('@gritty/protocol').AgentRunId,
+      workstreamId: 'a' as WorkstreamId,
+      workspaceId: 'ws-1' as Workstream['workspaceId'],
+      provider: 'CLAUDE_CODE',
+      state: 'BLOCKED',
+      startedAt: 0,
+      updatedAt: 0,
+      cancellationRequested: false,
+      correlationId: 'c' as import('@gritty/protocol').CorrelationId,
+      pending: { askId: `ask-${id}`, tool: 'Bash', verb: 'RUN_COMMAND', target: 'ls', askedAt },
+    };
+  }
+
+  it('is a permission item, ordered with a session’s by when each asked', () => {
+    const items = attentionItems(
+      [workstream('a')],
+      [],
+      NO_OWNERSHIP,
+      [asking('s1', 200)],
+      [blockedRun('r1', 100)],
+    );
+    expect(items.map((item) => item.kind)).toEqual(['permission', 'permission']);
+    expect(items.map((item) => item.id)).toEqual(['permission-run:ask-r1', 'permission:ask-s1']);
+    expect(filterItems(items, 'permission')).toHaveLength(2);
+  });
+
+  it('carries its workstream when one is loaded, and is not dropped when not', () => {
+    const [named] = attentionItems([workstream('a')], [], NO_OWNERSHIP, [], [blockedRun('r1', 1)]);
+    expect(named?.kind === 'permission' && named.source === 'run' && named.workstream?.id).toBe(
+      'a',
+    );
+    const [bare] = attentionItems([], [], NO_OWNERSHIP, [], [blockedRun('r1', 1)]);
+    expect(bare?.kind === 'permission' && bare.source === 'run' && bare.workstream).toBeNull();
+  });
+
+  it('keeps ids unique across the two lanes even when their ask ids collide', () => {
+    // Both helpers mint `ask-<id>`, so the same id collides by construction.
+    const items = attentionItems([], [], NO_OWNERSHIP, [asking('x', 1)], [blockedRun('x', 2)]);
+    expect(items.map((item) => item.kind)).toEqual(['permission', 'permission']);
+    expect(new Set(items.map((item) => item.id)).size).toBe(2);
+  });
+
+  it('counts nothing for a run that is not asking', () => {
+    const { pending: _gone, ...running } = { ...blockedRun('r1', 1), state: 'RUNNING' as const };
+    expect(attentionCount([], [], NO_OWNERSHIP, [], [running])).toBe(0);
+  });
+});

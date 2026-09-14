@@ -42,6 +42,8 @@ function controller(overrides: Partial<RunsController> = {}): RunsController {
     startFake: async () => {},
     startClaude: async () => {},
     prompt: async () => {},
+    answerPermission: async () => {},
+    answering: null,
     cancel: async () => {},
     openEvents: async () => true,
     logFor: () => emptyLog,
@@ -173,5 +175,98 @@ describe('a run that is not accepting input', () => {
     );
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
+  });
+});
+
+/**
+ * The run's ask, answered from its own console (T310-ANSWER).
+ *
+ * A DOM, because the failure this guards against has sent three tickets back:
+ * a correct view model whose buttons call nothing. The card is T335's; what is
+ * asserted is that on a run it reaches `runs.answerPermission`, and that `⏎`
+ * typed into the prompt box right under it cannot let a tool run.
+ */
+describe('answering a run’s permission ask', () => {
+  const blocked: Partial<AgentRun> = {
+    state: 'BLOCKED',
+    pending: {
+      askId: 'ask-7',
+      tool: 'Bash',
+      verb: 'RUN_COMMAND',
+      target: 'touch probe.txt',
+      askedAt: 0,
+    },
+  };
+
+  function showAsk(runs: RunsController) {
+    render(
+      <RunConsole run={run(blocked)} title="Ship the ring" controller={runs} pending={false} />,
+    );
+  }
+
+  it('draws the ask where the work is, with its verb and target', () => {
+    showAsk(controller());
+    const card = screen.getByRole('region', { name: 'Permission request' });
+    expect(card.textContent).toContain('Ship the ring needs permission');
+    expect(card.textContent).toContain('run command');
+    expect(card.textContent).toContain('touch probe.txt');
+  });
+
+  it('sends Allow once and Deny to the run, naming the ask', () => {
+    const answerPermission = vi.fn(async () => {});
+    showAsk(controller({ answerPermission }));
+    fireEvent.click(screen.getByRole('button', { name: /Allow once/ }));
+    expect(answerPermission).toHaveBeenLastCalledWith('run-1', 'ask-7', 'ALLOW_ONCE');
+    fireEvent.click(screen.getByRole('button', { name: /Deny/ }));
+    expect(answerPermission).toHaveBeenLastCalledWith('run-1', 'ask-7', 'DENY');
+  });
+
+  it('offers nothing that would remember, and ⌘⏎ does nothing', () => {
+    const answerPermission = vi.fn(async () => {});
+    showAsk(controller({ answerPermission }));
+    expect(screen.queryByRole('button', { name: /for this run/ })).toBeNull();
+    fireEvent.keyDown(window, { code: 'Enter', metaKey: true });
+    expect(answerPermission).not.toHaveBeenCalled();
+  });
+
+  it('answers the card’s own chords when nothing is being typed in', () => {
+    const answerPermission = vi.fn(async () => {});
+    showAsk(controller({ answerPermission }));
+    fireEvent.keyDown(document.body, { code: 'Escape' });
+    expect(answerPermission).toHaveBeenLastCalledWith('run-1', 'ask-7', 'DENY');
+  });
+
+  it('never takes ⏎ typed into a textarea as an allowance', () => {
+    const answerPermission = vi.fn(async () => {});
+    showAsk(controller({ answerPermission }));
+    // The prompt box is disabled while the run is blocked, so a terminal's
+    // hidden textarea stands in for "something the user is typing in".
+    const typing = document.createElement('textarea');
+    document.body.appendChild(typing);
+    fireEvent.keyDown(typing, { code: 'Enter' });
+    expect(answerPermission).not.toHaveBeenCalled();
+    typing.remove();
+  });
+
+  it('goes quiet while its answer is in flight, and while the run is stopping', () => {
+    showAsk(controller({ answering: 'ask-7' }));
+    expect(screen.getByRole('button', { name: /Allow once/ })).toHaveProperty('disabled', true);
+    cleanup();
+    render(
+      <RunConsole
+        run={run({ ...blocked, cancellationRequested: true })}
+        title="Ship the ring"
+        controller={controller()}
+        pending={false}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /Deny/ })).toHaveProperty('disabled', true);
+  });
+
+  it('tells the prompt box why it is closed: the answer is above', () => {
+    showAsk(controller());
+    expect(
+      screen.getByText(/waiting for your answer to its permission request above/),
+    ).toBeTruthy();
   });
 });

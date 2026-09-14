@@ -269,9 +269,20 @@ export function promptGate(run: AgentRun): PromptGate {
         reason: 'The run is still starting; there is nothing to say it to.',
       };
     case 'BLOCKED':
+      // One stop at a time: the answer to a block is a verdict, not a prompt,
+      // and when the block is a permission ask the card above is where it goes
+      // (T310-ANSWER).
+      if (run.pending) {
+        return {
+          kind: 'refused',
+          reason: 'The run is waiting for your answer to its permission request above.',
+        };
+      }
+      return {
+        kind: 'refused',
+        reason: 'The run is stopped on something a prompt does not answer.',
+      };
     case 'NEEDS_DECISION':
-      // One stop at a time: the answer to a block is a verdict, not a prompt.
-      // T310-ANSWER is what will put that verdict here.
       return {
         kind: 'refused',
         reason: 'The run is stopped on something a prompt does not answer.',

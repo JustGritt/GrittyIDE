@@ -5,6 +5,8 @@ import { taskLine } from '../agents/agents-reducer';
 import { verbLabel } from '../agents/permission-model';
 import { PermissionPrompt } from '../agents/permission-prompt';
 import type { AgentsController } from '../agents/use-agents';
+import { runVerdict } from '../runs/run-permission';
+import type { RunsController } from '../runs/use-runs';
 import { LinkedSessions } from './agent-link-panel';
 import {
   type AttentionFilter,
@@ -50,6 +52,7 @@ import type { WorkstreamsController } from './use-workstreams';
 export function AttentionQueue({
   controller,
   agents,
+  runs,
   onClose,
 }: {
   controller: WorkstreamsController;
@@ -58,10 +61,18 @@ export function AttentionQueue({
    * (T223 §17). Read-only here: the queue links nothing, the island does.
    */
   agents: AgentsController;
+  /** The runs Gritty owns, whose permission asks join this queue (T310-ANSWER). */
+  runs: RunsController;
   onClose(): void;
 }) {
   const { workstreams, decisions, ownership } = controller;
-  const items = attentionItems(workstreams, decisions, ownership, agents.roster.sessions);
+  const items = attentionItems(
+    workstreams,
+    decisions,
+    ownership,
+    agents.roster.sessions,
+    runs.runs,
+  );
   const [filter, setFilter] = useState<AttentionFilter>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const visible = filterItems(items, filter);
@@ -132,7 +143,7 @@ export function AttentionQueue({
 
         <aside className="queue__detail">
           {selected ? (
-            <QueueDetail item={selected} controller={controller} agents={agents} />
+            <QueueDetail item={selected} controller={controller} agents={agents} runs={runs} />
           ) : (
             <div className="queue__detail-empty">
               <p>Everything that needs you shows up here.</p>
@@ -215,9 +226,11 @@ const ANSWER_LABEL: Record<AgentPermissionVerdict, string> = {
   DENY: 'denied',
 };
 
-/** How a row names what is waiting — a workstream, or the session that asked. */
+/** How a row names what is waiting — a workstream, or the agent that asked. */
 function itemName(item: AttentionItem): string {
-  return isPermission(item) ? (taskLine(item.session) ?? item.session.id) : item.workstream.title;
+  if (!isPermission(item)) return item.workstream.title;
+  if (item.source === 'run') return item.workstream?.title ?? item.run.id.slice(0, 8);
+  return taskLine(item.session) ?? item.session.id;
 }
 
 function QueueRow({
@@ -273,14 +286,48 @@ function QueueDetail({
   item,
   controller,
   agents,
+  runs,
 }: {
   item: AttentionItem;
   controller: WorkstreamsController;
   agents: AgentsController;
+  runs: RunsController;
 }) {
-  // A permission ask is the one item with no workstream behind it (T335): it
-  // belongs to a session Gritty observes, and the link to a workstream is
-  // opt-in and usually absent. Everything below this point assumes one.
+  // A run Gritty owns asks through the same card, answered through its own
+  // command (T310-ANSWER). Unlike a session's, this prompt is live nowhere
+  // else: the run's child has no terminal, so the line under it says so.
+  if (isPermission(item) && item.source === 'run') {
+    const { run } = item;
+    const askId = run.pending.askId;
+    return (
+      <div className="queue__detail-body">
+        <div className="queue__detail-head">
+          <span className="label">Selected · permission</span>
+          <span className="queue__spacer" />
+          <span className="island__dot island__dot--blocked" aria-hidden="true" />
+          <span className="queue__meta">Gritty started this run</span>
+        </div>
+        <PermissionPrompt
+          request={item.request}
+          sessionLabel={item.workstream?.title ?? run.id.slice(0, 8)}
+          now={Date.now()}
+          busy={runs.answering === askId || run.cancellationRequested}
+          onAnswer={(verdict) => {
+            const answer = runVerdict(verdict);
+            if (answer) void runs.answerPermission(run.id, askId, answer);
+          }}
+        />
+        <p className="queue__meta">
+          The run is held until you answer. Nothing it asked for runs without a yes from you.
+        </p>
+      </div>
+    );
+  }
+
+  // A session's permission ask is the one item with no workstream behind it
+  // (T335): it belongs to a session Gritty observes, and the link to a
+  // workstream is opt-in and usually absent. Everything below this point
+  // assumes one.
   if (isPermission(item)) {
     return (
       <div className="queue__detail-body">

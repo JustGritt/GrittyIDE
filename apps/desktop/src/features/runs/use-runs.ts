@@ -1,6 +1,7 @@
 import {
   type AgentRun,
   type AgentRunId,
+  type AgentRunPermissionVerdict,
   type CoreError,
   toCoreError,
   type Workspace,
@@ -31,6 +32,20 @@ export interface RunsController {
    * `PROMPT_STARTED` arrives, which is the run confirming them.
    */
   prompt(runId: AgentRunId, text: string): Promise<void>;
+  /**
+   * Answer the permission ask a run is stopped at (T310-ANSWER).
+   *
+   * The run that comes back no longer carries the ask, so the card goes at
+   * once; the run itself leaves `BLOCKED` when its agent acknowledges, which
+   * arrives as an event.
+   */
+  answerPermission(
+    runId: AgentRunId,
+    askId: string,
+    verdict: AgentRunPermissionVerdict,
+  ): Promise<void>;
+  /** The ask whose answer is in flight, so its card's buttons go quiet. */
+  readonly answering: string | null;
   cancel(runId: AgentRunId): Promise<void>;
   /**
    * Fetch one run's events once, so an opened console starts from the ring.
@@ -60,6 +75,7 @@ export function useRuns(workspace: Workspace | null): RunsController {
   const [state, dispatch] = useReducer(runsReducer, initialRunsState);
   const [error, setError] = useState<CoreError | null>(null);
   const [inFlight, setInFlight] = useState(0);
+  const [answering, setAnswering] = useState<string | null>(null);
   const workspaceId = workspace?.id ?? null;
   // Read inside callbacks that are created once.
   const workspaceRef = useRef(workspaceId);
@@ -163,6 +179,19 @@ export function useRuns(workspace: Workspace | null): RunsController {
     [run],
   );
 
+  const answerPermission = useCallback(
+    async (runId: AgentRunId, askId: string, verdict: AgentRunPermissionVerdict) => {
+      setAnswering(askId);
+      try {
+        const answered = await run(() => core.runs.answerPermission({ runId, askId, verdict }));
+        if (answered) dispatch({ type: 'run', run: answered });
+      } finally {
+        setAnswering((current) => (current === askId ? null : current));
+      }
+    },
+    [run],
+  );
+
   const cancel = useCallback(
     async (runId: AgentRunId) => {
       // The answer may still be non-terminal with `cancellationRequested` set:
@@ -196,6 +225,8 @@ export function useRuns(workspace: Workspace | null): RunsController {
     startFake,
     startClaude,
     prompt,
+    answerPermission,
+    answering,
     cancel,
     openEvents,
     logFor,

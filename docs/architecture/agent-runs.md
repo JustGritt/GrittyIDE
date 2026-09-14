@@ -42,7 +42,8 @@ AgentRun {
   id, workstreamId, workspaceId, provider,
   state, activity?,
   startedAt, updatedAt, finishedAt?,
-  cancellationRequested, correlationId, error?
+  cancellationRequested, correlationId, error?,
+  pending?            // T310-ANSWER, protocol 2.27.0
 }
 ```
 
@@ -141,7 +142,7 @@ owns has no reason to also be a row in the observed roster.
 
 | | carries | emitted on |
 |---|---|---|
-| `AgentRunChanged` | the whole `AgentRun` | a state or activity change only |
+| `AgentRunChanged` | the whole `AgentRun` | a state, activity or pending-ask change only |
 | `AgentRunEventAppended` | a delta: a coalesced batch of records | new events, never one per event |
 
 A run is small, so a consumer that missed a `AgentRunChanged` converges on the
@@ -180,10 +181,11 @@ it exists to prove the boundary works, not to skip it.
   driving it died with the app is exactly the orphan the state machine exists to
   prevent — and ADR-021 decides it properly before T310 gives a real provider
   something worth losing.
-- **Answering.** A run may *reach* `BLOCKED` or `NEEDS_DECISION`, and
-  `PERMISSION_REQUESTED` / `DECISION_REQUESTED` report the ask. Nothing here
-  turns one into something the user can answer: `Decision.raisedBy` is already
-  an `Actor`, so T335 costs no shape change when it does.
+- **Answering a decision.** A run may *reach* `NEEDS_DECISION`, and
+  `DECISION_REQUESTED` reports the question. Nothing turns it into something
+  the user can answer yet: `Decision.raisedBy` is already an `Actor`, so doing
+  so costs no shape change. A *permission* ask is answerable since T310-ANSWER —
+  see the last section.
 - **Ownership.** `OwnershipLease.agentRunId` has had somewhere to point since
   T325. Nothing here constructs a lease or calls `ownership.acquire`; that is
   T405's, once there is a run to schedule.
@@ -212,9 +214,9 @@ Three things this surface deliberately does not have:
 - **No `runs.start`.** `AgentRunProvider` has one variant, so `startFake` is
   the only way to start a run at all and a run cannot reach a real process by
   construction. T310 adds the second variant and the command that uses it.
-- **No command that answers a run.** A run reaches `BLOCKED` or
-  `NEEDS_DECISION` and says so; replying to that is T335's, and half of it
-  built here would be redone there.
+- **No command that answered a run** when this was written. A permission ask
+  now has one, `runs.answerPermission` (T310-ANSWER, below); a decision still
+  does not.
 - **No script body on the wire.** `script` is a *name*, bounded at
   `MAX_SCRIPT_NAME` and resolved by the adapter. Letting a caller post the
   steps would make the renderer the author of what an "agent" does, and an
@@ -282,3 +284,51 @@ The box disables against `AgentRunState::accepts_input` (`RUNNING` and
 is **never optimistic**: what was typed reaches the feed when `PROMPT_STARTED`
 arrives, which is the run confirming it, and is why the adapter passes
 `--replay-user-messages`.
+
+## The user's verdict on a permission ask (T310-ANSWER, protocol 2.27.0)
+
+A run's child asks before a gated tool runs (`control_request`/`can_use_tool`
+on `--permission-prompt-tool stdio`), and holds until it is answered — for as
+long as it takes; there is no timeout on either side. Since T310-ANSWER the
+answer is the user's.
+
+```
+child ──can_use_tool──▶ driver ──ask_permission──▶ manager ─┬─ AgentRun.pending + BLOCKED (one AgentRunChanged)
+                                                            └─ PendingVerdict ◀─ oneshot ─┐
+user ──runs.answerPermission { runId, askId, ALLOW_ONCE | DENY }──▶ manager ──────────────┘
+driver ──control_response──▶ child ──echo──▶ driver ──RUN_RESUMED──▶ RUNNING
+```
+
+- **The ask is on the run**, as `pending: AgentRunPermissionAsk { askId, tool,
+  verb, target, detail?, askedAt }`, for the reason `AgentSession.pending` is on
+  a session: the queue has to answer it for a run nobody has open. It arrives in
+  the same `AgentRunChanged` that moves the run to `BLOCKED`, and it is taken
+  off the run the moment an answer is accepted, when a stop is requested, when
+  the run leaves `BLOCKED`, and when it ends. `askId` is minted by the core.
+- **Two verdicts.** `ALLOW_ONCE` and `DENY`, spelled as the observed side
+  spells them so one card and one set of chords answer both. There is no
+  `ALLOW_FOR_RUN`: a remembered grant for a run needs its own persistence and
+  revocation story (`T310-GRANTS`).
+- **An allowance carries no input.** The CLI runs a bare `{"behavior":"allow"}`
+  as issued, and it *would* honour a modified `updatedInput` (both verified
+  against 2.1.270), so Gritty never sends one: nothing it holds can change what
+  runs.
+- **Every other ending is a denial.** A stop or shutdown denies before the kill
+  (the supervisor gives a cancelled driver one grace period to do so before
+  aborting it); a second ask while one is outstanding is denied without
+  disturbing the first, and its echo is not allowed to resume the run; an ask
+  naming no tool is denied; a `control_request` of another subtype is refused
+  with an error response.
+- **Why a oneshot and not the inbox.** An ask arrives mid-turn, which is exactly
+  when the driver does not read the inbox, so a verdict queued there behind a
+  prompt could never be reached. And why the driver loop has an arm for it
+  rather than awaiting the verdict inline: inline, the loop could see neither a
+  cancellation nor the child dying.
+
+In the renderer the ask joins T335's surfaces rather than adding one: the same
+`PermissionPrompt` at the foot of the run's console, the same `permission` kind
+in the attention queue (with `source: 'run'`), the same banner, header count and
+status-bar count. `features/runs/run-permission.ts` is the whole of the
+difference — the ask phrased for the card, and the card's answer mapped back.
+The two lanes still never import each other in the core.
+

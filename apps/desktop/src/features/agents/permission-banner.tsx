@@ -1,7 +1,8 @@
-import type { AgentSession } from '@gritty/protocol';
+import type { AgentRun, AgentSession, Workstream } from '@gritty/protocol';
 import { useEffect, useState } from 'react';
+import { askingRuns, runAskCard } from '../runs/run-permission';
 import { taskLine } from './agents-reducer';
-import { verbLabel } from './permission-model';
+import { type PermissionCard, verbLabel } from './permission-model';
 
 /** The chord artboard 12b prints on the banner and on the header count. */
 export const PERMISSION_QUEUE_CHORD = '⌥⌘A';
@@ -35,6 +36,50 @@ export function askingSessions(sessions: readonly AgentSession[]): AgentSession[
     );
 }
 
+/** One ask waiting on the user, whichever lane it came from. */
+export interface WaitingAsk {
+  readonly askId: string;
+  /** How the banner names the asker: a session's task, a run's workstream. */
+  readonly who: string;
+  readonly request: PermissionCard;
+}
+
+/**
+ * Every ask waiting on the user — observed sessions' (T335) and owned runs'
+ * (T310-ANSWER) — oldest first.
+ *
+ * One list rather than two because the banner, the header count and the status
+ * bar each say one number and name one oldest ask, and a run's ask held up for
+ * five minutes is older than a session's from ten seconds ago whichever lane
+ * either is in.
+ */
+export function waitingAsks(
+  sessions: readonly AgentSession[],
+  runs: readonly AgentRun[] = [],
+  workstreams: readonly Workstream[] = [],
+): WaitingAsk[] {
+  const titles = new Map(workstreams.map((workstream) => [workstream.id as string, workstream]));
+  const fromSessions = askingSessions(sessions).flatMap((session) =>
+    session.pending
+      ? [
+          {
+            askId: session.pending.askId,
+            who: taskLine(session) ?? session.id,
+            request: session.pending,
+          },
+        ]
+      : [],
+  );
+  const fromRuns = askingRuns(runs).map((run) => ({
+    askId: run.pending.askId,
+    who: titles.get(run.workstreamId as string)?.title ?? run.id.slice(0, 8),
+    request: runAskCard(run.pending),
+  }));
+  return [...fromSessions, ...fromRuns].sort(
+    (left, right) => Number(left.request.askedAt) - Number(right.request.askedAt),
+  );
+}
+
 /**
  * A background agent needs you (T335, artboard 12b).
  *
@@ -49,15 +94,21 @@ export function askingSessions(sessions: readonly AgentSession[]): AgentSession[
  */
 export function PermissionBanner({
   sessions,
+  runs = [],
+  workstreams = [],
   onOpenQueue,
 }: {
   sessions: readonly AgentSession[];
+  /** Runs Gritty owns; their asks count and can be the oldest (T310-ANSWER). */
+  runs?: readonly AgentRun[];
+  /** What names a run: its workstream's title. */
+  workstreams?: readonly Workstream[];
   onOpenQueue(): void;
 }) {
-  const asking = askingSessions(sessions);
+  const asking = waitingAsks(sessions, runs, workstreams);
   const [dismissed, setDismissed] = useState<string | null>(null);
   const oldest = asking[0] ?? null;
-  const askId = oldest?.pending?.askId ?? null;
+  const askId = oldest?.askId ?? null;
 
   // Dismissal is per ask, not for ever: a *new* prompt is a new interruption
   // and has to be able to say so, or "Later" would quietly turn the feature off.
@@ -65,8 +116,8 @@ export function PermissionBanner({
     if (askId && dismissed && askId !== dismissed) setDismissed(null);
   }, [askId, dismissed]);
 
-  if (!oldest?.pending || dismissed === askId) return null;
-  const request = oldest.pending;
+  if (!oldest || dismissed === askId) return null;
+  const { request } = oldest;
 
   return (
     <div className="permission-banner" role="status">
@@ -74,7 +125,7 @@ export function PermissionBanner({
       <span className="permission-banner__count">
         {asking.length === 1 ? '1 agent needs' : `${asking.length} agents need`} permission
       </span>
-      <span className="permission-banner__who">{taskLine(oldest) ?? oldest.id}</span>
+      <span className="permission-banner__who">{oldest.who}</span>
       <span className="permission-banner__what">
         {verbLabel(request.verb)} {request.target}
       </span>

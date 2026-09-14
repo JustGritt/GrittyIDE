@@ -3,6 +3,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { AgentsController } from '../agents/use-agents';
+import type { RunsController } from '../runs/use-runs';
 import { AgentIsland } from './island';
 import { RaiseQuestion } from './raise-question';
 import type { WorkstreamsController } from './use-workstreams';
@@ -78,6 +79,14 @@ const agents: AgentsController = {
   answering: null,
 };
 
+/** No runs: the island only needs them for the permission asks it counts. */
+const runs = {
+  runs: [],
+  loaded: true,
+  error: null,
+  answering: null,
+} as unknown as RunsController;
+
 function renderForm(): string {
   return renderToStaticMarkup(
     createElement(RaiseQuestion, {
@@ -130,6 +139,7 @@ describe('the island roster offers the form', () => {
       createElement(AgentIsland, {
         controller: controller([workstream()]),
         agents,
+        runs,
         open: true,
         onOpenChange: () => {},
         onOpenQueue: () => {},
@@ -144,6 +154,7 @@ describe('the island roster offers the form', () => {
       createElement(AgentIsland, {
         controller: controller([workstream()]),
         agents,
+        runs,
         open: true,
         onOpenChange: () => {},
         onOpenQueue: () => {},
