@@ -4156,22 +4156,6 @@ textarea:focus-visible {
   gap: var(--gap-sm);
 }
 
-/* The notification setting lives in the agents settings popover (T223). */
-.agents__notifications {
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-xs);
-  padding-bottom: var(--gap-sm);
-  border-bottom: 1px solid var(--border);
-}
-
-.agents__notifications-row {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-sm);
-  font-size: var(--text-control);
-}
-
 /* ---------------------------------------------------------------------------
    Permission prompts (T335, design artboards 12a and 12b)
 
