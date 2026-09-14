@@ -27,7 +27,7 @@ moves back. Never move a task file by hand.
 | [T110](T110-diagnostics.md) | Diagnostics | 2 | T060, T090, T220, T325, ADR-001 | todo |
 | [T224](T224-reveal-terminal.md) | Reveal the terminal a session is running in | 3 | T220 | todo |
 | T305 | Agent capability model | 4 | T300 | unspec |
-| T310-ANSWER | Arm the host permission verdict for an owned run | 4 | T310-B | doing |
+| [T310-ANSWER](T310-ANSWER-host-permissions.md) | Arm the host permission verdict for an owned run | 4 | T310-B | review |
 | T310-VERDICT-EVENT | Record a permission verdict in a run's ring | 4 | T310-B | unspec |
 | T320 | Context manifest | 4 | T300 | unspec |
 | T310-RESUME | Take over an observed session as an owned run | 4 | T310-B | unspec |

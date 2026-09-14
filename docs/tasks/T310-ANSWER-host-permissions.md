@@ -1,7 +1,7 @@
 # Task T310-ANSWER — The user's verdict, behind the seam T310 built
 
 - **Phase:** 4 (orchestration)
-- **Status:** todo
+- **Status:** review
 - **Depends on:** T310-B (the run inbox and the `can_use_tool` plumbing), T335 (the permission queue), ADR-020
 
 ## Objective
