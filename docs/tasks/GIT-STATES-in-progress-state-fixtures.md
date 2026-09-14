@@ -1,7 +1,7 @@
 # Task GIT-STATES — Test the in-progress repository states git status names but never exercised
 
 - **Phase:** 2
-- **Status:** doing
+- **Status:** review
 - **Depends on:** T100 (git baseline), ADR-023 (git read in-process through `gix`)
 
 ## Objective

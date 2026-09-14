@@ -1,7 +1,7 @@
 # Task SEARCH-WALK-TIME — Time a search over large-repo against ADR-022's revisit trigger
 
 - **Phase:** 2
-- **Status:** doing
+- **Status:** review
 - **Depends on:** T080 (search), ADR-022 (in-process search on ripgrep's crates)
 
 ## Objective

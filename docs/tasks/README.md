@@ -36,6 +36,7 @@ moves back. Never move a task file by hand.
 | T400 | Worktree isolation | 5 | T100, T325 | unspec |
 | T405 | Ownership-aware scheduler | 5 | T325, T300 | unspec |
 | T410 | Attention queue | 5 | T210, T325, T335 | unspec |
+| ADR-034 | What "ignored" means across the explorer, the watcher and search | 2 | ADR-022 | review |
 | [AGENT-TURN-END](AGENT-TURN-END-roster-done-while-generating.md) | The agent roster says Done while the model is still generating | 3 | T220, T221, T223, T231 | review |
 | BOARD-ARCHIVE | Done and superseded tickets move to a generated archive, so the index lists open work | tools | – | review |
 | BOARD-DROP-DONE | drop --to done skips the reviewer rule move enforces | tools | – | unspec |
@@ -43,7 +44,11 @@ moves back. Never move a task file by hand.
 | [CARGO-FLAKE](CARGO-FLAKE-desktop-command-tests.md) | Three desktop command tests fail under a loaded machine | 2 | – | todo |
 | CI-LINUX-DARK | Linux CI is dark until the minute allowance resets (1 Oct) or a spending limit is set |  | – | blocked |
 | CONFIRM-DIALOG | Extract a shared confirm dialog before a third copy is written | 2 | – | unspec |
+| [EXPLORER-DISCARD-NOTICE](docs/tasks/EXPLORER-DISCARD-NOTICE-dirty-documents-only.md) | The discard notice replays only a dirty-document refusal | maintenance | T042, EXPLORER-FORCE-REPLAY | doing |
 | [FILE-ICONS](docs/tasks/FILE-ICONS-file-type-icons.md) | File-type icons in the explorer tree and Changes list | 2 | – | review |
+| [GC-BUDGET](GC-BUDGET-sweeper-defaults.md) | Re-derive the sweeper's cache budget and disk floor for ADR-033's smaller builds | tools | ADR-024, ADR-033 | review |
+| GC-DEV-SKIP | A running tauri dev stops every sweep of its checkout: the process scan outranks a free .cargo-lock | tools | GC-BUDGET | todo |
+| [GIT-STATES](GIT-STATES-in-progress-state-fixtures.md) | Test the in-progress repository states git status names but never exercised | 2 | T100, ADR-023 | review |
 | [LAST-PROMPT-NOTIFY](docs/tasks/LAST-PROMPT-NOTIFY-task-notifications.md) | A task notification is not a session's last prompt | maintenance | LAST-PROMPT-SHELL | review |
 | [LAST-PROMPT-SHELL](docs/tasks/LAST-PROMPT-SHELL-bang-commands.md) | A ! shell command is not a session's last prompt | maintenance | AGENT-TURN-END | review |
 | [LEASE-NOTIFY](docs/tasks/LEASE-NOTIFY-lease-change-notices.md) | Tell a session when the lease registry changes under it | tooling | – | review |
@@ -54,6 +59,7 @@ moves back. Never move a task file by hand.
 | [NOTIFY-SETTING-ORPHAN](docs/tasks/NOTIFY-SETTING-ORPHAN-delete.md) | Delete the notification switch nothing mounts | maintenance | T120-U, T120-M | review |
 | PROTO-W2 | Wave 2 wire, in one PR: watcher, git, terminal blocks, diagnostics, violations | 2 | ADR-001, ADR-017, ADR-023 | todo |
 | [RUNS-EVENT-FILTER](RUNS-EVENT-FILTER-subscription.md) | use-runs.ts subscribes to every event of every kind |  | – | review |
+| [SEARCH-WALK-TIME](SEARCH-WALK-TIME-large-repo-timing.md) | Time a search over large-repo against ADR-022's revisit trigger | 2 | T080, ADR-022 | review |
 | [SIDEBAR-ICONS](docs/tasks/SIDEBAR-ICONS-section-tab-icons.md) | Sidebar section tabs as icons, for horizontal room | 2 | – | review |
 | SIDECAR-BUNDLE-CONFIG | Move externalBin to a bundle-time config so a compile never needs a staged binary | 3 | SIDECAR-FRESH-CHECKOUT | unspec |
 | SIDECAR-FRESH-CHECKOUT | A fresh clone or worktree cannot build gritty-desktop until T225's sidecar is staged by hand | 3 | T225 | review |
@@ -73,7 +79,7 @@ moves back. Never move a task file by hand.
 | [TREE-DISCLOSURE](docs/tasks/TREE-DISCLOSURE-chevron-transition.md) | Tree chevron and expand/collapse transition | 2 | FILE-ICONS | review |
 | [TURN-START-DEQUEUE](docs/tasks/TURN-START-DEQUEUE-measure.md) | Measure whether a dequeued message should start a turn | maintenance | AGENT-TURN-END | review |
 | [TURN-START-QUEUED](docs/tasks/TURN-START-QUEUED-dequeue-and-shell.md) | A dequeued message or a ! command starts a turn | maintenance | TURN-START-DEQUEUE, AGENT-TURN-END | review |
-| [WATCH-FLAKE](WATCH-FLAKE-load-sensitive.md) | Two load-sensitive tests fail in the full-workspace run, pass alone |  | – | todo |
+| [WATCH-FLAKE](WATCH-FLAKE-load-sensitive.md) | Two load-sensitive tests fail in the full-workspace run, pass alone |  | – | doing |
 <!-- board:table end -->
 
 ## Dependency graph (architecture addendum §2)

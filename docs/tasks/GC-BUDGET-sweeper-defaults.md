@@ -1,7 +1,7 @@
 # Task GC-BUDGET — Re-derive the sweeper's cache budget and disk floor for ADR-033's smaller builds
 
 - **Phase:** tools
-- **Status:** doing
+- **Status:** review
 - **Depends on:** ADR-024 (one `target/` per checkout, swept), ADR-033 (`debug = "line-tables-only"`)
 
 ## Objective
