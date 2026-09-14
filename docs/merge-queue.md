@@ -137,10 +137,14 @@ rule below. `PROTOCOL_VERSION` **2.15.0** is on `main`; 2.13.0 and 2.14.0 were
 spent on the way and the resolved line took the highest. `SCHEMA_VERSION` is
 still **4** and migration **`0005` is free** — T326 needed neither.
 
-**The next free values are `PROTOCOL_VERSION` 2.27.0, `SCHEMA_VERSION` 5 and
+**The next free values are `PROTOCOL_VERSION` 2.28.0, `SCHEMA_VERSION` 5 and
 migration `0005`; the next free ADR number is 034.** (2.23.0–2.26.0 and
 ADR-030/031/032/033 were taken on 2026-09-09 — see the blocks at the end of
-this section.) ADR-027 is not free:
+this section. **2.27.0 is claimed by `T310-ANSWER`** (arm the host permission
+verdict for an owned run) on 2026-09-14: one command, `runs.answerPermission`,
+and an optional `pending` ask on `AgentRun`. Additive; no `CoreEvent` variant,
+no `SCHEMA_VERSION`, no migration — an ask lives as long as its run and a run
+is not persisted.) ADR-027 is not free:
 `HANDOFF.md:102` reserves it for T310's "the feed comes from the run event ring,
 not the transcript" decision. That reservation was never written here, which is
 rule 2's failure mode again — it is written here now.
