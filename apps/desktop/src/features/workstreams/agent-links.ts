@@ -81,17 +81,17 @@ export function workstreamsOfSession(
  * that it is not in the roster it can see.
  */
 export function linkedStatusLabel(entry: LinkedSession): string {
-  return entry.session ? agentStatus(entry.session.activity).label : 'Not running';
+  return entry.session ? agentStatus(entry.session).label : 'Not running';
 }
 
 export function linkedStatusHint(entry: LinkedSession): string {
   return entry.session
-    ? agentStatus(entry.session.activity).hint
+    ? agentStatus(entry.session).hint
     : 'This session is not in the roster any more. The link is kept: it records what worked on this.';
 }
 
 export function linkedStatusTone(entry: LinkedSession): string {
-  return entry.session ? agentStatus(entry.session.activity).tone : 'ended';
+  return entry.session ? agentStatus(entry.session).tone : 'ended';
 }
 
 /**

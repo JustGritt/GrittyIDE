@@ -1,6 +1,6 @@
 import type { AgentRoster, AgentRun, AgentRunId, AgentSession, Workstream } from '@gritty/protocol';
 import { isTerminalRun, needsAttention } from '../runs/runs-reducer';
-import { activitySourceLabel, agentStatus } from './agent-status';
+import { activitySourceLabel, agentStatus, sessionNeedsYou } from './agent-status';
 import { taskLine, toolLine } from './agents-reducer';
 import { type RunStatus, runStatus } from './run-status';
 
@@ -156,11 +156,11 @@ function sessionRow(session: AgentSession): RosterRow {
     id: session.rootName ?? session.id.slice(0, 7),
     title: taskLine(session),
     detail: toolLine(session),
-    status: agentStatus(session.activity),
+    status: agentStatus(session),
     badge: session.pending ? { text: 'asks', tone: 'attention' } : null,
     // The core's own definition of the count it publishes, applied to one
     // session. Not a second policy: `roster.needsYou` stays the total.
-    needsYou: session.activity === 'BLOCKED' || session.activity === 'WAITING',
+    needsYou: sessionNeedsYou(session),
     retired: session.activity === 'ENDED',
     elsewhere: !session.inWorkspace,
     sourceLabel: activitySourceLabel(session.activitySource),

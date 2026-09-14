@@ -103,11 +103,14 @@ impl AgentEvidence {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AgentActivitySource {
-    /// The process table: alive, or gone.
+    /// The process table: alive, or gone. A `WAITING` from here means alive
+    /// with no evidence either way about the turn — not that the turn ended.
     Process,
-    /// The transcript: a tool in flight, or a long silence.
+    /// The transcript: a tool in flight, a turn started or ended, or a long
+    /// silence.
     Transcript,
-    /// The agent's own hook. Only ever the source of `BLOCKED`.
+    /// The agent's own hook: a permission prompt, or a turn it reported
+    /// starting or ending. The only possible source of `BLOCKED`.
     Hook,
 }
 
@@ -122,13 +125,18 @@ pub enum AgentActivitySource {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AgentActivity {
-    /// A tool call is outstanding: the agent issued it and no result has been
-    /// recorded yet.
+    /// The agent's turn is in progress: a tool call is outstanding, or the
+    /// newest evidence is a turn starting or continuing — the model is thinking
+    /// or writing, which leaves nothing in the transcript until it finishes a
+    /// block (AGENT-TURN-END).
     Working,
     /// Stopped at a permission prompt, and waiting for the user to answer it.
     /// Hook evidence only.
     Blocked,
-    /// The process is alive with nothing outstanding — the user's move.
+    /// The process is alive and nothing says the agent is working. With a
+    /// `TRANSCRIPT` or `HOOK` source the turn was seen to end — the user's move.
+    /// With `PROCESS` there is no turn evidence at all, and the session is only
+    /// known to be alive: see [`AgentSession::needs_you`].
     Waiting,
     /// Alive, but the transcript has been quiet past the idle threshold.
     Idle,
@@ -137,11 +145,6 @@ pub enum AgentActivity {
 }
 
 impl AgentActivity {
-    /// Whether this session is the reason to look at the island.
-    pub const fn needs_you(self) -> bool {
-        matches!(self, Self::Waiting | Self::Blocked)
-    }
-
     pub const fn is_running(self) -> bool {
         matches!(
             self,
@@ -237,6 +240,24 @@ pub struct AgentSession {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub pending: Option<AgentPermissionRequest>,
+}
+
+impl AgentSession {
+    /// Whether this session is the reason to look at the island: stopped at a
+    /// prompt, or a turn that was *seen* to end.
+    ///
+    /// A `WAITING` whose only source is the process table is not one. It says
+    /// the process is alive and nothing more, and counting it would bring back
+    /// the notification AGENT-TURN-END removed — raised while the model was
+    /// still working, because no evidence said otherwise. The renderer mirrors
+    /// this in `sessionNeedsYou`.
+    pub fn needs_you(&self) -> bool {
+        match self.activity {
+            AgentActivity::Blocked => true,
+            AgentActivity::Waiting => self.activity_source != AgentActivitySource::Process,
+            AgentActivity::Working | AgentActivity::Idle | AgentActivity::Ended => false,
+        }
+    }
 }
 
 /// What kind of thing an agent is asking permission to do.
@@ -392,7 +413,8 @@ pub struct ListAgentSessionsRequest {}
 #[serde(rename_all = "camelCase")]
 pub struct AgentRoster {
     pub sessions: Vec<AgentSession>,
-    /// How many are `BLOCKED` or `WAITING` — the island's "needs you" count.
+    /// How many need the user — stopped at a prompt, or a turn seen to end
+    /// (`AgentSession::needs_you`). The island's "needs you" count.
     pub needs_you: u32,
     /// Whether process evidence was available at all. `false` means the roster
     /// is transcript-only, so every session reads as `ENDED` and the UI should

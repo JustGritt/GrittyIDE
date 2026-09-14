@@ -85,6 +85,14 @@ describe('agents reducer', () => {
     expect(mostUrgent(roster([]))).toBeNull();
   });
 
+  it('does not single out a session only known to be alive', () => {
+    // AGENT-TURN-END: WAITING from the process table is not a finished turn.
+    const alive = session({ id: 'alive', activity: 'WAITING', activitySource: 'PROCESS' });
+    const done = session({ id: 'done', activity: 'WAITING', activitySource: 'HOOK' });
+    expect(mostUrgent(roster([alive, done]))?.id).toBe('done');
+    expect(mostUrgent(roster([alive]))?.id).toBe('alive');
+  });
+
   it('prefers the agent title, then the prompt, then the reply', () => {
     expect(taskLine(session({ title: 'A', lastPrompt: 'B', lastReply: 'C' }))).toBe('A');
     expect(taskLine(session({ lastPrompt: 'B', lastReply: 'C' }))).toBe('B');

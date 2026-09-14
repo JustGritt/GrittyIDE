@@ -41,7 +41,7 @@ export function AgentConsole({
   controller: AgentConsoleController;
   agents: AgentsController;
 }) {
-  const status = agentStatus(session.activity);
+  const status = agentStatus(session);
   const task = taskLine(session);
 
   return (

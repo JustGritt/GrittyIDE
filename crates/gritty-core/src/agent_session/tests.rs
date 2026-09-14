@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use gritty_agents::hook::{AskVerb, HookAsk, HookPhase, HookState};
 use gritty_agents::{
     CommandRunner, DiscoveredSession, Discovery, Evidence, ProcessFacts, Provider, ToolCall,
+    TurnMark, TurnState,
 };
 
 use super::*;
@@ -31,6 +32,7 @@ fn discovered(evidence: Evidence, last_active_ms: i64, tool: Option<&str>) -> Di
             name: name.to_owned(),
             detail: None,
         }),
+        turn: None,
         last_active_ms: Some(last_active_ms),
         process: matches!(evidence, Evidence::ProcessOnly | Evidence::Both).then(|| ProcessFacts {
             pid: 42,
@@ -66,6 +68,23 @@ fn hook(phase: HookPhase, age_ms: i64, tool: Option<&str>) -> HookState {
     }
 }
 
+/// The same session, with the transcript's newest turn boundary `age_ms` ago.
+fn with_turn(mut session: DiscoveredSession, state: TurnState, age_ms: i64) -> DiscoveredSession {
+    session.turn = Some(TurnMark {
+        state,
+        at_ms: NOW_MS - age_ms,
+    });
+    session
+}
+
+/// A roster row carrying just an activity and the source that produced it.
+fn row(activity: AgentActivity, source: AgentActivitySource) -> AgentSession {
+    AgentSession {
+        activity_source: source,
+        ..ranked(activity, true, 0)
+    }
+}
+
 #[test]
 fn an_outstanding_tool_call_is_working() {
     let session = discovered(Evidence::Both, NOW_MS, Some("Bash"));
@@ -76,13 +95,50 @@ fn an_outstanding_tool_call_is_working() {
 }
 
 #[test]
-fn a_live_session_with_nothing_outstanding_is_waiting_on_the_user() {
-    let session = discovered(Evidence::Both, NOW_MS, None);
+fn a_turn_the_transcript_saw_end_is_the_users_move() {
+    let session = with_turn(
+        discovered(Evidence::Both, NOW_MS, None),
+        TurnState::Ended,
+        1_000,
+    );
     assert_eq!(
         derived(&session, None, true),
-        (AgentActivity::Waiting, AgentActivitySource::Process)
+        (AgentActivity::Waiting, AgentActivitySource::Transcript)
     );
-    assert!(AgentActivity::Waiting.needs_you());
+    assert!(row(AgentActivity::Waiting, AgentActivitySource::Transcript).needs_you());
+    assert!(row(AgentActivity::Waiting, AgentActivitySource::Hook).needs_you());
+}
+
+#[test]
+fn nothing_outstanding_is_not_the_turn_ending() {
+    // AGENT-TURN-END, as the screenshot caught it: a Write came back three
+    // seconds ago and the model is thinking about it. Nothing is outstanding,
+    // and the turn is not over.
+    let session = with_turn(
+        discovered(Evidence::Both, NOW_MS, None),
+        TurnState::InProgress,
+        3_000,
+    );
+    assert_eq!(
+        derived(&session, None, true),
+        (AgentActivity::Working, AgentActivitySource::Transcript)
+    );
+}
+
+#[test]
+fn without_turn_evidence_a_live_session_is_only_alive() {
+    for evidence in [Evidence::Both, Evidence::ProcessOnly] {
+        let session = discovered(evidence, NOW_MS, None);
+        assert_eq!(
+            derived(&session, None, true),
+            (AgentActivity::Waiting, AgentActivitySource::Process),
+            "{evidence:?}"
+        );
+    }
+    assert!(
+        !row(AgentActivity::Waiting, AgentActivitySource::Process).needs_you(),
+        "alive is not a reason to look"
+    );
 }
 
 #[test]
@@ -92,7 +148,33 @@ fn a_quiet_live_session_goes_idle_and_stops_asking_for_attention() {
         derived(&session, None, true),
         (AgentActivity::Idle, AgentActivitySource::Transcript)
     );
-    assert!(!AgentActivity::Idle.needs_you());
+    assert!(!row(AgentActivity::Idle, AgentActivitySource::Transcript).needs_you());
+}
+
+#[test]
+fn a_turn_left_in_progress_past_the_idle_threshold_stops_claiming_work() {
+    // The file is still being touched — by records that are not the model's —
+    // so the IDLE rule cannot fire. The in-progress mark itself has to decay,
+    // or a turn whose end was never written reads WORKING indefinitely.
+    let stuck = with_turn(
+        discovered(Evidence::Both, NOW_MS, None),
+        TurnState::InProgress,
+        30 * MINUTE_MS,
+    );
+    assert_eq!(
+        derived(&stuck, None, true),
+        (AgentActivity::Waiting, AgentActivitySource::Process)
+    );
+    // An end does not decay: an unanswered turn is still the user's move.
+    let answered_long_ago = with_turn(
+        discovered(Evidence::Both, NOW_MS, None),
+        TurnState::Ended,
+        30 * MINUTE_MS,
+    );
+    assert_eq!(
+        derived(&answered_long_ago, None, true),
+        (AgentActivity::Waiting, AgentActivitySource::Transcript)
+    );
 }
 
 #[test]
@@ -133,7 +215,7 @@ fn a_live_session_whose_hook_says_blocked_is_blocked() {
         (AgentActivity::Blocked, AgentActivitySource::Hook),
         "the one value poll-only discovery cannot reach"
     );
-    assert!(AgentActivity::Blocked.needs_you());
+    assert!(row(AgentActivity::Blocked, AgentActivitySource::Hook).needs_you());
     assert!(AgentActivity::Blocked.is_running());
 }
 
@@ -200,15 +282,155 @@ fn blocked_outranks_working_because_the_prompt_is_why_the_tool_stopped() {
 }
 
 #[test]
-fn no_phase_other_than_blocked_changes_what_the_row_says() {
-    // The hook reports four phases; only one of them is a value the derivation
-    // could not have reached on its own, and the rest change nothing.
+fn the_hook_reports_the_turn_when_the_transcript_has_nothing_to_say() {
+    // T221 believed only BLOCKED was out of the derivation's reach. The model
+    // generating is too: the transcript is silent, and the hook is not.
     let session = discovered(Evidence::Both, NOW_MS, None);
-    for phase in [HookPhase::Active, HookPhase::Settled, HookPhase::Ended] {
+    assert_eq!(
+        derived(&session, Some(&hook(HookPhase::Active, 0, None)), true),
+        (AgentActivity::Working, AgentActivitySource::Hook)
+    );
+    assert_eq!(
+        derived(&session, Some(&hook(HookPhase::Settled, 0, None)), true),
+        (AgentActivity::Waiting, AgentActivitySource::Hook)
+    );
+    // ENDED is the process table's to judge, not the hook's (ADR-018 §7).
+    assert_eq!(
+        derived(&session, Some(&hook(HookPhase::Ended, 0, None)), true),
+        (AgentActivity::Waiting, AgentActivitySource::Process)
+    );
+}
+
+#[test]
+fn the_newer_of_hook_and_transcript_decides_the_turn() {
+    use AgentActivity::{Waiting, Working};
+    use AgentActivitySource::{Hook, Transcript};
+    // (transcript, its age, hook phase, its age) → verdict. Ages in ms.
+    let cases = [
+        // Esc during generation: no Stop fires, and the interrupt line is
+        // written after the prompt's ACTIVE (probe, Claude Code 2.1.270).
+        (
+            TurnState::Ended,
+            1_000,
+            HookPhase::Active,
+            4_000,
+            (Waiting, Transcript),
+        ),
+        // A new prompt, reported by the hook before the next poll reads it.
+        (
+            TurnState::Ended,
+            4_000,
+            HookPhase::Active,
+            1_000,
+            (Working, Hook),
+        ),
+        (
+            TurnState::InProgress,
+            4_000,
+            HookPhase::Settled,
+            1_000,
+            (Waiting, Hook),
+        ),
+        (
+            TurnState::InProgress,
+            1_000,
+            HookPhase::Settled,
+            4_000,
+            (Working, Transcript),
+        ),
+        // `Stop` lands in the same millisecond as `turn_duration`: a tie is
+        // the hook's, the agent's own report of that moment.
+        (
+            TurnState::InProgress,
+            2_000,
+            HookPhase::Settled,
+            2_000,
+            (Waiting, Hook),
+        ),
+        (
+            TurnState::Ended,
+            2_000,
+            HookPhase::Active,
+            2_000,
+            (Working, Hook),
+        ),
+    ];
+    for (state, turn_age, phase, hook_age, expected) in cases {
+        let session = with_turn(discovered(Evidence::Both, NOW_MS, None), state, turn_age);
         assert_eq!(
-            derived(&session, Some(&hook(phase, 0, None)), true),
-            (AgentActivity::Waiting, AgentActivitySource::Process),
-            "{phase:?}"
+            derived(&session, Some(&hook(phase, hook_age, None)), true),
+            expected,
+            "{state:?} {turn_age}ms ago vs {phase:?} {hook_age}ms ago"
+        );
+    }
+}
+
+#[test]
+fn a_stale_hook_reports_no_turn() {
+    let session = discovered(Evidence::Both, NOW_MS, None);
+    assert_eq!(
+        derived(
+            &session,
+            Some(&hook(HookPhase::Active, 30 * MINUTE_MS, None)),
+            true
+        ),
+        (AgentActivity::Waiting, AgentActivitySource::Process),
+        "a half-hour-old ACTIVE is not a turn in progress"
+    );
+    let ended = with_turn(session, TurnState::Ended, 40 * MINUTE_MS);
+    assert_eq!(
+        derived(
+            &ended,
+            Some(&hook(HookPhase::Active, 30 * MINUTE_MS, None)),
+            true
+        ),
+        (AgentActivity::Waiting, AgentActivitySource::Transcript),
+        "and it cannot outvote an older transcript it no longer counts against"
+    );
+}
+
+#[test]
+fn a_turn_that_ended_after_the_prompt_appeared_is_not_blocked() {
+    // Esc at a permission prompt: the transcript gets the declined result, the
+    // interrupt and `turn_duration`; the hook gets nothing, so its state file
+    // still says BLOCKED (probe, Claude Code 2.1.270).
+    let session = with_turn(
+        discovered(Evidence::Both, NOW_MS, None),
+        TurnState::Ended,
+        1_000,
+    );
+    assert_eq!(
+        derived(
+            &session,
+            Some(&hook(HookPhase::Blocked, 3_000, Some("Bash"))),
+            true
+        ),
+        (AgentActivity::Waiting, AgentActivitySource::Transcript)
+    );
+}
+
+#[test]
+fn only_a_newer_end_clears_blocked() {
+    let prompt = hook(HookPhase::Blocked, 3_000, Some("Bash"));
+    // An end from before the prompt is the previous turn.
+    let earlier_end = with_turn(
+        discovered(Evidence::Both, NOW_MS, None),
+        TurnState::Ended,
+        9_000,
+    );
+    // Anything the transcript writes *while* the prompt stands must not
+    // clear it either — only an end can.
+    let newer_progress = with_turn(
+        discovered(Evidence::Both, NOW_MS, None),
+        TurnState::InProgress,
+        1_000,
+    );
+    for session in [earlier_end, newer_progress] {
+        assert_eq!(
+            derived(&session, Some(&prompt), true),
+            (AgentActivity::Blocked, AgentActivitySource::Hook),
+            "{:?}",
+            session.turn
         );
     }
 }
@@ -500,7 +722,15 @@ fn ranked(activity: AgentActivity, in_workspace: bool, last_active_ms: u64) -> A
         id: format!("{activity:?}-{in_workspace}-{last_active_ms}"),
         provider: AgentProvider::ClaudeCode,
         activity,
-        activity_source: AgentActivitySource::Process,
+        // The source the derivation gives each activity when its evidence
+        // exists; `WAITING` here is a turn seen to end.
+        activity_source: match activity {
+            AgentActivity::Blocked => AgentActivitySource::Hook,
+            AgentActivity::Ended => AgentActivitySource::Process,
+            AgentActivity::Working | AgentActivity::Waiting | AgentActivity::Idle => {
+                AgentActivitySource::Transcript
+            }
+        },
         evidence: AgentEvidence::Both,
         title: None,
         last_prompt: None,
@@ -546,6 +776,13 @@ fn the_open_workspace_sorts_first_then_what_is_blocked_on_you() {
 }
 
 #[test]
+fn a_session_only_known_to_be_alive_sorts_with_the_running_work() {
+    let alive = row(AgentActivity::Waiting, AgentActivitySource::Process);
+    assert_eq!(rank(&alive), rank(&ranked(AgentActivity::Working, true, 0)));
+    assert!(rank(&ranked(AgentActivity::Waiting, true, 0)) < rank(&alive));
+}
+
+#[test]
 fn recency_breaks_ties_within_a_rank() {
     let mut sessions = [
         ranked(AgentActivity::Waiting, true, 100),
@@ -588,7 +825,20 @@ async fn needs_you_counts_only_the_sessions_waiting_on_the_user() {
     let (manager, _sink) = manager(Arc::new(FakeRunner(None)));
     let found = Discovery {
         sessions: vec![
+            // A turn seen to end: counts.
+            with_turn(
+                discovered(Evidence::Both, NOW_MS, None),
+                TurnState::Ended,
+                1_000,
+            ),
+            // Alive, nothing known about its turn: does not.
             discovered(Evidence::Both, NOW_MS, None),
+            // Thinking between tools: does not.
+            with_turn(
+                discovered(Evidence::Both, NOW_MS, None),
+                TurnState::InProgress,
+                1_000,
+            ),
             discovered(Evidence::Both, NOW_MS, Some("Bash")),
             discovered(Evidence::TranscriptOnly, NOW_MS, None),
         ],
@@ -777,6 +1027,14 @@ fn manager_over_with(
     root: &TempTranscripts,
     ps: String,
 ) -> (Arc<AgentSessionManager>, Arc<RecordingSink>) {
+    manager_over_notifying(root, ps, None)
+}
+
+fn manager_over_notifying(
+    root: &TempTranscripts,
+    ps: String,
+    notifier: Option<Arc<dyn AttentionNotifier>>,
+) -> (Arc<AgentSessionManager>, Arc<RecordingSink>) {
     let sink = Arc::new(RecordingSink::default());
     let events = EventBus::new(FanOutSink::new(vec![sink.clone()]));
     let handle = Handle::current();
@@ -796,7 +1054,7 @@ fn manager_over_with(
             permissions: Some(permission_paths(&root.hook_dir())),
             hooks: root.hooks(),
             hook_binary: None,
-            notifier: None,
+            notifier,
             ownership: None,
             owned: None,
         },
@@ -1195,9 +1453,10 @@ async fn a_hook_write_that_changes_no_verdict_emits_nothing() {
     manager.follow_once().await;
     let emitted = sink.rosters().len();
 
-    // From here the agent keeps reporting, and none of it changes a verdict.
-    for phase in [HookPhase::Settled, HookPhase::Active, HookPhase::Settled] {
-        root.record_phase(TEST_SESSION, phase, Some("Bash"));
+    // From here the agent keeps reporting a turn in progress — every tool call
+    // rewrites the state file — and none of it changes a verdict.
+    for tool in ["Read", "Edit", "Bash"] {
+        root.record_phase(TEST_SESSION, HookPhase::Active, Some(tool));
         manager.follow_once().await;
     }
     assert_eq!(
@@ -1205,6 +1464,19 @@ async fn a_hook_write_that_changes_no_verdict_emits_nothing() {
         emitted,
         "three hook writes, no derived change, no events"
     );
+
+    // The turn ending *is* a change (AGENT-TURN-END), published exactly once.
+    root.record_phase(TEST_SESSION, HookPhase::Settled, None);
+    manager.follow_once().await;
+    manager.follow_once().await;
+    let rosters = sink.rosters();
+    assert_eq!(rosters.len(), emitted + 1);
+    let row = &rosters.last().expect("roster").sessions[0];
+    assert_eq!(
+        (row.activity, row.activity_source),
+        (AgentActivity::Waiting, AgentActivitySource::Hook)
+    );
+    let emitted = rosters.len();
 
     // And a tick with no hook write at all is free.
     manager.follow_once().await;
@@ -1313,8 +1585,11 @@ async fn hook_state_removed_from_under_the_roster_clears_the_prompt() {
 }
 
 #[tokio::test]
-async fn with_nothing_installed_the_roster_is_what_t220_shipped() {
+async fn with_nothing_installed_no_row_cites_the_hook() {
     let root = TempTranscripts::new("hook-absent");
+    // The seeded prompt is dated days ago, so its in-progress mark has long
+    // decayed: the row is alive and nothing more, and says the process table
+    // is why.
     let id = root.seed(TEST_SESSION);
     // The hook directory is configured and will simply never exist, which is
     // what a machine with no integration installed looks like.
@@ -1731,27 +2006,55 @@ async fn a_build_without_a_notifier_reports_the_setting_as_unsupported() {
 }
 
 #[tokio::test]
-async fn a_session_that_arrives_needing_you_notifies_once_and_not_per_poll() {
+async fn a_session_only_known_to_be_alive_arrives_without_a_notification() {
+    // T223 notified for this. With no transcript and no hook, nothing says
+    // the turn is over — the model may be mid-thought — so it is not the
+    // user's move and not a reason to interrupt (AGENT-TURN-END).
     let runner = Arc::new(SwitchableRunner::new(""));
     let notifier = RecordingNotifier::answering(AgentNotificationPermission::Granted);
     let (manager, _sink) = manager_with(runner.clone(), None, Some(notifier.clone()));
     manager.set_window_focused(false);
     assert!(manager.set_notifications(true).enabled);
-
-    // The first roster is what Gritty has just noticed; it notifies nothing.
     assert!(manager.list().await.sessions.is_empty());
-    assert!(notifier.shown().is_empty());
 
     runner.set(ONE_CLAUDE);
     let roster = manager.refresh().await;
-    assert_eq!(roster.sessions[0].activity, AgentActivity::Waiting);
+    let row = &roster.sessions[0];
+    assert_eq!(
+        (row.activity, row.activity_source),
+        (AgentActivity::Waiting, AgentActivitySource::Process)
+    );
+    assert_eq!(roster.needs_you, 0);
+    assert!(notifier.shown().is_empty());
+    manager.shutdown();
+}
+
+#[tokio::test]
+async fn a_turn_that_ends_notifies_once_and_not_per_poll() {
+    let root = TempTranscripts::new("notify-turn-end");
+    let id = root.seed(TEST_SESSION);
+    let notifier = RecordingNotifier::answering(AgentNotificationPermission::Granted);
+    let (manager, _sink) = manager_over_notifying(&root, live_claude(), Some(notifier.clone()));
+    manager.set_window_focused(false);
+    assert!(manager.set_notifications(true).enabled);
+
+    // The first roster is what Gritty has just noticed; it notifies nothing.
+    manager.refresh().await;
+    // The agent reports a turn, then the model thinks: still nothing.
+    root.record_phase(TEST_SESSION, HookPhase::Active, None);
+    manager.follow_once().await;
+    assert!(notifier.shown().is_empty());
+
+    root.record_phase(TEST_SESSION, HookPhase::Settled, None);
+    manager.follow_once().await;
     let shown = notifier.shown();
     assert_eq!(shown.len(), 1, "{shown:?}");
-    assert_eq!(shown[0].session_id, "claude_code:pid-42");
+    assert_eq!(shown[0].session_id, id);
 
-    // Still waiting on the next two polls: the roster is polled, and this is
+    // Still waiting on the next polls: the roster is polled, and this is
     // exactly the level-triggered notification rule 8 forbids.
     manager.refresh().await;
+    manager.follow_once().await;
     manager.refresh().await;
     assert_eq!(notifier.shown().len(), 1);
     manager.shutdown();

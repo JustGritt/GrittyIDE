@@ -3660,7 +3660,8 @@ textarea:focus-visible {
   background: var(--fg-faint);
 }
 
-/* A tool call is outstanding: filled disc, the colour of something happening. */
+/* The turn is in progress — a tool, or the model thinking: filled disc, the
+   colour of something happening. */
 .agent-status--working {
   color: var(--accent-text);
 }
@@ -3691,6 +3692,13 @@ textarea:focus-visible {
 .agent-status--done .agent-status__mark {
   border-radius: 1px;
   background: var(--ok);
+}
+
+/* Alive, and nothing known about its turn (AGENT-TURN-END): a half-filled disc,
+   because it may be working or may be done, and the mark claims neither. */
+.agent-status--alive .agent-status__mark {
+  background: linear-gradient(90deg, var(--accent) 50%, transparent 50%);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
 }
 
 /* Alive but quiet: a ring, because there is nothing filling it. */

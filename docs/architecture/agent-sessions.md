@@ -70,13 +70,34 @@ Derived from evidence alone, in this order:
 | `ENDED` | no live process, or the process table was unreadable |
 | `IDLE` | live process, transcript quiet past the idle threshold |
 | `WORKING` | live process, a `tool_use` with no matching `tool_result` |
-| `WAITING` | live process, nothing outstanding — the user's move |
+| `WORKING` | live process, the transcript's newest turn boundary says in progress |
+| `WAITING` | live process, the transcript's newest turn boundary says ended — the user's move |
+| `WAITING` | live process, no turn evidence at all — alive, and nothing more |
 
-(T221 adds `BLOCKED` between `IDLE` and `WORKING`; see below.)
+(T221 adds `BLOCKED` between `IDLE` and `WORKING`, and AGENT-TURN-END lets the
+hook report the turn too; see below.)
 
 A stale transcript outranks an outstanding tool call on purpose: a call with no
 result for half an hour is a session someone walked away from, not one that is
 working.
+
+**Nothing outstanding is not a finished turn** (AGENT-TURN-END). Claude Code
+writes a block to the transcript only once it has finished streaming, so a model
+thinking or writing leaves the file looking exactly like a turn that ended. The
+transcript does mark both, and the scanner latches the newest *turn boundary*
+in its tail, with the record's own timestamp:
+
+| Boundary | Records |
+|---|---|
+| in progress | a user prompt (not meta, not a subagent's, not CLI-tagged text such as `<command-name>` or `<bash-input>` — except `<task-notification>`, which starts a turn), a `tool_result`, any model record |
+| ended | `system/turn_duration`, `system/stop_hook_summary`, `[Request interrupted by user…]` |
+
+An interrupt is an end in its own right: most interrupted turns write no
+`turn_duration`. An end also closes any call still outstanding, because a call
+cut off by Esc may never get a result. An in-progress mark older than the idle
+threshold is no evidence — the file's modification time keeps moving for
+records that are not the model's, so the `IDLE` rule alone cannot bound it —
+while an end never decays.
 
 There is **no `WAITING_FOR_APPROVAL` from these two sources**. Poll-only
 discovery cannot distinguish a pending permission prompt from a finished turn —
@@ -282,10 +303,14 @@ controller, following T210's rule that two surfaces over one controller cannot
 disagree. The island stays *machine-wide* and keeps a count and its most urgent
 row; the sidebar is scoped to the open workspace and flags — rather than filters
 — the sessions running elsewhere and the ones that have ended, keeping both
-behind a single reveal. The five labels map onto the wire as Working=`WORKING`,
-Pending validation=`BLOCKED`, Done=`WAITING`, Idle=`IDLE`, Ended=`ENDED` —
-`WAITING` keeps its name because it means *the user's move*, and renaming the
-wire for a word is not worth the ripple.
+behind a single reveal. The six labels map onto the wire as Working=`WORKING`,
+Pending validation=`BLOCKED`, Done=`WAITING` from `HOOK` or `TRANSCRIPT`,
+Alive=`WAITING` from `PROCESS`, Idle=`IDLE`, Ended=`ENDED` — `WAITING` keeps its
+name because it means *the user's move*, and renaming the wire for a word is not
+worth the ripple. Alive is the one label that reads the source: a live process
+with no turn evidence may be a model mid-thought, so it is neither Done nor
+counted as needing you (`AgentSession::needs_you`, mirrored by
+`sessionNeedsYou`), and it has its own mark, a half-filled disc.
 
 ## The third source (T221)
 
@@ -334,15 +359,31 @@ in. A tick whose hook state changed re-derives the roster from the **cached**
 discovery — no second `ps`, no second `lsof` — and still publishes only when a
 derived value actually differs.
 
-The derivation gains one row, at a defined precedence:
+The derivation gains `BLOCKED`, and — since AGENT-TURN-END — the hook's report of
+the turn, at a defined precedence:
 
 | Value | Evidence | `activitySource` |
 |---|---|---|
 | `ENDED` | no live process, or the process table was unreadable | `PROCESS` |
 | `IDLE` | live process, transcript quiet past the idle threshold | `TRANSCRIPT` |
-| **`BLOCKED`** | live process, hook phase `BLOCKED`, not stale | `HOOK` |
+| **`BLOCKED`** | live process, hook phase `BLOCKED`, not stale, and no transcript end newer than it | `HOOK` |
 | `WORKING` | live process, a `tool_use` with no matching `tool_result` | `TRANSCRIPT` |
-| `WAITING` | live process, nothing outstanding | `PROCESS` |
+| `WORKING` | live process, the newest turn evidence says in progress | whichever said it |
+| `WAITING` | live process, the newest turn evidence says ended | whichever said it |
+| `WAITING` | live process, no turn evidence | `PROCESS` |
+
+**Turn evidence from two sources.** A non-stale `ACTIVE` phase is a turn in
+progress and `SETTLED` one ended, each at the hook's `since_ms`; the transcript's
+turn boundary (above) says the same two things at its record's timestamp. The
+later of the two decides, and a tie goes to the hook. They normally agree —
+`UserPromptSubmit` lands tens of milliseconds after the prompt record, `Stop` in
+the same millisecond as `turn_duration` — and newest-wins is for when they do
+not: Esc during generation fires **no** `Stop`, so the transcript's interrupt
+line is the newer, and truer, report. Esc at a permission prompt fires no hook
+at all, which is why a newer transcript *end* discards `BLOCKED` — and only an
+end, so nothing written while a prompt stands can clear it. The probe results
+and the corpus replay behind these rules are in ADR-018's AGENT-TURN-END
+amendment.
 
 `ENDED` outranks `BLOCKED` — an agent killed at a prompt is gone, not blocked —
 and so does `IDLE`, for the reason already given above. A hook phase older than
@@ -421,7 +462,7 @@ publish(roster)                   ← the one place a roster change is observed
       │
       ▼
 AttentionTracker::advance(roster, now, enabled, focused)  ← pure: no clock, no I/O
-      │  the sessions that just *entered* BLOCKED or WAITING
+      │  the sessions that just *entered* needing you: BLOCKED, or a turn seen to end
       ▼
 AttentionNotifier (composition root)  →  tauri-plugin-notification
 ```

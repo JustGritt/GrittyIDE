@@ -59,7 +59,7 @@ pub use integration::{
 pub use probe::{CommandRunner, ProcessEvidence, Provider, SystemCommandRunner};
 pub use transcript::{
     FollowOptions, Followed, FollowedEntry, FollowedRecord, NoticeLevel, ScanOptions, ToolCall,
-    TranscriptEvidence, follow, follow_with,
+    TranscriptEvidence, TurnMark, TurnState, follow, follow_with,
 };
 
 /// Which sources agreed that a session exists.
@@ -113,6 +113,9 @@ pub struct DiscoveredSession {
     pub model: Option<String>,
     pub git_branch: Option<String>,
     pub outstanding_tool: Option<ToolCall>,
+    /// Whether the transcript's newest boundary record says the turn is running
+    /// or over. `None` with no readable transcript, or none in its tail.
+    pub turn: Option<TurnMark>,
     /// When the transcript was last written. `None` for a session with no
     /// readable transcript: the scan time would be a fresh value on every poll,
     /// which would make an unchanging roster look like it changed every tick.
@@ -287,6 +290,7 @@ fn merge(
             model: found.model,
             git_branch: found.git_branch,
             outstanding_tool: found.outstanding_tool,
+            turn: found.turn,
             last_active_ms: Some(found.last_active_ms),
             process,
         })
@@ -306,6 +310,7 @@ fn merge(
             model: None,
             git_branch: None,
             outstanding_tool: None,
+            turn: None,
             // Unknown, and deliberately not "now": see the field's docs.
             last_active_ms: None,
             process: Some(facts),
@@ -348,6 +353,7 @@ mod tests {
             model: None,
             git_branch: None,
             outstanding_tool: None,
+            turn: None,
             last_active_ms: active_ms,
         }
     }

@@ -1,5 +1,4 @@
-import type { AgentActivity } from '@gritty/protocol';
-import { agentStatus } from './agent-status';
+import { type AgentStatusSubject, agentStatus } from './agent-status';
 
 /**
  * The status of one session: a word, and a shape that means the same thing.
@@ -11,10 +10,11 @@ import { agentStatus } from './agent-status';
  * difference between them.
  *
  * Shared by the rail and the island's reduced row, so the two surfaces cannot
- * end up calling the same activity by two different names.
+ * end up calling the same activity by two different names. It takes the source
+ * too, because the same `WAITING` is Done or Alive depending on what saw it.
  */
-export function AgentStatusBadge({ activity }: { activity: AgentActivity }) {
-  const status = agentStatus(activity);
+export function AgentStatusBadge({ session }: { session: AgentStatusSubject }) {
+  const status = agentStatus(session);
   return (
     <span className={`agent-status agent-status--${status.tone}`} title={status.hint}>
       <span className="agent-status__mark" aria-hidden="true" />

@@ -74,7 +74,7 @@ export function AgentTimelinePanel({
       <div className="agent-console__timeline-head">
         <span className="agent-console__timeline-title">{title ?? 'Selected session'}</span>
         <span className="agent-console__spacer" />
-        <AgentStatusBadge activity={session.activity} />
+        <AgentStatusBadge session={session} />
       </div>
 
       {files.length > 0 && (

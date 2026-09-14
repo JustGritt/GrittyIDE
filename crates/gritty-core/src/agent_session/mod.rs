@@ -50,7 +50,7 @@ use gritty_agents::integration::{self, HookTarget, IntegrationError};
 use gritty_workspace::WorkspacePath;
 
 use gritty_agents::{
-    CommandRunner, DiscoveredSession, Discovery, ScanOptions, SystemCommandRunner,
+    CommandRunner, DiscoveredSession, Discovery, ScanOptions, SystemCommandRunner, TurnState,
 };
 use tokio::runtime::Handle;
 use tokio::task::JoinHandle;
@@ -1288,7 +1288,7 @@ impl AgentSessionManager {
             needs_you: u32::try_from(
                 sessions
                     .iter()
-                    .filter(|session| session.activity.needs_you())
+                    .filter(|session| session.needs_you())
                     .count(),
             )
             .unwrap_or(u32::MAX),
@@ -1614,13 +1614,15 @@ fn detail_for<'a>(hook: &HookState, found: &'a DiscoveredSession) -> Option<&'a 
 /// Order matters, and every step of it is a claim about which evidence beats
 /// which:
 ///
-/// | Value | Evidence |
-/// |---|---|
-/// | `ENDED` | no live process, or the process table was unreadable |
-/// | `IDLE` | live process, transcript quiet past the idle threshold |
-/// | `BLOCKED` | live process, hook phase `BLOCKED`, not stale |
-/// | `WORKING` | live process, a `tool_use` with no matching `tool_result` |
-/// | `WAITING` | live process, nothing outstanding |
+/// | Value | Evidence | Source |
+/// |---|---|---|
+/// | `ENDED` | no live process, or the process table was unreadable | `PROCESS` |
+/// | `IDLE` | live process, transcript quiet past the idle threshold | `TRANSCRIPT` |
+/// | `BLOCKED` | live process, hook phase `BLOCKED`, not stale, no newer transcript end | `HOOK` |
+/// | `WORKING` | live process, a `tool_use` with no matching `tool_result` | `TRANSCRIPT` |
+/// | `WORKING` | live process, the newest turn evidence says in progress | whichever said it |
+/// | `WAITING` | live process, the newest turn evidence says ended | whichever said it |
+/// | `WAITING` | live process, no turn evidence at all | `PROCESS` |
 ///
 /// A stale transcript outranks an outstanding tool call: a call with no result
 /// for ten minutes is a session someone walked away from, not one that is
@@ -1633,6 +1635,13 @@ fn detail_for<'a>(hook: &HookState, found: &'a DiscoveredSession) -> Option<&'a 
 /// from. A hook phase older than the idle threshold is discarded outright, so a
 /// state file can never hold a row at `BLOCKED` forever — not even one whose
 /// transcript is still moving.
+///
+/// **Nothing outstanding is not the turn ending** (AGENT-TURN-END). The model
+/// thinking or writing leaves nothing in the transcript until it finishes a
+/// block, so between a tool result and the reply — or a prompt and the first
+/// tool — the only honest verdicts come from evidence about the *turn*: see
+/// [`newest_turn`]. Without any, the session is alive and nothing more, which
+/// `WAITING` from `PROCESS` says and [`AgentSession::needs_you`] does not count.
 ///
 /// `process_evidence` being `false` means the process table was unreadable, so
 /// *everything* would otherwise read as `ENDED`. It still does — there is no
@@ -1656,16 +1665,81 @@ fn activity_of(
             return (AgentActivity::Idle, AgentActivitySource::Transcript);
         }
     }
+    let hook = hook.filter(|hook| !hook.is_stale(now_ms, idle_after));
     if let Some(hook) = hook
         && hook.phase == HookPhase::Blocked
-        && !hook.is_stale(now_ms, idle_after)
+        && !found.turn.is_some_and(|turn| {
+            // Esc at a permission prompt writes the interrupt to the transcript
+            // and fires no hook at all (measured on Claude Code 2.1.270), so
+            // the state file would otherwise say BLOCKED until it went stale.
+            // A turn that ended after the prompt appeared cannot still be
+            // stopped at it. Only an *end* may do this: whatever the transcript
+            // writes while the prompt stands must not clear it.
+            turn.state == TurnState::Ended && turn.at_ms > hook.since_ms
+        })
     {
         return (AgentActivity::Blocked, AgentActivitySource::Hook);
     }
     if found.outstanding_tool.is_some() {
         return (AgentActivity::Working, AgentActivitySource::Transcript);
     }
-    (AgentActivity::Waiting, AgentActivitySource::Process)
+    match newest_turn(found, hook, now_ms, idle_after) {
+        Some((TurnState::InProgress, source)) => (AgentActivity::Working, source),
+        Some((TurnState::Ended, source)) => (AgentActivity::Waiting, source),
+        None => (AgentActivity::Waiting, AgentActivitySource::Process),
+    }
+}
+
+/// The newest evidence about the agent's turn, and which source it came from.
+///
+/// The hook and the transcript describe the same turn — `UserPromptSubmit`
+/// lands tens of milliseconds after the prompt record, `Stop` in the same
+/// millisecond as `turn_duration` — so they normally agree, and when they do
+/// not, the later report is the one that knows more. That is what keeps a hook
+/// `ACTIVE` from outliving an interrupt: Esc during generation fires no `Stop`,
+/// and the transcript's interrupt line, written after it, wins. A tie goes to
+/// the hook, the agent's own report of the moment.
+///
+/// `BLOCKED` and `ENDED` phases are not turn evidence here: the first is
+/// decided above, and the second is the process table's to judge (ADR-018 §7).
+/// The caller has already discarded a stale hook.
+///
+/// A transcript that says *in progress* is held to the same threshold. The
+/// file's modification time — what `IDLE` measures — keeps moving for records
+/// that are not the model's (`away_summary`, attachments), so a turn whose end
+/// was never written would otherwise read `WORKING` for as long as anything
+/// else touched the file. A claim that work is happening decays; a claim that
+/// it ended does not, because a finished turn the user has not answered is
+/// still the user's move twenty minutes later.
+fn newest_turn(
+    found: &DiscoveredSession,
+    hook: Option<&HookState>,
+    now_ms: i64,
+    idle_after: Duration,
+) -> Option<(TurnState, AgentActivitySource)> {
+    let from_hook = hook.and_then(|hook| {
+        let state = match hook.phase {
+            HookPhase::Active => TurnState::InProgress,
+            HookPhase::Settled => TurnState::Ended,
+            HookPhase::Blocked | HookPhase::Ended => return None,
+        };
+        Some((state, hook.since_ms))
+    });
+    let idle_ms = i64::try_from(idle_after.as_millis()).unwrap_or(i64::MAX);
+    let from_transcript = found
+        .turn
+        .filter(|turn| {
+            turn.state == TurnState::Ended || now_ms.saturating_sub(turn.at_ms) <= idle_ms
+        })
+        .map(|turn| (turn.state, turn.at_ms));
+    match (from_hook, from_transcript) {
+        (Some((_, hook_ms)), Some((written, written_ms))) if written_ms > hook_ms => {
+            Some((written, AgentActivitySource::Transcript))
+        }
+        (Some((hooked, _)), _) => Some((hooked, AgentActivitySource::Hook)),
+        (None, Some((written, _))) => Some((written, AgentActivitySource::Transcript)),
+        (None, None) => None,
+    }
 }
 
 /// Newest first, with an unknown time sorting last rather than first: absence
@@ -1685,12 +1759,13 @@ fn by_recency(left: &AgentSession, right: &AgentSession) -> std::cmp::Ordering {
 ///
 /// `BLOCKED` sorts above `WAITING` because it is the more urgent half of "your
 /// move": a finished turn waits patiently, a permission prompt has an agent
-/// stopped behind it.
+/// stopped behind it. A `WAITING` that does not [need you](AgentSession::needs_you)
+/// — alive, with no turn evidence — sorts with the running work, not above it.
 fn rank(session: &AgentSession) -> (bool, u8) {
     let activity = match session.activity {
         AgentActivity::Blocked => 0,
-        AgentActivity::Waiting => 1,
-        AgentActivity::Working => 2,
+        AgentActivity::Waiting if session.needs_you() => 1,
+        AgentActivity::Working | AgentActivity::Waiting => 2,
         AgentActivity::Idle => 3,
         AgentActivity::Ended => 4,
     };

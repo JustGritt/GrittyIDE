@@ -1,4 +1,9 @@
-import type { AgentActivity, AgentActivitySource, AgentProvider } from '@gritty/protocol';
+import type {
+  AgentActivity,
+  AgentActivitySource,
+  AgentProvider,
+  AgentSession,
+} from '@gritty/protocol';
 
 /**
  * How the renderer says what an agent session is doing (T231 §8/§9).
@@ -10,7 +15,13 @@ import type { AgentActivity, AgentActivitySource, AgentProvider } from '@gritty/
  * The wire value keeps T220's names. `WAITING` means *the user's move*, which
  * the rail says as **Done**: the turn finished. Renaming it on the wire would
  * ripple through the core for a word, so the translation lives here instead.
+ *
+ * The word depends on the source as well as the activity (AGENT-TURN-END). A
+ * `WAITING` from the process table is a live process with no evidence about
+ * its turn — the model may be mid-thought — and calling that Done is the claim
+ * this ticket removed. It reads **Alive**.
  */
+export type AgentStatusSubject = Pick<AgentSession, 'activity' | 'activitySource'>;
 export interface AgentStatus {
   /** What the row says, in words, because colour alone is not a status (§10). */
   readonly label: string;
@@ -24,7 +35,14 @@ export interface AgentStatus {
   readonly hint: string;
 }
 
-export type AgentStatusTone = 'working' | 'blocked' | 'done' | 'idle' | 'ended' | 'unknown';
+export type AgentStatusTone =
+  | 'working'
+  | 'blocked'
+  | 'done'
+  | 'alive'
+  | 'idle'
+  | 'ended'
+  | 'unknown';
 
 /**
  * Total over `AgentActivity` by construction: a value added to the wire fails
@@ -34,7 +52,7 @@ const STATUSES: Record<AgentActivity, AgentStatus> = {
   WORKING: {
     label: 'Working',
     tone: 'working',
-    hint: 'A tool call is outstanding.',
+    hint: 'The agent is on its turn: running a tool, or thinking.',
   },
   /**
    * The fifth status of §8, and the one T231 wrote down before the core could
@@ -74,17 +92,40 @@ const STATUSES: Record<AgentActivity, AgentStatus> = {
  */
 const LOOKUP: Readonly<Record<string, AgentStatus | undefined>> = STATUSES;
 
-/** The status to draw for an activity. Never blank, never invented. */
-export function agentStatus(activity: AgentActivity): AgentStatus {
+/** `WAITING` with nothing but the process table behind it. */
+const ALIVE: AgentStatus = {
+  label: 'Alive',
+  tone: 'alive',
+  hint: 'The process is running; Gritty cannot see whether its turn is over.',
+};
+
+/** The status to draw for a session. Never blank, never invented. */
+export function agentStatus(session: AgentStatusSubject): AgentStatus {
+  if (session.activity === 'WAITING' && session.activitySource === 'PROCESS') return ALIVE;
   return (
-    LOOKUP[activity] ?? {
+    LOOKUP[session.activity] ?? {
       // Shown as it arrived rather than mapped onto a status that would be a
       // claim about a value this build does not understand.
-      label: activity,
+      label: session.activity,
       tone: 'unknown',
       hint: 'Reported by a newer core than this build understands.',
     }
   );
+}
+
+/**
+ * Whether the session is a reason to look: stopped at a prompt, or a turn seen
+ * to end. The core's `AgentSession::needs_you`, applied to one row — the count
+ * it publishes stays `roster.needsYou`, and this is only ever the per-row half
+ * of the same rule.
+ */
+export function sessionNeedsYou(session: AgentStatusSubject): boolean {
+  return session.activity === 'BLOCKED' || turnEnded(session);
+}
+
+/** A `WAITING` that some evidence — hook or transcript — saw the turn end. */
+export function turnEnded(session: AgentStatusSubject): boolean {
+  return session.activity === 'WAITING' && session.activitySource !== 'PROCESS';
 }
 
 /**

@@ -1,4 +1,5 @@
 import type { AgentRoster, AgentSession, EventEnvelope } from '@gritty/protocol';
+import { turnEnded } from './agent-status';
 
 /**
  * The agent roster as the renderer holds it (T220).
@@ -43,14 +44,13 @@ export function agentsReducer(state: AgentsState, action: AgentsAction): AgentsS
  *
  * The island is no longer the primary surface for agents — the rail is — so it
  * keeps a count and the row worth interrupting for. That is the first session
- * whose turn is over and whose move is yours; failing that, the first session
- * of the core's ranking, which already puts this workspace and live work at
- * the top. `null` only when the roster is empty.
+ * whose turn was seen to end and whose move is yours — not merely one alive
+ * with nothing known about its turn; failing that, the first session of the
+ * core's ranking, which already puts this workspace and live work at the top.
+ * `null` only when the roster is empty.
  */
 export function mostUrgent(roster: AgentRoster): AgentSession | null {
-  return (
-    roster.sessions.find((session) => session.activity === 'WAITING') ?? roster.sessions[0] ?? null
-  );
+  return roster.sessions.find(turnEnded) ?? roster.sessions[0] ?? null;
 }
 
 /** How many are still alive — what the collapsed pill counts. */

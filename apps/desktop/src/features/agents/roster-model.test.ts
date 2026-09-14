@@ -1,5 +1,6 @@
 import type {
   AgentActivity,
+  AgentActivitySource,
   AgentPermissionRequest,
   AgentRoster,
   AgentRun,
@@ -216,25 +217,39 @@ describe('rosterRows', () => {
       expect(rows.map((row) => row.runId ?? row.sessionId)).toEqual(['r-1', 'r-2', 's-1', 's-2']);
     });
 
-    it('promotes a waiting session above a working run', () => {
+    it('promotes a session whose turn ended above a working run', () => {
       const rows = rosterRows(
         [run({ state: 'RUNNING' })],
-        roster([session({ id: 'waiting', activity: 'WAITING' })]),
+        roster([session({ id: 'waiting', activity: 'WAITING', activitySource: 'TRANSCRIPT' })]),
         [workstream()],
       );
       expect(rows[0]?.sessionId).toBe('waiting');
     });
 
-    it.each<[AgentActivity, boolean]>([
-      ['BLOCKED', true],
-      ['WAITING', true],
-      ['WORKING', false],
-      ['IDLE', false],
-      ['ENDED', false],
-    ])('treats a %s session as needing you: %s', (activity, expected) => {
+    it('does not promote a session only known to be alive', () => {
+      // AGENT-TURN-END: WAITING from the process table may be a model
+      // mid-thought, so it is not ahead of a run that is actually working.
+      const rows = rosterRows(
+        [run({ state: 'RUNNING' })],
+        roster([session({ id: 'alive', activity: 'WAITING', activitySource: 'PROCESS' })]),
+        [workstream()],
+      );
+      expect(rows.map((row) => row.runId ?? row.sessionId)).toEqual(['run-aaaaaaa-1', 'alive']);
+      expect(rows[1]?.status).toMatchObject({ label: 'Alive' });
+    });
+
+    it.each<[AgentActivity, AgentActivitySource, boolean]>([
+      ['BLOCKED', 'HOOK', true],
+      ['WAITING', 'TRANSCRIPT', true],
+      ['WAITING', 'HOOK', true],
+      ['WAITING', 'PROCESS', false],
+      ['WORKING', 'HOOK', false],
+      ['IDLE', 'TRANSCRIPT', false],
+      ['ENDED', 'PROCESS', false],
+    ])('treats a %s session from %s as needing you: %s', (activity, activitySource, expected) => {
       // The core's own definition of the count it publishes, applied to one
       // session rather than restated as a second policy.
-      const rows = rosterRows([], roster([session({ activity })]), []);
+      const rows = rosterRows([], roster([session({ activity, activitySource })]), []);
       expect(rows[0]?.needsYou).toBe(expected);
     });
   });

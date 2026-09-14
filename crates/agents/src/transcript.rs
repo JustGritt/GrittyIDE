@@ -9,7 +9,12 @@
 //!   which is the closest thing to "the task" that exists;
 //! - `{"type":"last-prompt","lastPrompt":…}` — the standing user request;
 //! - assistant `tool_use` blocks, closed by the matching user `tool_result`,
-//!   which is what "a tool call is in flight" means.
+//!   which is what "a tool call is in flight" means;
+//! - `system` records with subtype `turn_duration` or `stop_hook_summary`, and
+//!   the `[Request interrupted by user…]` line, which are what "the turn is
+//!   over" means (AGENT-TURN-END). A block is written only once it has finished
+//!   streaming, so a model that is thinking or writing leaves *nothing* in the
+//!   file — "nothing outstanding" is not the same claim as "the turn ended".
 //!
 //! **Only the tail of each file is read.** The reference implementation this
 //! was modelled on streams whole transcripts and carries a comment about
@@ -19,10 +24,13 @@
 //! a long session, which `ai-title` covers better anyway.
 //!
 //! Last-active time comes from the file's modification time rather than the
-//! records' ISO timestamps: it answers the same question, cannot disagree with
-//! the filesystem ordering the scan already relies on, and needs no date
-//! parser. Everything read here is untrusted (rule 13) — bounded, normalized to
-//! plain text, never interpreted, never logged.
+//! records' ISO timestamps: it answers the same question and cannot disagree
+//! with the filesystem ordering the scan already relies on. A turn mark is the
+//! exception, and carries its record's own timestamp, because the core weighs
+//! it against the agent hook's report of the same turn and only the time the
+//! record describes can be compared with that. Everything read here is
+//! untrusted (rule 13) — bounded, normalized to plain text, never interpreted,
+//! never logged.
 
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
@@ -63,6 +71,33 @@ pub struct ToolCall {
     pub detail: Option<String>,
 }
 
+/// Where the agent's turn stood at the newest record that says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnState {
+    /// A prompt was sent, a tool returned, or the model wrote something, and
+    /// nothing has ended the turn since: the agent is still on it.
+    InProgress,
+    /// The turn finished, failed, or was interrupted. The user's move.
+    Ended,
+}
+
+/// The newest turn-boundary record in the tail, and when it was written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TurnMark {
+    pub state: TurnState,
+    /// The record's own timestamp, in milliseconds since the epoch.
+    pub at_ms: i64,
+}
+
+/// The line Claude Code writes when the user interrupts a turn, with or
+/// without a tool in flight ("… for tool use").
+///
+/// An end marker in its own right, not a variant of one: in the 30-day corpus
+/// AGENT-TURN-END measured, six of nine interrupted turns wrote no
+/// `turn_duration`, and a probe on 2.1.270 showed Esc during generation fires
+/// no `Stop` hook either. This line is the only evidence those turns ended.
+const INTERRUPT_PREFIX: &str = "[Request interrupted by user";
+
 /// One session, as its transcript describes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TranscriptEvidence {
@@ -78,6 +113,10 @@ pub struct TranscriptEvidence {
     pub git_branch: Option<String>,
     /// The most recent `tool_use` with no matching `tool_result`.
     pub outstanding_tool: Option<ToolCall>,
+    /// Whether the turn was running or over at the newest boundary record.
+    /// `None` when the tail holds no boundary at all, which says nothing either
+    /// way.
+    pub turn: Option<TurnMark>,
     pub last_active_ms: i64,
 }
 
@@ -228,6 +267,7 @@ fn parse_transcript(path: &Path, tail_bytes: u64, modified_ms: i64) -> Option<Tr
         model: fold.model,
         git_branch: fold.git_branch,
         outstanding_tool: fold.pending_tools.pop().map(|(_, call)| call),
+        turn: fold.turn,
         last_active_ms: modified_ms,
     })
 }
@@ -288,6 +328,10 @@ struct Fold {
     git_branch: Option<String>,
     /// Insertion-ordered so the newest outstanding call is the last entry.
     pending_tools: Vec<(String, ToolCall)>,
+    /// Latched in file order, not by timestamp: a tool result, the interrupt
+    /// and `turn_duration` routinely share one millisecond, and the order they
+    /// were appended in is the order they happened.
+    turn: Option<TurnMark>,
 }
 
 impl Fold {
@@ -314,18 +358,45 @@ impl Fold {
             _ => {}
         }
 
-        let Some(message) = record.get("message").and_then(Value::as_object) else {
+        if let Some(message) = record.get("message").and_then(Value::as_object) {
+            match message.get("role").and_then(Value::as_str) {
+                Some("assistant") => self.absorb_assistant(message),
+                // A meta user record is Gritty-invisible plumbing the agent
+                // injects into its own context, not something the user typed.
+                Some("user") if record.get("isMeta") != Some(&Value::Bool(true)) => {
+                    self.absorb_user(message);
+                }
+                _ => {}
+            }
+        }
+
+        // After the message, so a record carrying both a tool result and the
+        // interrupt ends the turn rather than leaving the result's call to be
+        // re-opened by nothing.
+        self.absorb_turn(record);
+    }
+
+    fn absorb_turn(&mut self, record: &serde_json::Map<String, Value>) {
+        let Some(state) = turn_boundary(record) else {
             return;
         };
-        match message.get("role").and_then(Value::as_str) {
-            Some("assistant") => self.absorb_assistant(message),
-            // A meta user record is Gritty-invisible plumbing the agent injects
-            // into its own context, not something the user typed.
-            Some("user") if record.get("isMeta") != Some(&Value::Bool(true)) => {
-                self.absorb_user(message);
-            }
-            _ => {}
+        // A boundary with no time cannot be weighed against the hook's report
+        // of the same turn, and an invented time would win or lose that
+        // comparison arbitrarily. Every record Claude Code writes carries one.
+        let Some(at_ms) = record
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .and_then(parse_timestamp_ms)
+        else {
+            return;
+        };
+        if state == TurnState::Ended {
+            // A finished turn has no tool in flight. An interrupted call can
+            // leave a `tool_use` whose result is never written, and without
+            // this it would read as outstanding until the idle threshold.
+            self.pending_tools.clear();
         }
+        self.turn = Some(TurnMark { state, at_ms });
     }
 
     fn absorb_assistant(&mut self, message: &serde_json::Map<String, Value>) {
@@ -395,6 +466,82 @@ impl Fold {
                 _ => {}
             }
         }
+    }
+}
+
+/// Whether a record starts, continues or ends the agent's turn — or is not a
+/// turn boundary at all.
+///
+/// Deliberately conservative about what *starts* one. Calling a record a
+/// boundary when it is not costs a row that reads Working for the length of
+/// the idle threshold; missing a real start costs only the gap until the
+/// model's first record, which marks the turn by itself.
+///
+/// Subagent (`isSidechain`) and meta records are the agent's plumbing, not the
+/// turn the user is waiting on, and are never boundaries.
+fn turn_boundary(record: &serde_json::Map<String, Value>) -> Option<TurnState> {
+    if record.get("isSidechain") == Some(&Value::Bool(true))
+        || record.get("isMeta") == Some(&Value::Bool(true))
+    {
+        return None;
+    }
+    if record.get("type").and_then(Value::as_str) == Some("system") {
+        return matches!(
+            record.get("subtype").and_then(Value::as_str),
+            Some("turn_duration" | "stop_hook_summary")
+        )
+        .then_some(TurnState::Ended);
+    }
+    let message = record.get("message").and_then(Value::as_object)?;
+    match message.get("role").and_then(Value::as_str)? {
+        "assistant" => Some(TurnState::InProgress),
+        "user" => user_turn_boundary(message.get("content")?),
+        _ => None,
+    }
+}
+
+/// A user record's boundary: a tool result continues the turn, a prompt starts
+/// one, the interrupt line ends it. When one record carries several, the end
+/// wins.
+fn user_turn_boundary(content: &Value) -> Option<TurnState> {
+    if let Some(text) = content.as_str() {
+        return prompt_boundary(text);
+    }
+    let mut found = None;
+    for block in content.as_array()?.iter().filter_map(Value::as_object) {
+        let state = match block.get("type").and_then(Value::as_str) {
+            Some("tool_result") => Some(TurnState::InProgress),
+            Some("text") => block
+                .get("text")
+                .and_then(Value::as_str)
+                .and_then(prompt_boundary),
+            _ => None,
+        };
+        if found != Some(TurnState::Ended) && state.is_some() {
+            found = state;
+        }
+    }
+    found
+}
+
+/// What a line of user text says about the turn.
+///
+/// Text the CLI writes on the user's behalf is tagged (`<command-name>`,
+/// `<local-command-stdout>`, `<bash-input>`, …) and, measured over 30 days of
+/// real transcripts, almost never starts a turn — a `/model` or a `!ls` is the
+/// user talking to the CLI. The one tagged record that does is
+/// `<task-notification>` (119 of 121 were answered), a background task
+/// reporting back to the agent.
+fn prompt_boundary(text: &str) -> Option<TurnState> {
+    let text = text.trim_start();
+    if text.starts_with(INTERRUPT_PREFIX) {
+        Some(TurnState::Ended)
+    } else if text.starts_with("<task-notification>") {
+        Some(TurnState::InProgress)
+    } else if text.is_empty() || text.starts_with('<') {
+        None
+    } else {
+        Some(TurnState::InProgress)
     }
 }
 
@@ -1529,6 +1676,248 @@ mod tests {
             "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"<command-name>/clear</command-name>\"}}\n",
         );
         assert!(read.entries.is_empty());
+    }
+
+    // ------------------------------------------------------------ turn marks
+
+    fn at(second: u32) -> String {
+        format!("2026-09-14T08:50:{second:02}.000Z")
+    }
+
+    fn at_ms(second: u32) -> i64 {
+        parse_timestamp_ms(&at(second)).expect("a valid timestamp")
+    }
+
+    /// One record, carrying the session fields every real record repeats.
+    fn record(second: u32, mut fields: Value) -> String {
+        let object = fields.as_object_mut().expect("an object");
+        object.insert("timestamp".to_owned(), Value::String(at(second)));
+        object.insert("cwd".to_owned(), Value::String("/Users/a/p".to_owned()));
+        object.insert("sessionId".to_owned(), Value::String(SESSION.to_owned()));
+        fields.to_string()
+    }
+
+    fn prompt(second: u32, text: &str) -> String {
+        record(
+            second,
+            serde_json::json!({"type": "user", "message": {"role": "user", "content": text}}),
+        )
+    }
+
+    fn user_blocks(second: u32, blocks: Value) -> String {
+        record(
+            second,
+            serde_json::json!({"type": "user", "message": {"role": "user", "content": blocks}}),
+        )
+    }
+
+    fn assistant(second: u32, blocks: Value) -> String {
+        record(
+            second,
+            serde_json::json!({"type": "assistant", "message": {"role": "assistant", "content": blocks}}),
+        )
+    }
+
+    fn system(second: u32, subtype: &str) -> String {
+        record(
+            second,
+            serde_json::json!({"type": "system", "subtype": subtype}),
+        )
+    }
+
+    fn turn_of(lines: &[String]) -> (Option<TurnMark>, Option<ToolCall>) {
+        let found = parse(&lines.join("\n")).expect("evidence");
+        (found.turn, found.outstanding_tool)
+    }
+
+    fn mark(state: TurnState, second: u32) -> Option<TurnMark> {
+        Some(TurnMark {
+            state,
+            at_ms: at_ms(second),
+        })
+    }
+
+    #[test]
+    fn a_prompt_starts_a_turn_and_the_model_writing_keeps_it_going() {
+        let (turn, _) = turn_of(&[prompt(1, "rename the terminal")]);
+        assert_eq!(turn, mark(TurnState::InProgress, 1));
+
+        let (turn, _) = turn_of(&[
+            prompt(1, "rename the terminal"),
+            assistant(
+                4,
+                serde_json::json!([{"type": "thinking", "thinking": "hm"}]),
+            ),
+        ]);
+        assert_eq!(turn, mark(TurnState::InProgress, 4));
+    }
+
+    #[test]
+    fn the_silence_after_a_tool_result_is_still_the_turn() {
+        // The case AGENT-TURN-END was opened for: a result came back, the model
+        // is thinking about it, and nothing is outstanding.
+        let (turn, tool) = turn_of(&[
+            prompt(1, "icons for the explorer"),
+            assistant(
+                2,
+                serde_json::json!([{"type": "tool_use", "id": "toolu_1", "name": "Write", "input": {"file_path": "a.ts"}}]),
+            ),
+            user_blocks(
+                3,
+                serde_json::json!([{"type": "tool_result", "tool_use_id": "toolu_1", "content": "ok"}]),
+            ),
+        ]);
+        assert_eq!(tool, None, "nothing outstanding");
+        assert_eq!(turn, mark(TurnState::InProgress, 3), "and still the turn");
+    }
+
+    #[test]
+    fn turn_duration_and_stop_hook_summary_each_end_the_turn() {
+        for subtype in ["turn_duration", "stop_hook_summary"] {
+            let (turn, _) = turn_of(&[
+                prompt(1, "ship it"),
+                assistant(5, serde_json::json!([{"type": "text", "text": "Shipped."}])),
+                system(6, subtype),
+            ]);
+            assert_eq!(turn, mark(TurnState::Ended, 6), "{subtype}");
+        }
+    }
+
+    #[test]
+    fn an_interrupt_ends_the_turn_and_closes_the_call_it_cut_off() {
+        // Shaped like the probe's Esc at a permission prompt, minus the error
+        // result: a call left with no result must not stay outstanding.
+        let opened = [
+            prompt(1, "touch a file"),
+            assistant(
+                2,
+                serde_json::json!([{"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "touch x"}}]),
+            ),
+        ];
+        for interrupt in [
+            user_blocks(
+                3,
+                serde_json::json!([{"type": "text", "text": "[Request interrupted by user for tool use]"}]),
+            ),
+            prompt(3, "[Request interrupted by user]"),
+        ] {
+            let mut lines = opened.to_vec();
+            lines.push(interrupt);
+            let (turn, tool) = turn_of(&lines);
+            assert_eq!(turn, mark(TurnState::Ended, 3));
+            assert_eq!(tool, None);
+        }
+    }
+
+    #[test]
+    fn a_record_carrying_a_result_and_the_interrupt_ends_the_turn() {
+        let (turn, _) = turn_of(&[
+            prompt(1, "touch a file"),
+            user_blocks(
+                2,
+                serde_json::json!([
+                    {"type": "tool_result", "tool_use_id": "toolu_1", "is_error": true, "content": "declined"},
+                    {"type": "text", "text": "[Request interrupted by user for tool use]"}
+                ]),
+            ),
+        ]);
+        assert_eq!(turn, mark(TurnState::Ended, 2));
+    }
+
+    #[test]
+    fn the_cli_talking_to_the_user_is_not_a_turn() {
+        let ended = [prompt(1, "ship it"), system(2, "turn_duration")];
+        let not_boundaries = [
+            prompt(3, "<command-name>/model</command-name>"),
+            prompt(
+                4,
+                "<local-command-stdout>Set model to opus</local-command-stdout>",
+            ),
+            prompt(5, "<bash-input>ls</bash-input>"),
+            prompt(6, "<bash-stdout>README.md</bash-stdout>"),
+            record(
+                7,
+                serde_json::json!({"type": "user", "isMeta": true, "message": {"role": "user", "content": "caveat"}}),
+            ),
+            record(
+                8,
+                serde_json::json!({"type": "assistant", "isSidechain": true, "message": {"role": "assistant", "content": [{"type": "text", "text": "subagent"}]}}),
+            ),
+            system(9, "away_summary"),
+            system(10, "local_command"),
+            record(11, serde_json::json!({"type": "attachment"})),
+            record(
+                12,
+                serde_json::json!({"type": "last-prompt", "lastPrompt": "ship it"}),
+            ),
+        ];
+        for line in not_boundaries {
+            let mut lines = ended.to_vec();
+            lines.push(line.clone());
+            let (turn, _) = turn_of(&lines);
+            assert_eq!(turn, mark(TurnState::Ended, 2), "{line}");
+        }
+    }
+
+    #[test]
+    fn a_task_notification_starts_a_turn() {
+        let (turn, _) = turn_of(&[
+            system(1, "turn_duration"),
+            prompt(
+                2,
+                "<task-notification><task-id>b1</task-id></task-notification>",
+            ),
+        ]);
+        assert_eq!(turn, mark(TurnState::InProgress, 2));
+    }
+
+    #[test]
+    fn records_in_one_millisecond_count_in_the_order_they_were_written() {
+        let (turn, _) = turn_of(&[
+            assistant(5, serde_json::json!([{"type": "text", "text": "Done."}])),
+            system(5, "turn_duration"),
+        ]);
+        assert_eq!(turn, mark(TurnState::Ended, 5));
+
+        let (turn, _) = turn_of(&[system(5, "turn_duration"), prompt(5, "again")]);
+        assert_eq!(turn, mark(TurnState::InProgress, 5));
+    }
+
+    #[test]
+    fn a_boundary_without_a_timestamp_is_not_one() {
+        // `transcript_lines` is a prompt and a tool call, none of them timed.
+        let (turn, _) = turn_of(&[transcript_lines()]);
+        assert_eq!(turn, None);
+
+        let (turn, _) = turn_of(&[
+            prompt(1, "ship it"),
+            format!(
+                r#"{{"type":"system","subtype":"turn_duration","cwd":"/Users/a/p","sessionId":"{SESSION}"}}"#
+            ),
+        ]);
+        assert_eq!(
+            turn,
+            mark(TurnState::InProgress, 1),
+            "the untimed end is skipped"
+        );
+    }
+
+    #[test]
+    fn a_tail_that_starts_mid_turn_reads_the_turn_it_can_see() {
+        let root = TempRoot::new("turn-tail");
+        let early_end = system(1, "turn_duration");
+        let padding = prompt(2, &"x".repeat(8 * 1024));
+        let late = assistant(
+            3,
+            serde_json::json!([{"type": "text", "text": "still going"}]),
+        );
+        let path = root.write(
+            &format!("-Users-a-p/{SESSION}.jsonl"),
+            &[early_end, padding, late.clone()].join("\n"),
+        );
+        let tail = u64::try_from(late.len() + 64).expect("small");
+        let found = parse_transcript(&path, tail, 1_700_000_000_000).expect("evidence");
+        assert_eq!(found.turn, mark(TurnState::InProgress, 3));
     }
 
     #[test]

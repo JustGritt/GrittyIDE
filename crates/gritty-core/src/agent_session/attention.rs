@@ -5,9 +5,11 @@
 //! a rule about *not* notifying and those are the ones worth testing:
 //!
 //! - **Edge-triggered.** A notification fires when a session moves *into*
-//!   [`AgentActivity::Blocked`] or [`AgentActivity::Waiting`] from something
-//!   else. The roster is polled, so a level-triggered notification would fire
-//!   every interval for a session that is simply still waiting (rule 8).
+//!   [needing the user](AgentSession::needs_you) — a permission prompt, or a
+//!   turn seen to end — from something else. The roster is polled, so a
+//!   level-triggered notification would fire every interval for a session
+//!   that is simply still waiting (rule 8). A session alive with no turn
+//!   evidence does not need the user, so it never raises one (AGENT-TURN-END).
 //! - **Silent while the window is focused.** If the user is looking at Gritty,
 //!   the island *is* the notification. Focus that is unknown counts as focused:
 //!   a missed notification is better than one over the user's face.
@@ -112,8 +114,11 @@ pub trait AttentionNotifier: Send + Sync + 'static {
 /// its own so every rule in it is a test rather than a claim.
 #[derive(Debug, Default)]
 pub struct AttentionTracker {
-    /// What each session was doing at the previous roster.
-    previous: HashMap<String, AgentActivity>,
+    /// What each session was doing at the previous roster, and whether that
+    /// needed the user. The flag is kept because the activity alone no longer
+    /// decides it: `WAITING` from the process table does not, and turning into
+    /// a `WAITING` that does is an arrival.
+    previous: HashMap<String, (AgentActivity, bool)>,
     /// When each session was last notified about.
     notified_at: HashMap<String, i64>,
     /// When the recent notifications were raised, for the global cap.
@@ -152,7 +157,8 @@ impl AttentionTracker {
         let mut candidates: Vec<&AgentSession> = Vec::new();
         for session in &roster.sessions {
             let before = self.previous.get(&session.id).copied();
-            let entered = before != Some(session.activity) && session.activity.needs_you();
+            let entered =
+                session.needs_you() && before != Some((session.activity, session.needs_you()));
             // A first sighting has no "something else" to have come from; on
             // any roster after the first, arriving already needing you is one.
             if entered && !(first && before.is_none()) {
@@ -164,7 +170,7 @@ impl AttentionTracker {
         self.previous = roster
             .sessions
             .iter()
-            .map(|session| (session.id.clone(), session.activity))
+            .map(|session| (session.id.clone(), (session.activity, session.needs_you())))
             .collect();
         self.prune(roster, now_ms);
 
@@ -283,12 +289,20 @@ mod tests {
     use super::*;
     use crate::agent_session::wire::{AgentActivitySource, AgentEvidence};
 
+    /// A session, with the source the derivation would give that activity when
+    /// the evidence for it exists: `WAITING` here is a turn seen to end.
     fn session(id: &str, activity: AgentActivity) -> AgentSession {
         AgentSession {
             id: id.to_owned(),
             provider: AgentProvider::ClaudeCode,
             activity,
-            activity_source: AgentActivitySource::Process,
+            activity_source: match activity {
+                AgentActivity::Blocked => AgentActivitySource::Hook,
+                AgentActivity::Ended => AgentActivitySource::Process,
+                AgentActivity::Working | AgentActivity::Waiting | AgentActivity::Idle => {
+                    AgentActivitySource::Transcript
+                }
+            },
             evidence: AgentEvidence::Both,
             title: Some("Wire the attention queue".to_owned()),
             last_prompt: None,
@@ -306,10 +320,17 @@ mod tests {
         }
     }
 
+    /// Alive, and nothing known about its turn.
+    fn alive(id: &str) -> AgentSession {
+        AgentSession {
+            activity_source: AgentActivitySource::Process,
+            ..session(id, AgentActivity::Waiting)
+        }
+    }
+
     fn roster(sessions: Vec<AgentSession>) -> AgentRoster {
         AgentRoster {
-            needs_you: u32::try_from(sessions.iter().filter(|s| s.activity.needs_you()).count())
-                .unwrap(),
+            needs_you: u32::try_from(sessions.iter().filter(|s| s.needs_you()).count()).unwrap(),
             sessions,
             process_evidence: true,
             recent_answers: Vec::new(),
@@ -482,6 +503,44 @@ mod tests {
         nowhere.root = None;
         let alerts = tracker.advance(&roster(vec![nowhere]), 2_000, true, false);
         assert_eq!(alerts[0].body, "No transcript yet");
+    }
+
+    #[test]
+    fn a_session_only_known_to_be_alive_never_notifies() {
+        // What the roster used to call "waiting" while the model was thinking
+        // between two tools (AGENT-TURN-END): no evidence the turn ended, so no
+        // reason to interrupt — however often it comes and goes.
+        let mut tracker = warmed();
+        tracker.advance(
+            &roster(vec![session("s-1", AgentActivity::Working)]),
+            1_000,
+            true,
+            false,
+        );
+        for (at, row) in [
+            (2_000, alive("s-1")),
+            (3_000, session("s-1", AgentActivity::Working)),
+            (4_000, alive("s-1")),
+        ] {
+            assert!(
+                tracker
+                    .advance(&roster(vec![row]), at, true, false)
+                    .is_empty(),
+                "at {at}"
+            );
+        }
+        assert_eq!(tracker.notified_at("s-1"), None);
+    }
+
+    #[test]
+    fn a_turn_seen_to_end_after_being_only_alive_is_an_arrival() {
+        // Same activity on the wire, a different claim: the second roster is
+        // the first evidence that it is the user's move.
+        let mut tracker = warmed();
+        tracker.advance(&roster(vec![alive("s-1")]), 1_000, true, false);
+        let done = roster(vec![session("s-1", AgentActivity::Waiting)]);
+        assert_eq!(tracker.advance(&done, 2_000, true, false).len(), 1);
+        assert!(tracker.advance(&done, 3_000, true, false).is_empty());
     }
 
     #[test]

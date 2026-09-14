@@ -70,7 +70,7 @@ export function AgentsSection({ controller }: { controller: AgentsController }) 
                   </span>
                 </div>
                 <div className="agents__meta">
-                  <AgentStatusBadge activity={urgent.activity} />
+                  <AgentStatusBadge session={urgent} />
                   {urgent.root && <span>{urgent.root}</span>}
                 </div>
               </div>

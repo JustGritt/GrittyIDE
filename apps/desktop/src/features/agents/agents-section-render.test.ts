@@ -155,6 +155,14 @@ describe('the section draws both kinds of agent', () => {
     expect(markup).toContain('agent-status--done');
   });
 
+  it('draws a session only known to be alive as Alive, not Done', () => {
+    // AGENT-TURN-END: no transcript and no hook, so nothing saw its turn end.
+    const markup = render([], [session({ activity: 'WAITING', activitySource: 'PROCESS' })]);
+    expect(markup).toContain('Alive');
+    expect(markup).toContain('agent-status--alive');
+    expect(markup).not.toContain('Done');
+  });
+
   it('draws a failed run in its own tone rather than the grey of an ended one', () => {
     expect(render([run({ state: 'FAILED' })], [])).toContain('agent-status--failed');
   });

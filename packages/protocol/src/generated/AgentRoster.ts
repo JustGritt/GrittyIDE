@@ -12,7 +12,8 @@ import type { AgentSession } from "./AgentSession";
  */
 export type AgentRoster = { sessions: Array<AgentSession>, 
 /**
- * How many are `BLOCKED` or `WAITING` — the island's "needs you" count.
+ * How many need the user — stopped at a prompt, or a turn seen to end
+ * (`AgentSession::needs_you`). The island's "needs you" count.
  */
 needsYou: number, 
 /**

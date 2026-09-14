@@ -219,3 +219,63 @@ unnecessary — at which point this becomes one adapter among several rather tha
 the only route. Or when Gritty owns the agent's terminal (T300/T310) and can
 read the state from a process it started, which makes the integration redundant
 for those sessions and leaves it covering only the external ones.
+
+## Amendment (AGENT-TURN-END, 2026-09-14): the turn, not only the prompt
+
+- **Status:** Accepted
+- **Date:** 2026-09-14
+
+This ADR's Consequences said `BLOCKED` was the one value the derivation could
+not reach without the hook, and T221 ignored the hook's other phases on that
+basis. That was wrong. Claude Code writes a transcript block only once it has
+finished streaming, so a model **thinking or writing** leaves the transcript
+showing nothing outstanding — the same evidence as a finished turn. The roster
+called that `WAITING`, the rail said Done, and T223 notified on it. A
+hook-driven monitor watching the same session said *in progress*, correctly.
+
+**What changes.**
+
+- `WORKING` means *the agent's turn is in progress*: a tool in flight, or the
+  newest turn evidence says the turn started or continued. `WAITING` from
+  `HOOK` or `TRANSCRIPT` means a turn was seen to end.
+- The hook's `ACTIVE` phase is evidence of a turn in progress, and `SETTLED`
+  of one ended, each at its `since_ms`. The transcript contributes the same two
+  facts: a prompt, a tool result or any model record is in progress; a
+  `system/turn_duration`, a `system/stop_hook_summary` or the
+  `[Request interrupted by user…]` line is an end.
+- **Newest evidence wins**, a tie goes to the hook. The two describe one turn
+  and normally agree; when they do not, the later report knows more.
+- **A newer transcript end discards `BLOCKED`.** Only an end, and only a newer
+  one: nothing written while a prompt stands may clear it.
+- With **no turn evidence** a live session stays `WAITING` from `PROCESS`, which
+  the UI calls **Alive**, and which is not counted as needing the user and does
+  not notify.
+- An in-progress transcript mark older than the idle threshold is no evidence,
+  like a stale hook phase. An end does not decay.
+
+**What does not change.** `BLOCKED` is still set only from hook evidence (the
+new rules can only *discard* it). Process absence still outranks everything
+(§7). The integration stays optional: without it the transcript carries the
+turn on its own. No wire shape changed, so there is no version bump.
+
+**Measured, not assumed** (Claude Code 2.1.270, a pty-driven session with
+logging hooks):
+
+| Scenario | Hook events | Transcript |
+|---|---|---|
+| Prompt, generation, answer | `UserPromptSubmit` (+40 ms after the prompt record), `Stop` | thinking at +1.9 s, text at +6.5 s, then `stop_hook_summary` and `turn_duration` in `Stop`'s millisecond |
+| Esc during generation | **none after `UserPromptSubmit`** | partial text, then `[Request interrupted by user]`; no `turn_duration` |
+| Esc at a Bash permission prompt | `PreToolUse`, `PermissionRequest`, **then none** | error `tool_result`, `[Request interrupted by user for tool use]`, `turn_duration` |
+
+The second row is why the transcript's interrupt line must be an end marker in
+its own right and why newest-wins exists: a hook-only rule would hold such a
+session at `WORKING` until the phase went stale. The third is why a newer end
+discards `BLOCKED`: before this amendment that row read Pending validation for
+up to five minutes after the user had already dismissed the prompt.
+
+Replaying 30 days of real transcripts (114 files) through the real scanner,
+cut after every record and scored against an oracle that ignores end markers
+(did the model write again before the next human input?): time spent **in
+progress but shown Done** fell from **56.4 h to 1.3 h**; ended-but-Working is
+0.2 h; Alive covers 4.7 h, mostly sessions that have not received a first
+prompt. Failed and rate-limited turns all wrote `turn_duration` (41 of 41).
