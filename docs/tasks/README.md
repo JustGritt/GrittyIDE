@@ -23,7 +23,6 @@ moves back. Never move a task file by hand.
 | [T099-S](T099-S-terminal-splits.md) | Split terminals: shells side by side in the dock | 2 | T096, T098, T046, T120-T, T120-A | todo |
 | Phase 0 tests | `docs/plans/phase-0-spike.md` sections B–D | 0 | T060, T090 | doing |
 | [T099-E](T099-E-terminal-editor-tab.md) | A terminal as an editor tab | 2 | T099-S, T120-M | todo |
-| ADR-001 | Confirm or reject Tauri | 0 | Phase 0 tests | review |
 | [T110](T110-diagnostics.md) | Diagnostics | 2 | T060, T090, T220, T325, ADR-001 | todo |
 | [T224](T224-reveal-terminal.md) | Reveal the terminal a session is running in | 3 | T220 | todo |
 | T305 | Agent capability model | 4 | T300 | unspec |
@@ -45,13 +44,13 @@ moves back. Never move a task file by hand.
 | CI-LINUX-DARK | Linux CI is dark until the minute allowance resets (1 Oct) or a spending limit is set |  | – | blocked |
 | CONFIRM-DIALOG | Extract a shared confirm dialog before a third copy is written | 2 | – | unspec |
 | [FILE-ICONS](docs/tasks/FILE-ICONS-file-type-icons.md) | File-type icons in the explorer tree and Changes list | 2 | – | review |
-| [LAST-PROMPT-SHELL](docs/tasks/LAST-PROMPT-SHELL-bang-commands.md) | A ! shell command is not a session's last prompt | maintenance | AGENT-TURN-END | doing |
+| [LAST-PROMPT-SHELL](docs/tasks/LAST-PROMPT-SHELL-bang-commands.md) | A ! shell command is not a session's last prompt | maintenance | AGENT-TURN-END | review |
 | [LEASE-NOTIFY](docs/tasks/LEASE-NOTIFY-lease-change-notices.md) | Tell a session when the lease registry changes under it | tooling | – | review |
 | MARKDOWN-BENCH | A markdown benchmark with a recorded baseline, if a perf gate is wanted | 3 | MARKDOWN-BUDGET-FLAKE | unspec |
 | MARKDOWN-BUDGET-FLAKE | render.test.ts 2000ms wall-clock budget fails under concurrent-build load | 3 | – | review |
 | MONACO-JSDOM-FLAKE | model-eol.dom.test.ts times out its 10s beforeAll under load | 3 | JSDOM-VITEST | review |
 | MONACO-PREBUNDLE | Pre-bundle monaco-editor so the 9s transform is not paid every run | 3 | MONACO-JSDOM-FLAKE | unspec |
-| [NOTIFY-SETTING-ORPHAN](docs/tasks/NOTIFY-SETTING-ORPHAN-delete.md) | Delete the notification switch nothing mounts | maintenance | T120-U, T120-M | doing |
+| [NOTIFY-SETTING-ORPHAN](docs/tasks/NOTIFY-SETTING-ORPHAN-delete.md) | Delete the notification switch nothing mounts | maintenance | T120-U, T120-M | review |
 | PROTO-W2 | Wave 2 wire, in one PR: watcher, git, terminal blocks, diagnostics, violations | 2 | ADR-001, ADR-017, ADR-023 | todo |
 | [RUNS-EVENT-FILTER](RUNS-EVENT-FILTER-subscription.md) | use-runs.ts subscribes to every event of every kind |  | – | review |
 | [SIDEBAR-ICONS](docs/tasks/SIDEBAR-ICONS-section-tab-icons.md) | Sidebar section tabs as icons, for horizontal room | 2 | – | review |
@@ -71,7 +70,7 @@ moves back. Never move a task file by hand.
 | T300-PANEL | A run belongs on its workstream's island row, not a fourth roster | 4 | T300-WIRE | unspec |
 | T400-R | Worktree create and remove | 5 | T100 | unspec |
 | [TREE-DISCLOSURE](docs/tasks/TREE-DISCLOSURE-chevron-transition.md) | Tree chevron and expand/collapse transition | 2 | FILE-ICONS | review |
-| [TURN-START-DEQUEUE](docs/tasks/TURN-START-DEQUEUE-measure.md) | Measure whether a dequeued message should start a turn | maintenance | AGENT-TURN-END | doing |
+| [TURN-START-DEQUEUE](docs/tasks/TURN-START-DEQUEUE-measure.md) | Measure whether a dequeued message should start a turn | maintenance | AGENT-TURN-END | review |
 | [WATCH-FLAKE](WATCH-FLAKE-load-sensitive.md) | Two load-sensitive tests fail in the full-workspace run, pass alone |  | – | todo |
 <!-- board:table end -->
 
