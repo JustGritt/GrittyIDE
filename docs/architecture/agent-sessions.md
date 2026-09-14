@@ -136,7 +136,11 @@ inference:
 
 - `{"type":"ai-title","aiTitle":…}` — the agent's own name for the session,
   which is the closest thing to "the task" that exists;
-- `{"type":"last-prompt","lastPrompt":…}` — the standing user request.
+- `{"type":"last-prompt","lastPrompt":…}` — the standing user request. A
+  slash command is not one, and neither is a `!` shell command: the CLI writes
+  that here with its `!` prefix and in messages as `<bash-input>`/`<bash-stdout>`,
+  and all three are skipped so the previous real prompt stands
+  (LAST-PROMPT-SHELL).
 
 So the tail contains everything needed. The cost is the *first* prompt of a long
 session, which `ai-title` covers better anyway. Last-active time comes from the

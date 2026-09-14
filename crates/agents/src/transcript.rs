@@ -351,7 +351,12 @@ impl Fold {
                 self.title = clip(record.get("aiTitle"), MAX_TITLE);
             }
             Some("last-prompt") => {
-                if let Some(prompt) = clip(record.get("lastPrompt"), MAX_PREVIEW) {
+                // The CLI records a `!` shell command here with its prefix
+                // (`! export PATH=…`), where the message records carry it as
+                // `<bash-input>`.
+                if let Some(prompt) = clip(record.get("lastPrompt"), MAX_PREVIEW)
+                    && !prompt.starts_with('!')
+                {
                     self.set_prompt(prompt);
                 }
             }
@@ -435,7 +440,7 @@ impl Fold {
     }
 
     fn set_prompt(&mut self, prompt: String) {
-        if !is_command_echo(&prompt) {
+        if !is_command_echo(&prompt) && !is_shell_echo(&prompt) {
             self.last_prompt = Some(prompt);
         }
     }
@@ -570,6 +575,16 @@ fn non_empty_str(value: Option<&Value>) -> Option<&str> {
 /// work; showing `/clear` as "the task" would be actively misleading.
 fn is_command_echo(text: &str) -> bool {
     text.starts_with("<command-name>") || text.starts_with("<local-command")
+}
+
+/// A `!` shell command and its output, as the CLI writes them. Not "the task"
+/// either, but kept out of the prompt preview only: the model reads the output
+/// and usually answers it (10 of 11 in a 30-day corpus), so the timeline keeps
+/// the command that its reply is about.
+fn is_shell_echo(text: &str) -> bool {
+    text.starts_with("<bash-input>")
+        || text.starts_with("<bash-stdout>")
+        || text.starts_with("<bash-stderr>")
 }
 
 /// Collapses whitespace and truncates to `limit` characters. Both matter: the
@@ -1183,6 +1198,38 @@ mod tests {
         );
         let found = parse(&contents).expect("evidence");
         assert_eq!(found.last_prompt.as_deref(), Some("rename the terminal"));
+    }
+
+    #[test]
+    fn a_shell_command_is_not_the_last_prompt() {
+        // Both routes a `!` command takes: the tagged message records, and the
+        // CLI's own `last-prompt` record with the `!` prefix.
+        for shell in [
+            r#"{"type":"user","message":{"role":"user","content":"<bash-input>ls</bash-input>"}}"#,
+            r#"{"type":"user","message":{"role":"user","content":"<bash-stdout>README.md</bash-stdout><bash-stderr></bash-stderr>"}}"#,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"<bash-stderr>ls: nope</bash-stderr>"}]}}"#,
+            r#"{"type":"last-prompt","lastPrompt":"! export PATH=~/.bin:$PATH"}"#,
+        ] {
+            let found = parse(&format!("{}\n{shell}", transcript_lines())).expect("evidence");
+            assert_eq!(
+                found.last_prompt.as_deref(),
+                Some("rename the terminal"),
+                "{shell}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_shell_command_stays_on_the_timeline() {
+        // The model answers a `!` command, so its reply needs the command.
+        let read = followed(
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"<bash-input>ls</bash-input>\"}}\n",
+        );
+        assert!(matches!(
+            &read.entries[..],
+            [FollowedEntry { record: FollowedRecord::UserPrompt { text }, .. }]
+                if text == "<bash-input>ls</bash-input>"
+        ));
     }
 
     #[test]
