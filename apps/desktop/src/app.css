@@ -778,10 +778,12 @@ textarea:focus-visible {
   font-size: var(--text-control);
 }
 
+/* The top gap separates the first row from the header's tab and action
+   buttons; 2px read as the rows touching the bar. */
 .tree {
   list-style: none;
   margin: 0;
-  padding: 2px var(--gap-sm) var(--gap);
+  padding: var(--gap-sm) var(--gap-sm) var(--gap);
   font-family: var(--font-mono);
   font-size: var(--text-code);
   line-height: var(--row-h);
