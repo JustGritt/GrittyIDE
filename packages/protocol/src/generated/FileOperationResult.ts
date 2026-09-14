@@ -25,7 +25,11 @@ undo?: string,
  */
 redo?: string, 
 /**
- * Entries written before a cancellation stopped the work. `None` when the
- * operation ran to completion. What it counts is on the disk and stays.
+ * Entries written before a cancellation stopped the work, for a result
+ * that is still delivered after one. None is today: a cancelled
+ * operation's result is dropped by the operation model, so a cancel is
+ * reported by `OperationCancelled` alone, and what the batch completed
+ * before it is settled (journalled, documents moved) without being counted
+ * here. Kept because removing a wire field is a breaking change.
  */
 cancelledAfter?: number, };

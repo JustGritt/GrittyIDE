@@ -222,12 +222,28 @@ pub fn rename(
         }
         Err(error) => return Err(error),
     };
-    match fs::rename(&source, &destination) {
+    rename_native(&source, &destination, from, to, &|source, destination| {
+        fs::rename(source, destination)
+    })
+}
+
+/// The syscall half of [`rename`], with the syscall passed in so the
+/// cross-device branch is testable without a second mount (FILES-PARTIAL).
+fn rename_native(
+    source: &Path,
+    destination: &Path,
+    from: &WorkspacePath,
+    to: &WorkspacePath,
+    syscall: &dyn Fn(&Path, &Path) -> io::Result<()>,
+) -> Result<(), WorkspaceError> {
+    match syscall(source, destination) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::CrossesDevices => {
             let mut copied = 0;
-            copy_tree(&source, &destination, &|| false, &mut copied)?;
-            remove_native(&source, to)
+            copy_tree(source, destination, &|| false, &mut copied)?;
+            // The copy is complete, so what is left to fail is removing the
+            // *source*: name it, not the destination that now exists.
+            remove_native(source, from)
         }
         Err(error) => Err(WorkspaceError::from_io(error, format!("{from} → {to}"))),
     }
@@ -580,5 +596,68 @@ mod tests {
 
         let missing = remove(&root, &path("tree")).unwrap_err();
         assert!(matches!(missing, WorkspaceError::NotFound(_)));
+    }
+
+    /// What `fs::rename` answers when the two paths are on different
+    /// filesystems. Injected, because no fixture has a mount inside a root.
+    fn across_devices(_: &Path, _: &Path) -> io::Result<()> {
+        Err(io::Error::from(io::ErrorKind::CrossesDevices))
+    }
+
+    #[test]
+    fn a_rename_across_devices_copies_then_removes_the_source() {
+        let temp = TempDir::new("exdev");
+        create(&temp.root(), &path("from/deep/f.txt"), EntryKind::File).expect("create");
+        fs::write(temp.0.join("from/deep/f.txt"), b"kept").expect("write");
+        fs::create_dir_all(temp.0.join("into")).expect("target");
+
+        rename_native(
+            &temp.0.join("from"),
+            &temp.0.join("into/from"),
+            &path("from"),
+            &path("into/from"),
+            &across_devices,
+        )
+        .expect("the fallback moves the tree");
+
+        assert!(!temp.0.join("from").exists(), "the source is gone");
+        assert_eq!(
+            fs::read(temp.0.join("into/from/deep/f.txt")).expect("copied"),
+            b"kept"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_remove_after_a_cross_device_copy_names_the_source() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new("exdev-locked");
+        create(&temp.root(), &path("locked/a.txt"), EntryKind::File).expect("create");
+        fs::create_dir_all(temp.0.join("into")).expect("target");
+        // The file cannot be unlinked from a directory that is not writable.
+        fs::set_permissions(temp.0.join("locked"), fs::Permissions::from_mode(0o555))
+            .expect("lock");
+
+        let result = rename_native(
+            &temp.0.join("locked/a.txt"),
+            &temp.0.join("into/a.txt"),
+            &path("locked/a.txt"),
+            &path("into/a.txt"),
+            &across_devices,
+        );
+        let source_survived = temp.0.join("locked/a.txt").exists();
+        fs::set_permissions(temp.0.join("locked"), fs::Permissions::from_mode(0o755))
+            .expect("unlock, so the scratch dir can be removed");
+
+        // Root can unlink from a 0o555 directory; there is nothing to assert.
+        if !source_survived {
+            return;
+        }
+        let message = result.expect_err("removing the source failed").to_string();
+        assert!(
+            message.contains("locked/a.txt") && !message.contains("into/a.txt"),
+            "the error names the source it could not remove, not the copy: {message}"
+        );
     }
 }

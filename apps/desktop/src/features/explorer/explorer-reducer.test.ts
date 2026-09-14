@@ -441,6 +441,69 @@ describe('watched entries (T070)', () => {
   });
 });
 
+describe('file operations that end without a result (FILES-PARTIAL)', () => {
+  /** Root loaded with `src` (loaded) and `docs` (never opened). */
+  function withLoadedTree(): ExplorerState {
+    const root = explorerReducer(opened(), {
+      type: 'pageLoaded',
+      path: '',
+      page: page('', [entry('src', { kind: 'dir' }), entry('docs', { kind: 'dir' })]),
+      append: false,
+    });
+    return explorerReducer(root, {
+      type: 'pageLoaded',
+      path: 'src',
+      page: page('src', [entry('main.rs')]),
+      append: false,
+    });
+  }
+
+  function filesOperation(status: Operation['status'], workspaceId = WS.id): Operation {
+    return { ...listOperation(status), kind: 'files.transfer', workspaceId };
+  }
+
+  it('re-lists every loaded node when a transfer fails or is cancelled', () => {
+    const failed = explorerReducer(withLoadedTree(), {
+      type: 'event',
+      event: event({
+        name: 'OperationFailed',
+        payload: {
+          operation: filesOperation('FAILED'),
+          error: { code: 'NotFound', message: 'missing.txt does not exist', retryable: false },
+        },
+      }),
+    });
+    // It may have moved entries before it stopped, and carries no `changed`.
+    expect([...failed.stale].sort()).toEqual(['', 'src']);
+
+    const cancelled = explorerReducer(withLoadedTree(), {
+      type: 'event',
+      event: event({
+        name: 'OperationCancelled',
+        payload: { operation: filesOperation('CANCELLED') },
+      }),
+    });
+    expect([...cancelled.stale].sort()).toEqual(['', 'src']);
+  });
+
+  it("ignores another workspace's file operation", () => {
+    const loaded = withLoadedTree();
+    const other = explorerReducer(loaded, {
+      type: 'event',
+      event: event({
+        name: 'OperationCancelled',
+        payload: { operation: filesOperation('CANCELLED', 'ws-other' as WorkspaceId) },
+      }),
+    });
+    expect(other).toBe(loaded);
+  });
+
+  it('invalidates the whole loaded tree on request', () => {
+    const state = explorerReducer(withLoadedTree(), { type: 'invalidate', paths: [], all: true });
+    expect([...state.stale].sort()).toEqual(['', 'src']);
+  });
+});
+
 describe('isExpandable', () => {
   it('allows directories and inside-root directory symlinks only', () => {
     expect(isExpandable(null)).toBe(true);

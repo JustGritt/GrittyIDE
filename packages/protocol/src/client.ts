@@ -753,8 +753,13 @@ export interface CoreClient {
    *
    * `move` and `delete` can run long, so they answer `ready` or `pending` the
    * way `workspace.list` does; cancel with `operations.cancel`. Cancellation
-   * stops before the next entry and **leaves what it already wrote** —
-   * `cancelledAfter` counts it, and nothing is rolled back.
+   * stops before the next entry and **leaves what it already wrote**, and
+   * nothing is rolled back. The core settles that part itself — journalled,
+   * open documents moved — but a cancelled operation carries no result, so it
+   * is announced by `OperationCancelled` alone and `cancelledAfter` is not set.
+   * A move or delete that *fails* part-way does the same, and its error names
+   * how far it got in `details.completed` and `details.requested`; a refusal
+   * before any work has no `completed`. Either way, re-list what is loaded.
    *
    * `undo` and `redo` replay a bounded, in-memory journal that lives as long as
    * the workspace. A delete is never in it: on macOS the Trash is the recovery

@@ -151,8 +151,12 @@ pub struct FileOperationResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub redo: Option<String>,
-    /// Entries written before a cancellation stopped the work. `None` when the
-    /// operation ran to completion. What it counts is on the disk and stays.
+    /// Entries written before a cancellation stopped the work, for a result
+    /// that is still delivered after one. None is today: a cancelled
+    /// operation's result is dropped by the operation model, so a cancel is
+    /// reported by `OperationCancelled` alone, and what the batch completed
+    /// before it is settled (journalled, documents moved) without being counted
+    /// here. Kept because removing a wire field is a breaking change.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub cancelled_after: Option<u32>,
@@ -204,6 +208,9 @@ pub struct FileService {
     /// id changes, which is what drops an undo history with its workspace.
     journal: Mutex<(Option<WorkspaceId>, Journal)>,
     guard: Mutex<Option<Weak<dyn DocumentTreeGuard>>>,
+    /// See [`FileService::entry_delay`].
+    #[cfg(test)]
+    entry_delay: Mutex<Duration>,
 }
 
 impl FileService {
@@ -218,6 +225,8 @@ impl FileService {
             handle,
             journal: Mutex::new((None, Journal::new())),
             guard: Mutex::new(None),
+            #[cfg(test)]
+            entry_delay: Mutex::new(Duration::ZERO),
         })
     }
 
@@ -249,13 +258,18 @@ impl FileService {
         body(&mut held.1)
     }
 
+    /// What ⌘Z and ⇧⌘Z would do now. Read-only: a journal held for another
+    /// workspace answers nothing rather than being reset, so a late settle for
+    /// a closed workspace cannot empty the open one's history (FILES-PARTIAL).
     fn labels(&self, workspace_id: &WorkspaceId) -> (Option<String>, Option<String>) {
-        self.with_journal(workspace_id, |journal| {
-            (
-                journal.peek_undo().map(|entry| entry.label.clone()),
-                journal.peek_redo().map(|entry| entry.label.clone()),
-            )
-        })
+        let held = self.journal.lock().unwrap_or_else(PoisonError::into_inner);
+        if held.0.as_ref() != Some(workspace_id) {
+            return (None, None);
+        }
+        (
+            held.1.peek_undo().map(|entry| entry.label.clone()),
+            held.1.peek_redo().map(|entry| entry.label.clone()),
+        )
     }
 
     fn result(
@@ -385,28 +399,29 @@ impl FileService {
         let pairs = plan_transfer(&root, &request)?;
 
         let token = CancellationToken::new();
+        let pause = self.entry_delay();
         let mut job = {
+            let me = Arc::clone(self);
             let root = Arc::clone(&root);
-            let planned = pairs.clone();
+            let workspace_id = workspace.id.clone();
+            let pairs = pairs.clone();
             let mode = request.mode;
             let token = token.clone();
-            self.handle
-                .spawn_blocking(move || transfer_blocking(&root, &planned, mode, &token))
+            let actor = actor.clone();
+            let correlation = correlation.clone();
+            // The job settles what it did itself — journal, rehome, the changed
+            // set. Settling in the operation body instead would be skipped by a
+            // failure part-way, and by every cancellation: the registry aborts
+            // a cancelled body and drops its result (FILES-PARTIAL).
+            self.handle.spawn_blocking(move || {
+                let progress = transfer_blocking(&root, &pairs, mode, &token, pause);
+                me.settle_transfer(&workspace_id, &pairs, progress, mode, &actor, &correlation)
+            })
         };
         match tokio::time::timeout(budget, &mut job).await {
-            Ok(joined) => {
-                let progress = finish_job(joined, "transfer")?;
-                Ok(FileOperationResponse::Ready {
-                    result: self.settle_transfer(
-                        &workspace.id,
-                        &pairs,
-                        progress,
-                        request.mode,
-                        &actor,
-                        &correlation,
-                    ),
-                })
-            }
+            Ok(joined) => Ok(FileOperationResponse::Ready {
+                result: finish_job(joined, "transfer")?,
+            }),
             Err(_elapsed) => {
                 tracing::debug!(
                     workspace = %workspace.id,
@@ -421,24 +436,23 @@ impl FileService {
                     correlation_id: correlation.clone(),
                     durable: false,
                 };
-                let me = Arc::clone(self);
-                let workspace_id = workspace.id.clone();
-                let mode = request.mode;
+                // Owned by the closure, not by the future it returns: an
+                // operation cancelled before its body is first polled drops the
+                // closure unrun, and that must still stop the job.
+                let job_token = CancelOnDrop(token);
                 let operation = self.registry.start(spec, move |ctx| async move {
-                    let job_token = CancelOnDrop(token);
+                    let job_token = job_token;
                     tokio::select! {
                         biased;
                         () = ctx.cancelled() => {
                             // Stops before the next entry. What is already
-                            // moved or copied stays (ADR-028).
+                            // moved or copied stays (ADR-028), and the job
+                            // settles it on its own thread.
                             job_token.0.cancel();
                             Err(CoreError::cancelled("file transfer cancelled"))
                         }
                         joined = &mut job => {
-                            let progress = finish_job(joined, "transfer")?;
-                            let result = me.settle_transfer(
-                                &workspace_id, &pairs, progress, mode, &actor, &correlation,
-                            );
+                            let result = finish_job(joined, "transfer")?;
                             Ok(Some(serde_json::to_value(result)?))
                         }
                     }
@@ -450,7 +464,12 @@ impl FileService {
         }
     }
 
-    /// Record what a transfer actually did: only the pairs it completed.
+    /// Record what a transfer actually did: only the pairs it completed, and
+    /// all of them, however the batch stopped.
+    ///
+    /// Runs on the blocking job's thread (FILES-PARTIAL). Every lock it takes —
+    /// the journal, the document table, the event bus — is a std mutex held
+    /// for the call, and none is held while taking another's owner.
     fn settle_transfer(
         &self,
         workspace_id: &WorkspaceId,
@@ -459,7 +478,7 @@ impl FileService {
         mode: TransferMode,
         actor: &Actor,
         correlation: &CorrelationId,
-    ) -> FileOperationResult {
+    ) -> Result<FileOperationResult, CoreError> {
         let done = &pairs[..progress.done];
         let mut changed = BTreeSet::new();
         for (from, to) in done {
@@ -467,20 +486,29 @@ impl FileService {
             mark_changed(&mut changed, to);
         }
         if !done.is_empty() {
-            let label = transfer_label(mode, done);
-            match mode {
-                TransferMode::Move => {
-                    self.after_move(workspace_id, done, actor, correlation);
-                    self.with_journal(workspace_id, |journal| {
-                        journal.record(JournalEntry::moved(done.to_vec(), label));
-                    });
-                }
-                TransferMode::Copy => {
-                    self.with_journal(workspace_id, |journal| {
-                        journal.record(JournalEntry::copied(done.to_vec(), label));
-                    });
-                }
+            if mode == TransferMode::Move {
+                // Even for a workspace that has since closed: the document
+                // layer ignores a workspace it no longer holds.
+                self.after_move(workspace_id, done, actor, correlation);
             }
+            // A settle that outlived its workspace must not journal, because
+            // the journal resets for a new id and would take the next
+            // workspace's history with it.
+            if self.is_open(workspace_id) {
+                let label = transfer_label(mode, done);
+                let entry = match mode {
+                    TransferMode::Move => JournalEntry::moved(done.to_vec(), label),
+                    TransferMode::Copy => JournalEntry::copied(done.to_vec(), label),
+                };
+                self.with_journal(workspace_id, |journal| journal.record(entry));
+            }
+        }
+        if let Some(error) = progress.failed {
+            let verb = match mode {
+                TransferMode::Move => "moved",
+                TransferMode::Copy => "copied",
+            };
+            return Err(partial_failure(error, progress.done, pairs.len(), verb));
         }
         let moved = done
             .iter()
@@ -489,12 +517,65 @@ impl FileService {
                 to: to.clone(),
             })
             .collect();
-        self.result(
+        Ok(self.result(
             workspace_id,
             changed,
             moved,
             progress.cancelled.then_some(progress.done as u32),
-        )
+        ))
+    }
+
+    /// Record what a delete actually did. Deliberately not journalled: a
+    /// trashed entry is recovered from the Trash and a permanent one is gone
+    /// (ADR-028).
+    fn settle_delete(
+        &self,
+        workspace_id: &WorkspaceId,
+        paths: &[WorkspacePath],
+        progress: TransferProgress,
+        mode: DeleteMode,
+    ) -> Result<FileOperationResult, CoreError> {
+        if let Some(error) = progress.failed {
+            let verb = match mode {
+                DeleteMode::Trash => "moved to the Trash",
+                DeleteMode::Permanent => "deleted",
+            };
+            return Err(partial_failure(error, progress.done, paths.len(), verb));
+        }
+        let mut changed = BTreeSet::new();
+        for path in &paths[..progress.done] {
+            mark_changed(&mut changed, path);
+        }
+        Ok(self.result(
+            workspace_id,
+            changed,
+            Vec::new(),
+            progress.cancelled.then_some(progress.done as u32),
+        ))
+    }
+
+    /// Whether `workspace_id` is still the open workspace.
+    fn is_open(&self, workspace_id: &WorkspaceId) -> bool {
+        self.workspaces
+            .current_open()
+            .is_some_and(|(open, _)| open == *workspace_id)
+    }
+
+    /// How long each entry of a batch takes at least. Zero outside tests; a
+    /// test raises it so a cancellation lands between two entries instead of
+    /// racing a batch that finishes in microseconds.
+    fn entry_delay(&self) -> Duration {
+        #[cfg(test)]
+        {
+            *self
+                .entry_delay
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+        }
+        #[cfg(not(test))]
+        {
+            Duration::ZERO
+        }
     }
 
     /// `files.delete`: to the trash, or permanently.
@@ -535,36 +616,24 @@ impl FileService {
         }
 
         let token = CancellationToken::new();
+        let pause = self.entry_delay();
         let mut job = {
+            let me = Arc::clone(self);
             let root = Arc::clone(&root);
+            let workspace_id = workspace.id.clone();
             let paths = request.paths.clone();
             let mode = request.mode;
             let token = token.clone();
-            self.handle
-                .spawn_blocking(move || delete_blocking(&root, &paths, mode, &token))
-        };
-        let paths = request.paths.clone();
-        let settle = |done: usize, cancelled: bool| {
-            let mut changed = BTreeSet::new();
-            for path in &paths[..done] {
-                mark_changed(&mut changed, path);
-            }
-            // Deliberately not journalled: a trashed entry is recovered from
-            // the Trash and a permanent one is gone (ADR-028).
-            self.result(
-                &workspace.id,
-                changed,
-                Vec::new(),
-                cancelled.then_some(done as u32),
-            )
+            // Settled on the job's thread, for the reason `transfer` gives.
+            self.handle.spawn_blocking(move || {
+                let progress = delete_blocking(&root, &paths, mode, &token, pause);
+                me.settle_delete(&workspace_id, &paths, progress, mode)
+            })
         };
         match tokio::time::timeout(budget, &mut job).await {
-            Ok(joined) => {
-                let progress = finish_job(joined, "delete")?;
-                Ok(FileOperationResponse::Ready {
-                    result: settle(progress.done, progress.cancelled),
-                })
-            }
+            Ok(joined) => Ok(FileOperationResponse::Ready {
+                result: finish_job(joined, "delete")?,
+            }),
             Err(_elapsed) => {
                 let spec = OperationSpec {
                     kind: OperationKind::new(FILES_KIND),
@@ -573,11 +642,10 @@ impl FileService {
                     correlation_id: correlation,
                     durable: false,
                 };
-                let me = Arc::clone(self);
-                let workspace_id = workspace.id.clone();
-                let paths = request.paths.clone();
+                // Owned by the closure, for the reason `transfer` gives.
+                let job_token = CancelOnDrop(token);
                 let operation = self.registry.start(spec, move |ctx| async move {
-                    let job_token = CancelOnDrop(token);
+                    let job_token = job_token;
                     tokio::select! {
                         biased;
                         () = ctx.cancelled() => {
@@ -585,17 +653,7 @@ impl FileService {
                             Err(CoreError::cancelled("delete cancelled"))
                         }
                         joined = &mut job => {
-                            let progress = finish_job(joined, "delete")?;
-                            let mut changed = BTreeSet::new();
-                            for path in &paths[..progress.done] {
-                                mark_changed(&mut changed, path);
-                            }
-                            let result = me.result(
-                                &workspace_id,
-                                changed,
-                                Vec::new(),
-                                progress.cancelled.then_some(progress.done as u32),
-                            );
+                            let result = finish_job(joined, "delete")?;
                             Ok(Some(serde_json::to_value(result)?))
                         }
                     }
@@ -688,11 +746,76 @@ impl Drop for CancelOnDrop {
 }
 
 /// How far a batch got before it stopped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug)]
 struct TransferProgress {
     /// Entries fully completed. Only these are journalled or reported as moved.
     done: usize,
     cancelled: bool,
+    /// What stopped the batch at entry `done`, when something failed. The
+    /// entries before it still happened, so this is not a reason to discard
+    /// `done` (FILES-PARTIAL).
+    failed: Option<CoreError>,
+}
+
+impl TransferProgress {
+    fn finished(done: usize) -> Self {
+        Self {
+            done,
+            cancelled: false,
+            failed: None,
+        }
+    }
+
+    fn cancelled(done: usize) -> Self {
+        Self {
+            done,
+            cancelled: true,
+            failed: None,
+        }
+    }
+
+    fn failed(done: usize, error: impl Into<CoreError>) -> Self {
+        Self {
+            done,
+            cancelled: false,
+            failed: Some(error.into()),
+        }
+    }
+}
+
+/// The error that stopped a batch after `completed` of its `requested` entries
+/// had already happened.
+///
+/// The original error keeps its code, retryability and details — it is still
+/// the answer to "what went wrong" — and gains `completed` and `requested` in
+/// `details`, because what was done stays done (ADR-028) and the caller has to
+/// be told so. A refusal before any work never comes through here, so the
+/// presence of `completed` is itself the signal that the tree changed.
+fn partial_failure(
+    mut error: CoreError,
+    completed: usize,
+    requested: usize,
+    verb: &str,
+) -> CoreError {
+    let mut details = match error.details.take() {
+        Some(serde_json::Value::Object(map)) => map,
+        None => serde_json::Map::new(),
+        Some(other) => {
+            let mut map = serde_json::Map::new();
+            map.insert("cause".to_string(), other);
+            map
+        }
+    };
+    details.insert("completed".to_string(), completed.into());
+    details.insert("requested".to_string(), requested.into());
+    error.details = Some(serde_json::Value::Object(details));
+    if completed > 0 {
+        error.message = format!(
+            "{} ({completed} of {requested} were already {verb}; that stays, and nothing was rolled back)",
+            error.message
+        );
+    }
+    error
 }
 
 fn finish_job<T>(
@@ -745,65 +868,65 @@ fn plan_transfer(
     Ok(pairs)
 }
 
+/// Move or copy each planned pair in order, stopping before the next entry on
+/// cancellation and at the first entry that fails. Never `?`: the entries
+/// before a failure happened, and the settle needs to know how many.
 fn transfer_blocking(
     root: &WorkspaceRoot,
     pairs: &[(WorkspacePath, WorkspacePath)],
     mode: TransferMode,
     token: &CancellationToken,
-) -> Result<TransferProgress, CoreError> {
-    let mut done = 0;
-    for (from, to) in pairs {
+    pause: Duration,
+) -> TransferProgress {
+    for (done, (from, to)) in pairs.iter().enumerate() {
         if token.is_cancelled() {
-            return Ok(TransferProgress {
-                done,
-                cancelled: true,
-            });
+            return TransferProgress::cancelled(done);
         }
-        match mode {
-            TransferMode::Move => mutate::rename(root, from, to)?,
-            TransferMode::Copy => {
-                let CopyOutcome { cancelled, .. } =
-                    mutate::copy(root, from, to, &|| token.is_cancelled())?;
-                if cancelled {
-                    return Ok(TransferProgress {
-                        done,
-                        cancelled: true,
-                    });
-                }
-            }
+        let stopped_midway = match mode {
+            TransferMode::Move => mutate::rename(root, from, to).map(|()| false),
+            TransferMode::Copy => mutate::copy(root, from, to, &|| token.is_cancelled())
+                .map(|CopyOutcome { cancelled, .. }| cancelled),
+        };
+        match stopped_midway {
+            Ok(false) => {}
+            Ok(true) => return TransferProgress::cancelled(done),
+            Err(error) => return TransferProgress::failed(done, error),
         }
-        done += 1;
+        pause_between_entries(pause);
     }
-    Ok(TransferProgress {
-        done,
-        cancelled: false,
-    })
+    TransferProgress::finished(pairs.len())
 }
 
+/// Trash or remove each path in order, with `transfer_blocking`'s stopping
+/// rules.
 fn delete_blocking(
     root: &WorkspaceRoot,
     paths: &[WorkspacePath],
     mode: DeleteMode,
     token: &CancellationToken,
-) -> Result<TransferProgress, CoreError> {
-    let mut done = 0;
-    for path in paths {
+    pause: Duration,
+) -> TransferProgress {
+    for (done, path) in paths.iter().enumerate() {
         if token.is_cancelled() {
-            return Ok(TransferProgress {
-                done,
-                cancelled: true,
-            });
+            return TransferProgress::cancelled(done);
         }
-        match mode {
-            DeleteMode::Trash => mutate::trash(root, path)?,
-            DeleteMode::Permanent => mutate::remove(root, path)?,
+        let outcome = match mode {
+            DeleteMode::Trash => mutate::trash(root, path),
+            DeleteMode::Permanent => mutate::remove(root, path),
+        };
+        if let Err(error) = outcome {
+            return TransferProgress::failed(done, error);
         }
-        done += 1;
+        pause_between_entries(pause);
     }
-    Ok(TransferProgress {
-        done,
-        cancelled: false,
-    })
+    TransferProgress::finished(paths.len())
+}
+
+/// The test seam behind [`FileService::entry_delay`]; nothing outside tests.
+fn pause_between_entries(pause: Duration) {
+    if !pause.is_zero() {
+        std::thread::sleep(pause);
+    }
 }
 
 /// What performing one journal step changed.
@@ -1059,13 +1182,15 @@ mod tests {
     struct Harness {
         files: Arc<FileService>,
         documents: Arc<FakeDocuments>,
+        registry: Arc<OperationRegistry>,
+        sink: Arc<RecordingSink>,
         workspace: Workspace,
         dir: TempDir,
     }
 
     fn harness(label: &str) -> Harness {
         let (sink, _rx) = RecordingSink::with_channel();
-        let events = EventBus::new(sink);
+        let events = EventBus::new(sink.clone());
         let registry = OperationRegistry::new(Handle::current(), events.clone());
         let workspaces = WorkspaceManager::new(Handle::current(), events, registry.clone());
         let dir = TempDir::new(label);
@@ -1077,7 +1202,7 @@ mod tests {
                 CorrelationId::new(),
             )
             .expect("open workspace");
-        let files = FileService::new(Handle::current(), workspaces, registry);
+        let files = FileService::new(Handle::current(), workspaces, registry.clone());
         let documents = Arc::new(FakeDocuments::default());
         let as_guard: Arc<dyn DocumentTreeGuard> = documents.clone();
         files.set_document_guard(Arc::downgrade(&as_guard));
@@ -1088,6 +1213,8 @@ mod tests {
         Harness {
             files,
             documents,
+            registry,
+            sink,
             workspace,
             dir,
         }
@@ -1379,5 +1506,292 @@ mod tests {
         let h = harness("undo-empty");
         let refused = h.undo().await.unwrap_err();
         assert_eq!(refused.code, CoreErrorCode::Conflict);
+    }
+
+    // ---- A batch that stops part-way (FILES-PARTIAL) ----
+
+    impl Harness {
+        async fn transfer(
+            &self,
+            paths: &[&str],
+            target: &str,
+            mode: TransferMode,
+            budget: Duration,
+        ) -> Result<FileOperationResponse, CoreError> {
+            self.files
+                .transfer(
+                    MoveEntriesRequest {
+                        workspace_id: self.workspace.id.clone(),
+                        paths: paths.iter().map(|raw| path(raw)).collect(),
+                        target_dir: path(target),
+                        mode,
+                    },
+                    Actor::User,
+                    CorrelationId::new(),
+                    budget,
+                )
+                .await
+        }
+
+        fn rehomed(&self) -> Vec<(WorkspacePath, WorkspacePath)> {
+            self.documents.rehomed.lock().expect("lock").clone()
+        }
+
+        fn undo_label(&self) -> Option<String> {
+            self.files.labels(&self.workspace.id).0
+        }
+    }
+
+    /// Poll `condition` for up to five seconds: the settle of a cancelled
+    /// batch runs on the job's own thread, after the operation already ended.
+    async fn eventually(what: &str, condition: impl Fn() -> bool) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !condition() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for {what}"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn a_move_whose_second_entry_fails_still_journals_and_rehomes_the_first() {
+        let h = harness("partial-move");
+        fs::create_dir_all(h.dir.0.join("dst")).expect("target");
+        fs::write(h.dir.0.join("b.txt"), "b").expect("seed");
+
+        // `plan_transfer` does not check that a source exists, so the second
+        // entry fails at execution, deterministically, after the first moved.
+        let error = h
+            .transfer(
+                &["src/main.rs", "missing.txt", "b.txt"],
+                "dst",
+                TransferMode::Move,
+                BUDGET,
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code, CoreErrorCode::NotFound);
+        let details = error.details.clone().expect("details");
+        assert_eq!(details["completed"], 1);
+        assert_eq!(details["requested"], 3);
+        assert!(
+            error.message.contains("1 of 3 were already moved"),
+            "the message says the first move stays: {}",
+            error.message
+        );
+        assert!(h.dir.0.join("dst/main.rs").is_file());
+        assert!(
+            h.dir.0.join("b.txt").is_file(),
+            "nothing after the failure ran"
+        );
+        assert_eq!(
+            h.rehomed(),
+            vec![(path("src/main.rs"), path("dst/main.rs"))],
+            "the moved file's open document follows it"
+        );
+        assert_eq!(h.undo_label().as_deref(), Some("Move src/main.rs"));
+
+        h.undo().await.expect("the completed part is undoable");
+        assert!(h.dir.0.join("src/main.rs").is_file());
+    }
+
+    #[tokio::test]
+    async fn a_delete_whose_second_entry_fails_names_what_it_removed() {
+        let h = harness("partial-delete");
+        fs::write(h.dir.0.join("c.txt"), "c").expect("seed");
+
+        let error = h
+            .files
+            .delete(
+                DeleteEntriesRequest {
+                    workspace_id: h.workspace.id.clone(),
+                    paths: vec![path("src/main.rs"), path("missing.txt"), path("c.txt")],
+                    mode: DeleteMode::Permanent,
+                    force: None,
+                },
+                Actor::User,
+                CorrelationId::new(),
+                BUDGET,
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code, CoreErrorCode::NotFound);
+        let details = error.details.clone().expect("details");
+        assert_eq!(details["completed"], 1);
+        assert_eq!(details["requested"], 3);
+        assert!(error.message.contains("1 of 3 were already deleted"));
+        assert!(!h.dir.0.join("src/main.rs").exists());
+        assert!(h.dir.0.join("c.txt").is_file());
+        assert_eq!(
+            h.undo().await.unwrap_err().code,
+            CoreErrorCode::Conflict,
+            "a delete is still never journalled"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refusal_before_anything_ran_keeps_its_error_untouched() {
+        let h = harness("partial-refusal");
+        fs::write(h.dir.0.join("main.rs"), "taken").expect("seed");
+
+        let error = h
+            .transfer(&["src/main.rs"], "", TransferMode::Move, BUDGET)
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code, CoreErrorCode::Conflict);
+        assert!(
+            error
+                .details
+                .as_ref()
+                .is_none_or(|details| details.get("completed").is_none()),
+            "no work ran, so nothing may claim the tree changed: {:?}",
+            error.details
+        );
+    }
+
+    #[test]
+    fn a_partial_failure_keeps_the_original_details() {
+        let original = CoreError::conflict("dst/a.txt already exists")
+            .with_details(serde_json::json!({ "path": "dst/a.txt" }));
+        let error = partial_failure(original, 2, 5, "copied");
+        assert_eq!(error.code, CoreErrorCode::Conflict);
+        assert_eq!(
+            error.details,
+            Some(serde_json::json!({ "path": "dst/a.txt", "completed": 2, "requested": 5 }))
+        );
+
+        let bare = partial_failure(
+            CoreError::conflict("x").with_details("raw".into()),
+            0,
+            1,
+            "moved",
+        );
+        assert_eq!(
+            bare.details,
+            Some(serde_json::json!({ "cause": "raw", "completed": 0, "requested": 1 }))
+        );
+        assert_eq!(bare.message, "x", "nothing completed, so nothing to add");
+    }
+
+    #[tokio::test]
+    async fn a_move_cancelled_before_its_body_first_ran_still_stops() {
+        let h = harness("cancel-unpolled");
+        fs::create_dir_all(h.dir.0.join("dst")).expect("target");
+        fs::write(h.dir.0.join("b.txt"), "b").expect("seed");
+        fs::write(h.dir.0.join("c.txt"), "c").expect("seed");
+        *h.files.entry_delay.lock().expect("lock") = Duration::from_millis(400);
+
+        let response = h
+            .transfer(
+                &["src/main.rs", "b.txt", "c.txt"],
+                "dst",
+                TransferMode::Move,
+                Duration::from_millis(50),
+            )
+            .await
+            .expect("transfer");
+        let FileOperationResponse::Pending { operation } = response else {
+            panic!("three entries at 400 ms each outlive a 50 ms budget");
+        };
+        // No await since `transfer` returned: on this single-threaded runtime
+        // the operation's task has not been polled, so the registry finishes
+        // it as cancelled and drops its body unrun. Only the closure owning
+        // the job's token can stop the job now.
+        h.registry.cancel(&operation.id).expect("cancel");
+
+        eventually("the completed moves to be journalled", || {
+            h.undo_label().is_some()
+        })
+        .await;
+        assert!(
+            h.dir.0.join("c.txt").is_file(),
+            "the job was stopped; before, it ran every entry to the end"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_move_still_rehomes_and_journals_what_it_completed() {
+        let h = harness("partial-cancel");
+        fs::create_dir_all(h.dir.0.join("dst")).expect("target");
+        fs::write(h.dir.0.join("b.txt"), "b").expect("seed");
+        fs::write(h.dir.0.join("c.txt"), "c").expect("seed");
+        *h.files.entry_delay.lock().expect("lock") = Duration::from_millis(400);
+
+        let response = h
+            .transfer(
+                &["src/main.rs", "b.txt", "c.txt"],
+                "dst",
+                TransferMode::Move,
+                Duration::from_millis(50),
+            )
+            .await
+            .expect("transfer");
+        let FileOperationResponse::Pending { operation } = response else {
+            panic!("three entries at 400 ms each outlive a 50 ms budget");
+        };
+
+        // Cancel only once the body is running and the first entry has
+        // certainly moved: this is the cancel the registry answers by aborting
+        // a live body, which is what used to skip the settle. (Cancelling
+        // before the body is polled is the test above.)
+        eventually("the operation's body to run", || {
+            h.registry
+                .get(&operation.id)
+                .is_some_and(|op| op.status == crate::operation::OperationStatus::Running)
+        })
+        .await;
+        eventually("the first entry to move", || {
+            h.dir.0.join("dst/main.rs").is_file()
+        })
+        .await;
+        h.registry.cancel(&operation.id).expect("cancel");
+
+        eventually("the operation to end cancelled", || {
+            h.registry
+                .get(&operation.id)
+                .is_some_and(|op| op.status == crate::operation::OperationStatus::Cancelled)
+        })
+        .await;
+        // The label is written last, after every rehome, so once it exists
+        // the settle is complete.
+        eventually("the completed moves to be journalled", || {
+            h.undo_label().is_some()
+        })
+        .await;
+
+        // Normally exactly the first entry; a loaded machine may let the
+        // second finish before the cancel lands. Either way what the batch
+        // settled is exactly what is on the disk, and it stopped before the end.
+        let planned = [
+            (path("src/main.rs"), path("dst/main.rs")),
+            (path("b.txt"), path("dst/b.txt")),
+            (path("c.txt"), path("dst/c.txt")),
+        ];
+        let on_disk = planned
+            .iter()
+            .take_while(|(_, to)| h.dir.0.join(to.as_str()).exists())
+            .count();
+        assert!((1..3).contains(&on_disk), "{on_disk} of 3 moved");
+        assert_eq!(h.rehomed(), planned[..on_disk].to_vec());
+        let expected_label = if on_disk == 1 {
+            "Move src/main.rs".to_string()
+        } else {
+            format!("Move {on_disk} items")
+        };
+        assert_eq!(h.undo_label(), Some(expected_label));
+        assert!(
+            h.dir.0.join("c.txt").is_file(),
+            "the batch stopped before its last entry"
+        );
+        assert!(
+            !h.sink.names().contains(&"OperationCompleted"),
+            "a cancelled operation stays cancelled: {:?}",
+            h.sink.names()
+        );
     }
 }

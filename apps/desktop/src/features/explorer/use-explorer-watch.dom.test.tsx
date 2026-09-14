@@ -177,3 +177,79 @@ describe('useExplorer under a watched workspace', () => {
     expect(timesListed('src')).toBe(1);
   });
 });
+
+/**
+ * FILES-PARTIAL, through the hook: a move that failed after doing part of its
+ * work re-lists the loaded tree, because its error carries no `changed`; a
+ * refusal before any work re-lists nothing.
+ */
+describe('useExplorer after a move that stopped part-way', () => {
+  afterEach(cleanup);
+
+  beforeEach(() => {
+    seam.handlers.clear();
+    listed.length = 0;
+    seam.handlers.set('workspace_current', (): Workspace => WORKSPACE);
+    seam.handlers.set('workspace_list', (args): ListDirectoryResponse => {
+      const path = (args?.request as { path?: string } | undefined)?.path ?? '';
+      listed.push(path);
+      const entries = path === '' ? [dir('src'), dir('docs')] : [file(`${path}.txt`)];
+      return {
+        status: 'ready',
+        page: { path: path as WorkspacePath, entries, total: entries.length, truncated: false },
+      };
+    });
+  });
+
+  async function openedTree() {
+    const rendered = renderHook(() => useExplorer());
+    await waitFor(() =>
+      expect(rendered.result.current.state.nodes['']?.children).toEqual(['src', 'docs']),
+    );
+    const src = rendered.result.current.state.nodes.src;
+    if (!src) throw new Error('the root listing produced no `src` node');
+    await act(async () => {
+      rendered.result.current.toggle(src);
+    });
+    await waitFor(() =>
+      expect(rendered.result.current.state.nodes.src?.children).toEqual(['src/src.txt']),
+    );
+    listed.length = 0;
+    return rendered;
+  }
+
+  it('re-lists every loaded directory once', async () => {
+    seam.handlers.set('files_move', () => {
+      throw {
+        code: 'NotFound',
+        message: 'b.txt does not exist (1 of 3 were already moved)',
+        retryable: false,
+        details: { completed: 1, requested: 3 },
+      };
+    });
+    const rendered = await openedTree();
+
+    await act(async () => {
+      await rendered.result.current.transfer(['a.txt', 'b.txt', 'c.txt'], 'src', 'MOVE');
+    });
+
+    await waitFor(() => expect(timesListed('src')).toBe(1));
+    expect(timesListed('')).toBe(1);
+    expect(timesListed('docs')).toBe(0);
+    expect(rendered.result.current.error?.code).toBe('NotFound');
+  });
+
+  it('re-lists nothing for a refusal before any work', async () => {
+    seam.handlers.set('files_move', () => {
+      throw { code: 'Conflict', message: 'src/a.txt already exists', retryable: false };
+    });
+    const rendered = await openedTree();
+
+    await act(async () => {
+      await rendered.result.current.transfer(['a.txt'], 'src', 'MOVE');
+    });
+
+    expect(rendered.result.current.error?.code).toBe('Conflict');
+    expect(listed).toEqual([]);
+  });
+});

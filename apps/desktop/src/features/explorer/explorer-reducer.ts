@@ -112,8 +112,12 @@ export type ExplorerAction =
    * Re-list these directories: a `files.*` command said its `changed` (T042).
    * The watcher would say the same thing a debounce later, but it is
    * best-effort, so the response is what the tree converges on.
+   *
+   * `all` re-lists every loaded directory instead, for a command that changed
+   * the tree without being able to say where: a move or delete that failed
+   * part-way (FILES-PARTIAL). The same answer `overflowed` gets.
    */
-  | { type: 'invalidate'; paths: readonly string[] }
+  | { type: 'invalidate'; paths: readonly string[]; all?: boolean }
   | { type: 'event'; event: EventEnvelope };
 
 export function childPath(parent: string, name: string): string {
@@ -298,6 +302,19 @@ function staleNodes(state: ExplorerState, directories: readonly string[], overfl
   return pending.size === state.stale.length ? state.stale : [...pending];
 }
 
+/**
+ * A transfer or delete that ended without a result (FILES-PARTIAL).
+ *
+ * It may have moved or removed entries before it failed or was cancelled — the
+ * core settles those, but a failed or cancelled operation carries no `changed`
+ * — so every loaded node is re-listed, the answer `overflowed` already gets.
+ */
+function staleAfterFileOperation(state: ExplorerState, workspaceId: WorkspaceId | undefined) {
+  if (workspaceId === undefined || state.workspace?.id !== workspaceId) return state;
+  const stale = staleNodes(state, [], true);
+  return stale === state.stale ? state : { ...state, stale };
+}
+
 function onEvent(state: ExplorerState, event: EventEnvelope): ExplorerState {
   switch (event.name) {
     case 'WorkspaceOpened':
@@ -335,12 +352,18 @@ function onEvent(state: ExplorerState, event: EventEnvelope): ExplorerState {
       return settle(state, event.payload.operation.id, outcome);
     }
     case 'OperationFailed':
+      if (event.payload.operation.kind === FILES_OPERATION_KIND) {
+        return staleAfterFileOperation(state, event.payload.operation.workspaceId);
+      }
       if (event.payload.operation.kind !== LIST_OPERATION_KIND) return state;
       return settle(state, event.payload.operation.id, {
         kind: 'failed',
         error: event.payload.error,
       });
     case 'OperationCancelled':
+      if (event.payload.operation.kind === FILES_OPERATION_KIND) {
+        return staleAfterFileOperation(state, event.payload.operation.workspaceId);
+      }
       if (event.payload.operation.kind !== LIST_OPERATION_KIND) return state;
       return settle(state, event.payload.operation.id, { kind: 'cancelled' });
     default:
@@ -377,7 +400,7 @@ export function explorerReducer(state: ExplorerState, action: ExplorerAction): E
         ? state
         : { ...state, selection: action.selection };
     case 'invalidate': {
-      const stale = staleNodes(state, action.paths, false);
+      const stale = staleNodes(state, action.paths, action.all === true);
       return stale === state.stale ? state : { ...state, stale };
     }
     case 'listFailed':

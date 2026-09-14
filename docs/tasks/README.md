@@ -45,7 +45,7 @@ moves back. Never move a task file by hand.
 | CONFIRM-DIALOG | Extract a shared confirm dialog before a third copy is written | 2 | – | unspec |
 | [EXPLORER-DISCARD-NOTICE](docs/tasks/EXPLORER-DISCARD-NOTICE-dirty-documents-only.md) | The discard notice replays only a dirty-document refusal | maintenance | T042, EXPLORER-FORCE-REPLAY | review |
 | [FILE-ICONS](docs/tasks/FILE-ICONS-file-type-icons.md) | File-type icons in the explorer tree and Changes list | 2 | – | review |
-| [FILES-PARTIAL](docs/tasks/FILES-PARTIAL-settle-what-was-done.md) | A move or delete that stops partway settles what it did | maintenance | T042 | doing |
+| [FILES-PARTIAL](docs/tasks/FILES-PARTIAL-settle-what-was-done.md) | A move or delete that stops partway settles what it did | maintenance | T042 | review |
 | [GC-BUDGET](GC-BUDGET-sweeper-defaults.md) | Re-derive the sweeper's cache budget and disk floor for ADR-033's smaller builds | tools | ADR-024, ADR-033 | review |
 | GC-DEV-SKIP | A running tauri dev stops every sweep of its checkout: the process scan outranks a free .cargo-lock | tools | GC-BUDGET | todo |
 | [GIT-STATES](GIT-STATES-in-progress-state-fixtures.md) | Test the in-progress repository states git status names but never exercised | 2 | T100, ADR-023 | review |
@@ -70,7 +70,7 @@ moves back. Never move a task file by hand.
 | T080-U | The search panel | 2 | PROTO-W3, T080 | todo |
 | T101-D | The diff as an editor tab (Monaco diff editor) on git.show | 2 | T101-R | todo |
 | T101-R | gix: a paged commit walk, and a blob at a revision | 2 | T101-C | review |
-| [T102-U](T102-U-git-write-ui.md) | Staging, discard and the commit box in the Changes panel | 2 | T102-R | todo |
+| [T102-U](T102-U-git-write-ui.md) | Staging, discard and the commit box in the Changes panel | 2 | T102-R | doing |
 | [T120-A](T120-A-settings-apply.md) | Make the editor and terminal obey their settings, then delete the popovers | 2 | T120-M | review |
 | [T120-M](T120-M-settings-mount.md) | Mount the settings tab, and the comma chord | 2 | T120-U | review |
 | [T120-T](T120-T-theme.md) | A theme the user picks: system, light or dark | 2 | T120-C | review |

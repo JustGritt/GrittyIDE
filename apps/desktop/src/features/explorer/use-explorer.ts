@@ -308,6 +308,33 @@ export function useExplorer(options: ExplorerOptions = {}) {
     return result;
   }, []);
 
+  /** Re-list every directory the tree has loaded. */
+  const refreshAll = useCallback(() => dispatch({ type: 'invalidate', paths: [], all: true }), []);
+
+  /**
+   * Send a move or delete, and re-list the whole loaded tree if it failed after
+   * doing part of its work (FILES-PARTIAL).
+   *
+   * The core says so with `details.completed`: what was done stays done and is
+   * settled core-side, but an error carries no `changed`, so the renderer
+   * cannot know which directories moved under it. A refusal before any work
+   * has no `completed`, changed nothing, and re-lists nothing. The error still
+   * reaches `run`.
+   */
+  const relistIfPartial = useCallback(async <T>(send: () => Promise<T>) => {
+    try {
+      return await send();
+    } catch (cause: unknown) {
+      const details = toCoreError(cause).details;
+      const completed =
+        typeof details === 'object' && details !== null && !Array.isArray(details)
+          ? (details as { completed?: unknown }).completed
+          : undefined;
+      if (typeof completed === 'number') dispatch({ type: 'invalidate', paths: [], all: true });
+      throw cause;
+    }
+  }, []);
+
   /**
    * A `move`/`delete` answers `ready` or `pending`. The pending arm is settled
    * by `OperationCompleted` in the reducer, which carries the same `changed`,
@@ -344,15 +371,17 @@ export function useExplorer(options: ExplorerOptions = {}) {
       run(async () => {
         if (!workspace || paths.length === 0) return undefined;
         return settleResponse(
-          await core.files.move({
-            workspaceId: workspace.id,
-            paths: [...paths],
-            targetDir,
-            mode,
-          }),
+          await relistIfPartial(() =>
+            core.files.move({
+              workspaceId: workspace.id,
+              paths: [...paths],
+              targetDir,
+              mode,
+            }),
+          ),
         );
       }),
-    [run, workspace, settleResponse],
+    [run, workspace, settleResponse, relistIfPartial],
   );
 
   const deleteEntries = useCallback(
@@ -360,16 +389,18 @@ export function useExplorer(options: ExplorerOptions = {}) {
       run(async () => {
         if (!workspace || paths.length === 0) return undefined;
         const response = await refusable({ kind: 'delete', paths, mode }, () =>
-          core.files.delete({
-            workspaceId: workspace.id,
-            paths: [...paths],
-            mode,
-            ...(force ? { force: true } : {}),
-          }),
+          relistIfPartial(() =>
+            core.files.delete({
+              workspaceId: workspace.id,
+              paths: [...paths],
+              mode,
+              ...(force ? { force: true } : {}),
+            }),
+          ),
         );
         return settleResponse(response);
       }),
-    [run, workspace, settleResponse, refusable],
+    [run, workspace, settleResponse, refusable, relistIfPartial],
   );
 
   /**
@@ -451,6 +482,7 @@ export function useExplorer(options: ExplorerOptions = {}) {
     setShowHidden,
     dismissNotice,
     clearError,
+    refreshAll,
     // T042
     setSelection,
     clipboard,
