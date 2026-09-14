@@ -1,6 +1,7 @@
 import type { WorkspaceClosedReason, WorkspaceId } from '@gritty/protocol';
 import { type FormEvent, type ReactNode, useState } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
+import { FolderIcon } from '../git/sidebar-icons';
 import { type SidebarTab, SidebarTabs, sidebarPanelId, sidebarTabId } from '../git/sidebar-tabs';
 import { countHidden, selectRows } from './explorer-reducer';
 import { ExplorerTree } from './explorer-tree';
@@ -84,8 +85,14 @@ export function ExplorerPanel({
         {tab === 'files' && hiddenCount > 0 && !state.showHidden && (
           <span className="badge">{hiddenCount} hidden</span>
         )}
-        <button type="button" onClick={() => void explorer.openFolder()}>
-          Open…
+        <button
+          type="button"
+          className="explorer__icon-button"
+          aria-label="Open folder…"
+          title="Open folder…"
+          onClick={() => void explorer.openFolder()}
+        >
+          <FolderIcon />
         </button>
         <details className="explorer__more">
           <summary aria-label="Workspace options">⋯</summary>

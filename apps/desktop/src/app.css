@@ -624,6 +624,7 @@ textarea:focus-visible {
 /* A 32px header carrying only the label and a count: the workspace controls
    that used to wrap across three rows now live in the disclosure beside it. */
 .explorer__toolbar {
+  position: relative; /* the options menu's containing block, see `.explorer__menu` */
   height: var(--section-h);
   flex: none;
   display: flex;
@@ -643,16 +644,33 @@ textarea:focus-visible {
   flex: none;
 }
 
+/* Since SIDEBAR-ICONS a tab holds a 16px glyph, not an uppercase label: a
+   square 24px hit target in the 32px bar, coloured through `currentColor`. */
 .explorer__toolbar .explorer__tab {
   margin: 0;
-  padding: 4px var(--gap-sm);
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
   border-radius: var(--radius-sm);
   background: transparent;
-  font-size: var(--text-label);
-  letter-spacing: var(--tracking-label);
-  text-transform: uppercase;
-  font-weight: 600;
   color: var(--fg-muted);
+}
+
+/* The open action, drawn the same way; it keeps the control's hover but not
+   the text padding `.explorer__toolbar button` gives a worded button. */
+.explorer__toolbar .explorer__icon-button {
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+/* Every inline icon (`components/icons.tsx`) keeps its 16px in a flex row. */
+.glyph {
+  flex: none;
 }
 
 .explorer__toolbar .explorer__tab:hover:not(:disabled) {
@@ -681,7 +699,6 @@ textarea:focus-visible {
 /* The path form, close and hidden toggle, folded into the popover idiom the
    editor and terminal settings already use. */
 .explorer__more {
-  position: relative;
   flex: none;
 }
 
@@ -705,16 +722,20 @@ textarea:focus-visible {
   color: var(--fg);
 }
 
+/* Anchored to the toolbar, not to the ⋯ button: `.explorer` clips its overflow,
+   so a fixed 21rem hung off the button's right edge ran past the sidebar's left
+   edge whenever the sidebar was narrower than that (SIDEBAR-ICONS). The width
+   is capped at the bar's own width less its gutters, so it always fits. */
 .explorer__menu {
   position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
+  top: calc(100% - 2px);
+  right: var(--gap-md);
   z-index: 15;
   display: flex;
   flex-direction: column;
   gap: var(--gap-sm);
   padding: 10px;
-  width: 21rem;
+  width: min(21rem, calc(100% - 2 * var(--gap-md)));
   background: var(--surface-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -783,14 +804,23 @@ textarea:focus-visible {
   background: var(--ghost);
 }
 
+/* A folder's chevron and a file's type icon share one 16px column (FILE-ICONS),
+   so a file no longer needs an invisible toggle to keep the names aligned. */
+.tree__toggle,
+.tree__glyph {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .tree__toggle {
-  width: 14px;
   padding: 0;
   border: none;
   background: transparent;
   color: var(--fg-faint);
-  font-size: var(--text-meta);
-  text-align: center;
 }
 
 .tree__toggle:hover:not(:disabled) {
@@ -798,17 +828,18 @@ textarea:focus-visible {
   color: var(--fg);
 }
 
-.tree__toggle:disabled {
-  opacity: 0;
+.tree__toggle .glyph {
+  transition: transform 80ms ease-out;
+}
+
+.tree__toggle--open .glyph {
+  transform: rotate(90deg);
 }
 
 .tree__glyph {
-  width: 10px;
   color: var(--fg-faint);
-  text-align: center;
 }
 
-.tree__row--dir .tree__glyph,
 .tree__row--dir .tree__name {
   color: var(--fg);
   font-weight: 600;
@@ -816,6 +847,61 @@ textarea:focus-visible {
 
 .tree__name--hidden {
   opacity: 0.55;
+}
+
+/* File-type icons (`components/file-icon.tsx`). The hues are the ANSI ramp,
+   the one set of named colours `tokens.css` defines for both themes; anything
+   without a recognisable type stays as faint as the old dot glyph was. */
+.file-icon {
+  color: var(--fg-faint);
+}
+
+.file-icon__letters {
+  fill: currentColor;
+  stroke: none;
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+
+.file-icon--markdown,
+.file-icon--typescript,
+.file-icon--css,
+.file-icon--readme,
+.file-icon--python {
+  color: var(--ansi-blue);
+}
+
+.file-icon--json,
+.file-icon--javascript,
+.file-icon--license {
+  color: var(--ansi-yellow);
+}
+
+.file-icon--react,
+.file-icon--sql {
+  color: var(--ansi-cyan);
+}
+
+.file-icon--rust,
+.file-icon--html {
+  color: var(--ansi-red);
+}
+
+.file-icon--yaml,
+.file-icon--image {
+  color: var(--ansi-magenta);
+}
+
+.file-icon--shell {
+  color: var(--ansi-green);
+}
+
+.file-icon--config,
+.file-icon--lock,
+.file-icon--text {
+  color: var(--fg-muted);
 }
 
 .tree__badge {
@@ -4854,6 +4940,12 @@ textarea:focus-visible {
   font-family: var(--font-mono);
   font-size: var(--text-code);
   min-width: 0;
+}
+
+/* The row aligns its text on the baseline; an SVG's baseline is its bottom
+   edge, so the file icon centres itself instead. */
+.git__file-button .file-icon {
+  align-self: center;
 }
 
 .git__file-button--selected,

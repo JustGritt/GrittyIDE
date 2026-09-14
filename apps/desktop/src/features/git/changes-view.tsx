@@ -7,6 +7,7 @@ import type {
   WorkspacePath,
 } from '@gritty/protocol';
 import { ErrorEnvelope } from '../../components/error-envelope';
+import { FileIcon, fileIconKind } from '../../components/file-icon';
 import {
   changeKindWord,
   describeEntry,
@@ -416,6 +417,7 @@ function ChangeRow({
         >
           {statusCode(entry)}
         </span>
+        <FileIcon kind={fileIconKind(fileName(entry.path))} />
         <span className="git__name">{fileName(entry.path)}</span>
         {directory !== null && <span className="git__dir">{directory}</span>}
         {entry.conflicted && <span className="badge git__badge--conflict">conflict</span>}

@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import { ChangesIcon, FilesIcon } from './sidebar-icons';
 
 /**
  * The sidebar's section tabs (T100-U), which artboard 9a drew and T233-S could
@@ -15,12 +16,20 @@ import { useRef } from 'react';
  * It lives beside the Changes tab rather than in a shared `components/` module
  * because there are exactly two tabs and one caller. A third section is what
  * would justify hoisting it, and moving it then is a rename.
+ *
+ * Since SIDEBAR-ICONS each tab draws an icon rather than its label, to give the
+ * header back its width. The label is still the tab's accessible name and its
+ * tooltip, so a screen reader and a hover both say what the glyph means.
  */
 export type SidebarTab = 'files' | 'changes';
 
-export const SIDEBAR_TABS: readonly { readonly id: SidebarTab; readonly label: string }[] = [
-  { id: 'files', label: 'Files' },
-  { id: 'changes', label: 'Changes' },
+export const SIDEBAR_TABS: readonly {
+  readonly id: SidebarTab;
+  readonly label: string;
+  readonly Icon: () => React.JSX.Element;
+}[] = [
+  { id: 'files', label: 'Files', Icon: FilesIcon },
+  { id: 'changes', label: 'Changes', Icon: ChangesIcon },
 ];
 
 export function sidebarTabId(tab: SidebarTab): string {
@@ -101,9 +110,11 @@ export function SidebarTabs({
             // broken reference rather than a helpful one.
             aria-controls={selected ? sidebarPanelId(candidate.id) : undefined}
             tabIndex={selected ? 0 : -1}
+            aria-label={candidate.label}
+            title={candidate.label}
             onClick={() => onTabChange(candidate.id)}
           >
-            {candidate.label}
+            <candidate.Icon />
           </button>
         );
       })}

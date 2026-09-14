@@ -1,6 +1,8 @@
 import { isInstructionFile } from '@gritty/markdown';
 import type { DirEntry } from '@gritty/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FileIcon, type FileIconKind, fileIconKind } from '../../components/file-icon';
+import { ChevronIcon } from '../../components/icons';
 import { Menu, type MenuAnchor, type MenuItem } from '../../components/menu';
 import { explorerIntentFor } from './explorer-keymap';
 import { checkName, checkNewPath } from './explorer-names';
@@ -522,22 +524,27 @@ function TreeRow({
             if (!expandable) onOpenFile?.(node.path, false);
           }}
         >
-          <button
-            type="button"
-            className="tree__toggle"
-            onClick={(event) => {
-              event.stopPropagation();
-              explorer.toggle(node);
-            }}
-            disabled={!expandable}
-            aria-hidden="true"
-            tabIndex={-1}
-          >
-            {expandable ? (node.expanded ? '▾' : '▸') : ' '}
-          </button>
-          <span className="tree__glyph" aria-hidden="true">
-            {glyph(entry)}
-          </span>
+          {/* One 16px column holds either a folder's chevron or a file's type
+              icon (FILE-ICONS), so names line up across both, the way the
+              Seti-themed trees in VS Code and Cursor draw it. */}
+          {expandable ? (
+            <button
+              type="button"
+              className={`tree__toggle${node.expanded ? ' tree__toggle--open' : ''}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                explorer.toggle(node);
+              }}
+              aria-hidden="true"
+              tabIndex={-1}
+            >
+              <ChevronIcon />
+            </button>
+          ) : (
+            <span className="tree__glyph" aria-hidden="true">
+              <FileIcon kind={iconKind(entry)} />
+            </span>
+          )}
           {draft ? (
             <DraftInput
               value={draft.value}
@@ -705,16 +712,15 @@ function DeleteDialog({
   );
 }
 
-function glyph(entry: DirEntry): string {
+/** Only for rows without a chevron: an expandable symlink draws as a folder. */
+function iconKind(entry: DirEntry): FileIconKind {
   switch (entry.kind) {
-    case 'dir':
-      return '▪';
     case 'symlink':
-      return '↗';
+      return 'symlink';
     case 'other':
-      return '◌';
+      return 'special';
     default:
-      return '·';
+      return fileIconKind(entry.name);
   }
 }
 

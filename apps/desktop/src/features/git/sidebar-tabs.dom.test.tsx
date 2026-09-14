@@ -33,7 +33,19 @@ describe('the sidebar tablist', () => {
   it('is a tablist with the two sections artboard 9a drew', () => {
     render(<Harness />);
     expect(screen.getByRole('tablist')).toBeTruthy();
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Files', 'Changes']);
+    expect(screen.getAllByRole('tab').map((tab) => tab.getAttribute('aria-label'))).toEqual([
+      'Files',
+      'Changes',
+    ]);
+  });
+
+  it('draws an icon, not the label, and keeps the label as the tooltip', () => {
+    render(<Harness />);
+    for (const tab of screen.getAllByRole('tab')) {
+      expect(tab.textContent).toBe('');
+      expect(tab.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+      expect(tab.getAttribute('title')).toBe(tab.getAttribute('aria-label'));
+    }
   });
 
   it('marks exactly one tab selected and points it at the panel that exists', () => {

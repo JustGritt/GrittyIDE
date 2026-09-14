@@ -142,6 +142,21 @@ describe('the tree as a widget', () => {
     }
   });
 
+  it('gives a folder a chevron and a file its type icon, in the same column (FILE-ICONS)', async () => {
+    const { view } = await mountTree();
+    const [folder, readme, notes] = rows(view.container);
+
+    expect(folder?.querySelector('.tree__toggle svg')).not.toBeNull();
+    expect(folder?.querySelector('.file-icon')).toBeNull();
+
+    // A file no longer carries an invisible toggle to hold the column open.
+    for (const item of [readme, notes]) {
+      expect(item?.querySelector('.tree__toggle')).toBeNull();
+    }
+    expect(readme?.querySelector('.tree__glyph .file-icon--readme')).not.toBeNull();
+    expect(notes?.querySelector('.tree__glyph .file-icon--text')).not.toBeNull();
+  });
+
   it('moves the roving tabIndex with the arrow keys', async () => {
     const { view } = await mountTree();
     const tree = view.container.querySelector('[role="tree"]') as HTMLElement;
