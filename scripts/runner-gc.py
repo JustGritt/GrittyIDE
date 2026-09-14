@@ -734,14 +734,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--floor-gb",
         type=float,
         default=25.0,
-        # Measured 2026-09-06, this worktree, cold: a from-scratch `pnpm
-        # check` (debug) plus `pnpm tauri build --bundles app --ci` (release,
-        # the macos job's own step) peaked at 4.5 GiB debug + ~1.24 GiB
-        # release + 16 MiB bundle ≈ 5.7 GiB combined in target/. 25 GiB is
-        # ~4.4x that measured full-clean-build peak — headroom for node_modules
-        # (281M measured), a second concurrent lane's incremental churn before
-        # the next sweep, and the guard's own point: refuse well before the
-        # edge, not at it.
+        # Re-derived 2026-09-14 (GC-BUDGET), after ADR-033's line-tables-only
+        # profile, in a private CARGO_TARGET_DIR, one clean generation of
+        # everything this machine builds: the gate's clippy + test builds, the
+        # debug app `pnpm dev` runs, and the release sidecar + app `pnpm tauri
+        # build` compiles. That consumed 7.87 GiB by `df` (7.95 by `du`). It is
+        # larger than CI-RUNNER-GC's 5.7 GiB from 2026-09-06 even though each
+        # build shrank, because the workspace grew and that figure left out the
+        # `pnpm dev` binary. 25 GiB still holds: one cold macos job (≈8 GiB plus
+        # node_modules and target/fixtures) leaves ≈16 GiB, room for about two
+        # more cold generations from concurrent lanes before the next sweep.
+        # The ratio is now ~3.2x, down from the 4.4x first intended. Raise the
+        # floor if cold builds in two lanes at once become ordinary.
         help="minimum free GiB required to proceed (see task file for how this was measured)",
     )
     guard.set_defaults(func=cmd_guard)
@@ -760,14 +764,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--cache-budget-gb",
         type=float,
         default=12.0,
-        # Measured 2026-09-06, in this worktree, cold: a full `pnpm check`
-        # (fmt, clippy --all-targets, cargo test --workspace incl. doctests)
-        # left target/debug/{deps,build,.fingerprint} at 3.1G + 360M + 13M =
-        # ~3.47 GiB. 12 GiB is ~3.5x that single-build figure, room for
-        # several dependency bumps between sweeps without every pass
-        # forcing a cold rebuild. Release wasn't independently measured to
-        # the same rigor (see completion report); this budget applies to
-        # each profile separately, so it covers both.
+        # Re-derived 2026-09-14 (GC-BUDGET), after ADR-033, from one clean
+        # generation in a private target dir, in this function's own unit
+        # (summed lstat sizes of deps + build + .fingerprint):
+        #   debug, gate only (clippy + test builds)      3.48 GiB
+        #   debug, live set (gate + `pnpm dev` binary)   4.15 GiB
+        #     of which the workspace's own gritty-* crates 1.77 GiB
+        #   release (sidecar + tauri build)              1.40 GiB
+        # ADR-033 made each build smaller, but the workspace grew by about the
+        # same amount, so the budget did not become generous. 12 GiB still
+        # holds the debug live set, one whole dependency-bump generation beside
+        # it, and two edit-cycle generations of workspace crates
+        # (4.15 + 4.15 + 2 × 1.77 ≈ 11.8). A tighter budget evicts inputs of
+        # the build the next command reuses. Per profile, so release (1.40)
+        # has far more room than it needs, but it only grows when an app build
+        # runs.
         help="per profile (debug/release), per target root: deps+build+.fingerprint budget",
     )
     sweep.add_argument(
