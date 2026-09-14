@@ -86,6 +86,7 @@ moves back. Never move a task file by hand.
 | [TREE-DISCLOSURE](docs/tasks/TREE-DISCLOSURE-chevron-transition.md) | Tree chevron and expand/collapse transition | 2 | FILE-ICONS | review |
 | [TURN-START-DEQUEUE](docs/tasks/TURN-START-DEQUEUE-measure.md) | Measure whether a dequeued message should start a turn | maintenance | AGENT-TURN-END | review |
 | [TURN-START-QUEUED](docs/tasks/TURN-START-QUEUED-dequeue-and-shell.md) | A dequeued message or a ! command starts a turn | maintenance | TURN-START-DEQUEUE, AGENT-TURN-END | review |
+| [WATCH-DEGRADED](docs/tasks/WATCH-DEGRADED-report-unwatched-tree.md) | Say when part of the tree isn't being watched | maintenance | WATCH-FLAKE, FILES-PARTIAL, EXPLORER-RELIST-QUEUE | blocked |
 | [WATCH-FLAKE](WATCH-FLAKE-load-sensitive.md) | Two load-sensitive tests fail in the full-workspace run, pass alone |  | – | doing |
 <!-- board:table end -->
 
