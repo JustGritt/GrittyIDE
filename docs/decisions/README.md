@@ -27,7 +27,7 @@ requires updating the relevant ADR.
 | [ADR-019](ADR-019-workspace-ownership.md) | Write ownership is a logical lease held by a workstream, and it is observed rather than enforced | Accepted |
 | [ADR-020](ADR-020-agent-permission-verdicts.md) | A hook may wait for Gritty's verdict on a permission prompt, bounded and fail-open | Accepted |
 | [ADR-021](ADR-021-agent-run-persistence.md) | A run Gritty owns is persisted as an account of itself, never as something to resume | Accepted |
-| [ADR-022](ADR-022-search-engine.md) | Search runs in-process on ripgrep's own crates, and "ignored" keeps its current, narrower meaning | Accepted |
+| [ADR-022](ADR-022-search-engine.md) | Search runs in-process on ripgrep's own crates, and "ignored" keeps its current, narrower meaning | Accepted, amended by ADR-034 |
 | [ADR-023](ADR-023-git-library.md) | Git is read in-process through `gix`, with no `git` process and no configuration that can run one | Accepted, amended by ADR-029 |
 | [ADR-024](ADR-024-target-dir-retention.md) | One `target/` per checkout, swept by budget and age — not a shared `CARGO_TARGET_DIR` | Accepted |
 | [ADR-025](ADR-025-filesystem-watching.md) | Filesystem watching is one coalesced, bounded, directory-grained signal | Accepted |
@@ -37,7 +37,7 @@ requires updating the relevant ADR.
 | [ADR-031](ADR-031-settings-storage.md) | Settings are a core-owned JSON file, and user configuration is not application metadata | Accepted |
 | [ADR-032](ADR-032-ui-framework.md) | The UI framework is React 19, and it renders chrome rather than content | Accepted |
 | [ADR-033](ADR-033-dev-profile-debuginfo.md) | The dev profile is set deliberately, and debug info is the thing it sets | Accepted |
-| [ADR-034](ADR-034-meaning-of-ignored.md) | "Ignored" means what Git means when the root is a repository, and it is one predicate every surface is handed | Proposed |
+| [ADR-034](ADR-034-meaning-of-ignored.md) | "Ignored" means what Git means when the root is a repository, and it is one predicate every surface is handed | Accepted |
 
 Template:
 

@@ -1,7 +1,14 @@
 # ADR-034: "Ignored" means what Git means when the root is a repository, and it is one predicate every surface is handed
 
-- **Status:** Proposed
+- **Status:** Accepted (not yet implemented; IGNORE-RULES, IGNORE-SEAM,
+  IGNORE-WIRE and IGNORE-UI build it)
 - **Date:** 2026-09-14
+- **Accepted:** 2026-09-14 by Alexis, as drafted: option C. When the workspace
+  root is a repository, "ignored" means untracked and matched by Git's exclude
+  rules or the eleven names. One gix-backed `IgnoreRules` in `gritty-git` is
+  handed by `gritty-core` to the listing, the watcher, search and quick-open.
+  Nothing is hidden, and `ignoredHint` covers files. Until IGNORE-SEAM lands,
+  the two disagreements under "What ADR-022 did not know" are still live.
 - **Decides:** ADR-022 decision 3, the decision it deliberately left unmade
 - **Motivated by:** the limitation T080 (`docs/tasks/completed/T080-search.md:499-501`),
   T130-R (`docs/tasks/completed/T130-R-path-ranking.md:324-326`) and T130-C
@@ -244,7 +251,8 @@ change — made to `gritty-git`'s open options once, for both surfaces.
 
 ## Follow-up tickets this would create
 
-Not added to the board; named here so the decision has a shape to be judged by.
+Added to the board as `unspec` on acceptance, each waiting for its own task
+file. They run in order: RULES, then SEAM, then WIRE, then UI.
 
 - **IGNORE-RULES** — `IgnoreRules` in `gritty-git`: `gix` excludes stack plus
   index, bounded ignore-file reads, differential fixtures against

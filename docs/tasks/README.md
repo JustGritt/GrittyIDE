@@ -36,7 +36,6 @@ moves back. Never move a task file by hand.
 | T400 | Worktree isolation | 5 | T100, T325 | unspec |
 | T405 | Ownership-aware scheduler | 5 | T325, T300 | unspec |
 | T410 | Attention queue | 5 | T210, T325, T335 | unspec |
-| ADR-034 | What "ignored" means across the explorer, the watcher and search | 2 | ADR-022 | review |
 | [AGENT-TURN-END](AGENT-TURN-END-roster-done-while-generating.md) | The agent roster says Done while the model is still generating | 3 | T220, T221, T223, T231 | review |
 | BOARD-ARCHIVE | Done and superseded tickets move to a generated archive, so the index lists open work | tools | – | review |
 | BOARD-DROP-DONE | drop --to done skips the reviewer rule move enforces | tools | – | unspec |
@@ -46,9 +45,14 @@ moves back. Never move a task file by hand.
 | CONFIRM-DIALOG | Extract a shared confirm dialog before a third copy is written | 2 | – | unspec |
 | [EXPLORER-DISCARD-NOTICE](docs/tasks/EXPLORER-DISCARD-NOTICE-dirty-documents-only.md) | The discard notice replays only a dirty-document refusal | maintenance | T042, EXPLORER-FORCE-REPLAY | review |
 | [FILE-ICONS](docs/tasks/FILE-ICONS-file-type-icons.md) | File-type icons in the explorer tree and Changes list | 2 | – | review |
+| [FILES-PARTIAL](docs/tasks/FILES-PARTIAL-settle-what-was-done.md) | A move or delete that stops partway settles what it did | maintenance | T042 | doing |
 | [GC-BUDGET](GC-BUDGET-sweeper-defaults.md) | Re-derive the sweeper's cache budget and disk floor for ADR-033's smaller builds | tools | ADR-024, ADR-033 | review |
 | GC-DEV-SKIP | A running tauri dev stops every sweep of its checkout: the process scan outranks a free .cargo-lock | tools | GC-BUDGET | todo |
 | [GIT-STATES](GIT-STATES-in-progress-state-fixtures.md) | Test the in-progress repository states git status names but never exercised | 2 | T100, ADR-023 | review |
+| IGNORE-RULES | IgnoreRules in gritty-git: Git's exclude rules plus the index, checked against git check-ignore | 2 | ADR-034 | unspec |
+| IGNORE-SEAM | One ignored predicate handed to the listing, the watcher, search and quick-open | 2 | IGNORE-RULES | unspec |
+| IGNORE-UI | The include-ignored toggle in search and quick-open, and how the explorer marks ignored rows | 2 | IGNORE-WIRE | unspec |
+| IGNORE-WIRE | ignoredHint on files, both includeIgnored docs, includeIgnored on workspace.findFiles | 2 | IGNORE-SEAM | unspec |
 | [LAST-PROMPT-NOTIFY](docs/tasks/LAST-PROMPT-NOTIFY-task-notifications.md) | A task notification is not a session's last prompt | maintenance | LAST-PROMPT-SHELL | review |
 | [LAST-PROMPT-SHELL](docs/tasks/LAST-PROMPT-SHELL-bang-commands.md) | A ! shell command is not a session's last prompt | maintenance | AGENT-TURN-END | review |
 | [LEASE-NOTIFY](docs/tasks/LEASE-NOTIFY-lease-change-notices.md) | Tell a session when the lease registry changes under it | tooling | – | review |

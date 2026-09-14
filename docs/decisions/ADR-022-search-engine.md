@@ -1,6 +1,12 @@
 # ADR-022: Search runs in-process on ripgrep's own crates, and "ignored" keeps its current, narrower meaning
 
-- **Status:** Accepted (implemented by T080)
+- **Status:** Accepted (implemented by T080), amended by ADR-034
+- **Amended:** 2026-09-14 by ADR-034, accepted the same day, which makes
+  decision 3's separate decision: in a repository, "ignored" takes Git's
+  meaning, through one predicate every surface is handed. The title's "keeps
+  its current, narrower meaning" holds until IGNORE-SEAM lands. Decisions 1, 2
+  and 4 stand, including the walker's ignore sources staying off: the
+  predicate is injected into `filter_entry` as it is today.
 - **Date:** 2026-09-06
 - **Accepted:** 2026-09-14 by Alexis, as drafted, after T080 had already built
   on it. Checked against the tree that day: the walker turns every ignore
@@ -119,8 +125,8 @@ the tree to implement it. Or when a measured walk over `fixtures/large-repo`
 `CANCEL_CHECK_INTERVAL`, which would argue for `ignore`'s parallel walker and
 its own cancellation, not for a process.
 
-**2026-09-14, both triggers checked.** The first is the subject of ADR-034
-(Proposed), which drafts the meaning of "ignored" this ADR deferred. The second
+**2026-09-14, both triggers checked.** The first is answered by ADR-034
+(accepted 2026-09-14), which decides the meaning of "ignored" this ADR deferred. The second
 did not fire (SEARCH-WALK-TIME, `docs/tasks/SEARCH-WALK-TIME-large-repo-timing.md`):
 over `large-repo`'s 10,429 files a full content scan takes a median 197 ms in
 release and 242 ms in debug, and a cancellation is honoured within 2.3 ms at
