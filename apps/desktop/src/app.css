@@ -951,26 +951,6 @@ textarea:focus-visible {
   color: var(--fg-muted);
 }
 
-/* Explorer file buttons (T030) */
-
-/* The whole row already lights up on hover, so the name itself only needs to
-   go from dim to full — an underline on top of that reads as a hyperlink. */
-.tree__name--file {
-  padding: 0;
-  border: none;
-  border-radius: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.tree__name--file:hover:not(:disabled) {
-  background: transparent;
-  color: var(--fg);
-}
-
 /* Editor pane (T040): Monaco bound to the core's buffers */
 
 .editor {
