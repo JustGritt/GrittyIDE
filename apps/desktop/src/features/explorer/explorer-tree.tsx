@@ -1,6 +1,14 @@
 import { isInstructionFile } from '@gritty/markdown';
 import type { DirEntry } from '@gritty/protocol';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { FileIcon, type FileIconKind, fileIconKind } from '../../components/file-icon';
 import { ChevronIcon } from '../../components/icons';
 import { Menu, type MenuAnchor, type MenuItem } from '../../components/menu';
@@ -9,6 +17,14 @@ import { checkName, checkNewPath } from './explorer-names';
 import { type ExplorerNode, type ExplorerRow, isExpandable, selectRows } from './explorer-reducer';
 import { focusAt, moveFocus, selectAll, selectOn, typeahead } from './explorer-selection';
 import type { ExplorerController } from './use-explorer';
+import {
+  animateRowIn,
+  EXIT_MS,
+  type ExitBlock,
+  MOTION_EASING,
+  rowKey,
+  useRowMotion,
+} from './use-row-motion';
 
 /** Our own drag payload, so an OS drag and a tab drag are not mistaken for one. */
 const ENTRY_MIME = 'application/x-gritty-entry';
@@ -63,6 +79,15 @@ export function ExplorerTree({
     (path: string) => state.nodes[path]?.entry?.name ?? path,
     [state.nodes],
   );
+  const motion = useRowMotion(rows);
+  const exitsAfter = useMemo(() => {
+    const byAnchor = new Map<string, ExitBlock[]>();
+    for (const block of motion.exits) {
+      const key = `entry:${block.parent}`;
+      byAnchor.set(key, [...(byAnchor.get(key) ?? []), block]);
+    }
+    return byAnchor;
+  }, [motion.exits]);
 
   const [menu, setMenu] = useState<{ anchor: MenuAnchor; path: string } | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -348,68 +373,78 @@ export function ExplorerTree({
           setDropTarget(null);
         }}
       >
-        {rows.map((row) => (
-          <TreeRow
-            key={`${row.kind}:${row.node.path}`}
-            row={row}
-            explorer={explorer}
-            selected={row.kind === 'entry' && selection.paths.includes(row.node.path)}
-            focused={row.kind === 'entry' && selection.focused === row.node.path}
-            cut={
-              explorer.clipboard?.mode === 'MOVE' &&
-              explorer.clipboard.paths.includes(row.node.path)
-            }
-            dropTarget={dropTarget === row.node.path}
-            draft={draft?.kind === 'rename' && draft.path === row.node.path ? draft : null}
-            onDraftChange={(value) => setDraft((d) => (d === null ? null : { ...d, value }))}
-            onCommitDraft={() => void commitDraft()}
-            onCancelDraft={() => setDraft(null)}
-            onSelect={(event) =>
-              setSelection(
-                selectOn(selection, visible, row.node.path, {
-                  toggle: event.metaKey || event.ctrlKey,
-                  range: event.shiftKey,
-                }),
-              )
-            }
-            onOpenFile={onOpenFile}
-            onContextMenu={(event) => openMenu(event, row.node.path)}
-            onDragStart={(event) => {
-              const paths = targets(row.node.path);
-              dragging.current = paths;
-              event.dataTransfer.setData(ENTRY_MIME, paths.join('\n'));
-              event.dataTransfer.effectAllowed = 'copyMove';
-            }}
-            onDragEnd={() => {
-              dragging.current = [];
-              setDropTarget(null);
-            }}
-            onDragOverRow={(event) => {
-              if (dragging.current.length === 0) return;
-              const container = containerOf(row.node.path);
-              // Never offer to drop something into itself.
-              if (dragging.current.some((p) => container === p || container.startsWith(`${p}/`))) {
-                return;
-              }
-              event.preventDefault();
-              event.stopPropagation();
-              event.dataTransfer.dropEffect = event.altKey ? 'copy' : 'move';
-              setDropTarget(row.node.path);
-            }}
-            onDropRow={(event) => {
-              if (dragging.current.length === 0) return;
-              event.preventDefault();
-              event.stopPropagation();
-              void explorer.transfer(
-                dragging.current,
-                containerOf(row.node.path),
-                event.altKey ? 'COPY' : 'MOVE',
-              );
-              dragging.current = [];
-              setDropTarget(null);
-            }}
-          />
-        ))}
+        {rows.map((row) => {
+          const key = rowKey(row);
+          return (
+            <Fragment key={key}>
+              <TreeRow
+                row={row}
+                enter={motion.enter.has(key)}
+                explorer={explorer}
+                selected={row.kind === 'entry' && selection.paths.includes(row.node.path)}
+                focused={row.kind === 'entry' && selection.focused === row.node.path}
+                cut={
+                  explorer.clipboard?.mode === 'MOVE' &&
+                  explorer.clipboard.paths.includes(row.node.path)
+                }
+                dropTarget={dropTarget === row.node.path}
+                draft={draft?.kind === 'rename' && draft.path === row.node.path ? draft : null}
+                onDraftChange={(value) => setDraft((d) => (d === null ? null : { ...d, value }))}
+                onCommitDraft={() => void commitDraft()}
+                onCancelDraft={() => setDraft(null)}
+                onSelect={(event) =>
+                  setSelection(
+                    selectOn(selection, visible, row.node.path, {
+                      toggle: event.metaKey || event.ctrlKey,
+                      range: event.shiftKey,
+                    }),
+                  )
+                }
+                onOpenFile={onOpenFile}
+                onContextMenu={(event) => openMenu(event, row.node.path)}
+                onDragStart={(event) => {
+                  const paths = targets(row.node.path);
+                  dragging.current = paths;
+                  event.dataTransfer.setData(ENTRY_MIME, paths.join('\n'));
+                  event.dataTransfer.effectAllowed = 'copyMove';
+                }}
+                onDragEnd={() => {
+                  dragging.current = [];
+                  setDropTarget(null);
+                }}
+                onDragOverRow={(event) => {
+                  if (dragging.current.length === 0) return;
+                  const container = containerOf(row.node.path);
+                  // Never offer to drop something into itself.
+                  if (
+                    dragging.current.some((p) => container === p || container.startsWith(`${p}/`))
+                  ) {
+                    return;
+                  }
+                  event.preventDefault();
+                  event.stopPropagation();
+                  event.dataTransfer.dropEffect = event.altKey ? 'copy' : 'move';
+                  setDropTarget(row.node.path);
+                }}
+                onDropRow={(event) => {
+                  if (dragging.current.length === 0) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void explorer.transfer(
+                    dragging.current,
+                    containerOf(row.node.path),
+                    event.altKey ? 'COPY' : 'MOVE',
+                  );
+                  dragging.current = [];
+                  setDropTarget(null);
+                }}
+              />
+              {exitsAfter.get(key)?.map((block) => (
+                <ExitingRows key={block.id} block={block} onDone={motion.finishExit} />
+              ))}
+            </Fragment>
+          );
+        })}
         {draftRow && (
           <div className="tree__row tree__row--draft" style={{ paddingLeft: '0.5rem' }}>
             <DraftInput
@@ -445,8 +480,97 @@ export function ExplorerTree({
   );
 }
 
+/**
+ * The rows a collapse just removed, folding away (TREE-DISCLOSURE). A copy,
+ * not the rows themselves: no roles, no `data-path`, `inert` — nothing can
+ * focus, select or click a row that is already gone from the tree's state.
+ */
+function ExitingRows({ block, onDone }: { block: ExitBlock; onDone: (id: number) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element || typeof element.animate !== 'function') {
+      onDone(block.id);
+      return;
+    }
+    const fold = element.animate(
+      [
+        { height: `${element.offsetHeight}px`, opacity: 1 },
+        { height: '0px', opacity: 0 },
+      ],
+      { duration: EXIT_MS, easing: MOTION_EASING, fill: 'forwards' },
+    );
+    fold.onfinish = () => onDone(block.id);
+    return () => {
+      fold.onfinish = null;
+      fold.cancel();
+    };
+  }, [block, onDone]);
+  return (
+    <div ref={ref} className="tree__exit" aria-hidden="true" inert>
+      {block.rows.map((row) => (
+        <GhostRow key={rowKey(row)} row={row} />
+      ))}
+    </div>
+  );
+}
+
+/** What `TreeRow` draws, without any of its behaviour. */
+function GhostRow({ row }: { row: ExplorerRow }) {
+  const indent = indentOf(row.depth);
+  switch (row.kind) {
+    case 'entry': {
+      const { node, entry } = row;
+      return (
+        <div className={`tree__row tree__row--${entry.kind}`} style={indent}>
+          {isExpandable(entry) ? (
+            <span className={`tree__toggle${node.expanded ? ' tree__toggle--open' : ''}`}>
+              <ChevronIcon />
+            </span>
+          ) : (
+            <span className="tree__glyph">
+              <FileIcon kind={iconKind(entry)} />
+            </span>
+          )}
+          <span className={`tree__name${entry.hidden ? ' tree__name--hidden' : ''}`}>
+            {entry.name}
+          </span>
+          {describe(entry).map((badge) => (
+            <span key={badge} className="tree__badge">
+              {badge}
+            </span>
+          ))}
+          {entry.size !== undefined && <span className="tree__size">{formatSize(entry.size)}</span>}
+        </div>
+      );
+    }
+    case 'more':
+      return (
+        <div className="tree__row tree__row--more" style={indent}>
+          <button type="button" tabIndex={-1}>
+            Load {row.remaining.toLocaleString()} more…
+          </button>
+        </div>
+      );
+    case 'status':
+      return (
+        <div
+          className={`tree__row tree__row--${row.node.error ? 'error' : 'loading'}`}
+          style={indent}
+        >
+          <span>{row.node.error ? row.node.error.message : 'Listing…'}</span>
+        </div>
+      );
+  }
+}
+
+function indentOf(depth: number) {
+  return { paddingLeft: `${0.5 + depth * 1.1}rem` };
+}
+
 function TreeRow({
   row,
+  enter,
   explorer,
   selected,
   focused,
@@ -465,6 +589,8 @@ function TreeRow({
   onDropRow,
 }: {
   row: ExplorerRow;
+  /** Fade in on mount (TREE-DISCLOSURE); ignored once the row is mounted. */
+  enter: boolean;
   explorer: ExplorerController;
   selected: boolean;
   focused: boolean;
@@ -482,7 +608,11 @@ function TreeRow({
   onDragOverRow: (event: React.DragEvent) => void;
   onDropRow: (event: React.DragEvent) => void;
 }) {
-  const indent = { paddingLeft: `${0.5 + row.depth * 1.1}rem` };
+  const indent = indentOf(row.depth);
+  // A callback ref runs as the row attaches, before paint, so the first frame
+  // is already transparent. Once the row stops entering the ref is dropped,
+  // which calls it with `null` and leaves a running fade alone.
+  const ref = enter ? animateRowIn : undefined;
   switch (row.kind) {
     case 'entry': {
       const { node, entry } = row;
@@ -500,6 +630,7 @@ function TreeRow({
       return (
         // biome-ignore lint/a11y/useKeyWithClickEvents: every key is handled once, on the tree, where the roving tabIndex is.
         <div
+          ref={ref}
           className={classes}
           style={indent}
           role="treeitem"
@@ -570,7 +701,7 @@ function TreeRow({
     }
     case 'more':
       return (
-        <div className="tree__row tree__row--more" style={indent} role="none">
+        <div ref={ref} className="tree__row tree__row--more" style={indent} role="none">
           <button type="button" onClick={() => explorer.loadMore(row.node)}>
             Load {row.remaining.toLocaleString()} more…
           </button>
@@ -583,7 +714,7 @@ function TreeRow({
       const { node } = row;
       if (node.error) {
         return (
-          <div className="tree__row tree__row--error" style={indent} role="none">
+          <div ref={ref} className="tree__row tree__row--error" style={indent} role="none">
             <span>
               {node.error.code}: {node.error.message}
             </span>
@@ -594,7 +725,7 @@ function TreeRow({
         );
       }
       return (
-        <div className="tree__row tree__row--loading" style={indent} role="none">
+        <div ref={ref} className="tree__row tree__row--loading" style={indent} role="none">
           <span>{node.pending ? 'Listing (operation)…' : 'Listing…'}</span>
           {node.pending && (
             <button type="button" onClick={() => void explorer.cancelListing(node)}>

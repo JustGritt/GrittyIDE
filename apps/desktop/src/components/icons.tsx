@@ -38,11 +38,16 @@ export function Glyph({
   );
 }
 
-/** Points right; CSS turns it down when what it discloses is open. */
+/**
+ * Points right; CSS turns it down when what it discloses is open.
+ *
+ * Smaller than the 16px column that holds it (TREE-DISCLOSURE), and centred
+ * on (8, 8), the point `rotate()` turns it around, so it does not wobble.
+ */
 export function ChevronIcon() {
   return (
     <Glyph strokeWidth={1.5}>
-      <path d="M6 3.5 10.5 8 6 12.5" />
+      <path d="M6.5 5 9.5 8 6.5 11" />
     </Glyph>
   );
 }

@@ -828,12 +828,27 @@ textarea:focus-visible {
   color: var(--fg);
 }
 
+/* The chevron's turn shares its duration and curve with the rows entering and
+   folding away (TREE-DISCLOSURE, `use-row-motion.ts`), so the three read as one
+   movement. There are no motion tokens yet; if a second surface wants these
+   values, that is the moment to add them to ADR-016. */
 .tree__toggle .glyph {
-  transition: transform 80ms ease-out;
+  transition: transform 120ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .tree__toggle--open .glyph {
   transform: rotate(90deg);
+}
+
+/* A collapsed folder's rows, copied, while they fold to nothing. */
+.tree__exit {
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tree__toggle .glyph {
+    transition: none;
+  }
 }
 
 .tree__glyph {

@@ -333,3 +333,123 @@ describe('the operations', () => {
     });
   });
 });
+
+/**
+ * jsdom has no Web Animations, so every test above runs with motion off, as a
+ * WebView without it would. Here `animate` is stubbed to record what was asked
+ * to move; whether it looks right is for a person in `pnpm dev`.
+ */
+describe('expand and collapse motion (TREE-DISCLOSURE)', () => {
+  interface Recorded {
+    element: HTMLElement;
+    keyframes: Keyframe[];
+    animation: { onfinish: (() => void) | null; cancel: () => void };
+  }
+  const recorded: Recorded[] = [];
+
+  beforeEach(() => {
+    recorded.length = 0;
+    seam.handlers.set('workspace_list', (args) => {
+      const path = (args?.request as { path: string } | undefined)?.path ?? '';
+      if (path === '') return { status: 'ready', page: ROOT_PAGE };
+      const entries = [file('a.ts'), file('b.ts')];
+      return { status: 'ready', page: { path, entries, total: entries.length, truncated: false } };
+    });
+    Object.defineProperty(HTMLElement.prototype, 'animate', {
+      configurable: true,
+      writable: true,
+      value(this: HTMLElement, keyframes: Keyframe[]) {
+        const animation = { onfinish: null, cancel: vi.fn() };
+        recorded.push({ element: this, keyframes, animation });
+        return animation;
+      },
+    });
+  });
+
+  afterEach(() => {
+    delete (HTMLElement.prototype as { animate?: unknown }).animate;
+    delete (window as { matchMedia?: unknown }).matchMedia;
+  });
+
+  async function toggleSrc(container: HTMLElement) {
+    const toggle = container.querySelector('[data-path="src"] .tree__toggle') as HTMLElement;
+    await act(async () => {
+      fireEvent.click(toggle);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  const animatedPaths = () =>
+    recorded.map((entry) => entry.element.dataset.path).filter((path) => path !== undefined);
+
+  it("fades in a folder's children as they mount, and no row that was already there", async () => {
+    const { view } = await mountTree();
+    await toggleSrc(view.container);
+
+    expect(rows(view.container).map((row) => row.dataset.path)).toEqual([
+      'src',
+      'src/a.ts',
+      'src/b.ts',
+      'README.md',
+      'notes.txt',
+    ]);
+    expect(animatedPaths()).toEqual(['src/a.ts', 'src/b.ts']);
+    expect(recorded.find((entry) => entry.element.dataset.path)?.keyframes[0]).toMatchObject({
+      opacity: 0,
+    });
+  });
+
+  it('folds a collapsed folder away as an inert copy, then removes it', async () => {
+    const { view } = await mountTree();
+    await toggleSrc(view.container);
+    recorded.length = 0;
+    await toggleSrc(view.container);
+
+    // The tree's own state is already collapsed: the children are not treeitems.
+    expect(rows(view.container).map((row) => row.dataset.path)).toEqual([
+      'src',
+      'README.md',
+      'notes.txt',
+    ]);
+    const exit = view.container.querySelector<HTMLElement>('.tree__exit');
+    expect(exit, 'the removed rows stay on screen while they fold').not.toBeNull();
+    expect(exit?.previousElementSibling?.getAttribute('data-path')).toBe('src');
+    expect(exit?.getAttribute('aria-hidden')).toBe('true');
+    expect(exit?.hasAttribute('inert')).toBe(true);
+    expect(exit?.querySelectorAll('.tree__row')).toHaveLength(2);
+    expect(exit?.querySelector('[role], [data-path], [tabindex="0"]')).toBeNull();
+
+    const fold = recorded.find((entry) => entry.element === exit);
+    expect(fold?.keyframes.at(-1)).toMatchObject({ height: '0px', opacity: 0 });
+    await act(async () => {
+      fold?.animation.onfinish?.();
+    });
+    expect(view.container.querySelector('.tree__exit')).toBeNull();
+  });
+
+  it('reopening a folder mid-fold drops the copy instead of drawing the children twice', async () => {
+    const { view } = await mountTree();
+    await toggleSrc(view.container);
+    await toggleSrc(view.container);
+    expect(view.container.querySelector('.tree__exit')).not.toBeNull();
+
+    await toggleSrc(view.container);
+    expect(view.container.querySelector('.tree__exit')).toBeNull();
+    expect(view.container.textContent?.match(/a\.ts/g)).toHaveLength(1);
+  });
+
+  it('does nothing when the OS asks for reduced motion', async () => {
+    window.matchMedia = ((query: string) => ({
+      matches: query === '(prefers-reduced-motion: reduce)',
+      media: query,
+    })) as unknown as typeof window.matchMedia;
+    const { view } = await mountTree();
+    await toggleSrc(view.container);
+    await toggleSrc(view.container);
+
+    expect(recorded).toEqual([]);
+    expect(view.container.querySelector('.tree__exit')).toBeNull();
+  });
+});
