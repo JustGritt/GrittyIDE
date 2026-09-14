@@ -39,7 +39,6 @@ moves back. Never move a task file by hand.
 | T410 | Attention queue | 5 | T210, T325, T335 | unspec |
 | ADR-017 | Decide the terminal command-block contract (drafted, undecided) | 2 | – | todo |
 | ADR-018A | ADR-018 amendment: a hook that may refuse a write | 4 | T326 | todo |
-| ADR-033 | What [profile.dev] should be: debuginfo and split-debuginfo on macOS | 2 | – | review |
 | [AGENT-TURN-END](AGENT-TURN-END-roster-done-while-generating.md) | The agent roster says Done while the model is still generating | 3 | T220, T221, T223, T231 | doing |
 | BOARD-ARCHIVE | Done and superseded tickets move to a generated archive, so the index lists open work | tools | – | review |
 | BOARD-STALE-REASON | A block reason outlives its block, and show prints it as present tense | tools | – | todo |

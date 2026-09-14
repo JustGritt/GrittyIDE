@@ -62,6 +62,7 @@ a reopened ticket moves back the same way. Do not move files in or out by hand.
 | ADR-029 | Git writes run through the git binary, not gix | 2 | – | done |
 | ADR-031 | Settings are a core-owned settings.json, user scope only | 2 | – | done |
 | ADR-032 | Record the UI framework decision (React 19) | 0 | – | done |
+| ADR-033 | What [profile.dev] should be: debuginfo and split-debuginfo on macOS | 2 | – | done |
 | CI-COST | CI: self-hosted macOS runner, and stop burning metered minutes |  | – | done |
 | [CI-RUNNER-GC](CI-RUNNER-GC-disk-retention.md) | Self-hosted runner never cleans up: target/ and stale bundles grow unbounded on the dev Mac |  | – | done |
 | [EVENT-LISTEN-GAP](EVENT-LISTEN-GAP-startup-events.md) | An event emitted before the WebView is listening reaches nobody | 1 | T010 | done |

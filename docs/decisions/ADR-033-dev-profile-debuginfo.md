@@ -1,11 +1,10 @@
 # ADR-033: The dev profile is set deliberately, and debug info is the thing it sets
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-09
-- **Decided by:** nobody yet. Drafted by the agent that measured it;
-  `docs/plans/execution-board.md` reserves every ADR verdict for lane H, so this
-  stays `Proposed` until Alexis records one — as ADR-017, ADR-021, ADR-022,
-  ADR-023, ADR-024 and ADR-028 also do.
+- **Accepted:** 2026-09-14 by Alexis, as drafted. `debug = "line-tables-only"`,
+  live in the root `Cargo.toml` since 1f7077b, stops being a proposal and
+  becomes the dev profile; `split-debuginfo` stays at the platform default.
 - **Relates to:** ADR-024 (target retention), which this does **not** amend —
   see §1.
 
