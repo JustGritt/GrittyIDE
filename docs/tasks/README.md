@@ -27,7 +27,7 @@ moves back. Never move a task file by hand.
 | [T110](T110-diagnostics.md) | Diagnostics | 2 | T060, T090, T220, T325, ADR-001 | todo |
 | [T224](T224-reveal-terminal.md) | Reveal the terminal a session is running in | 3 | T220 | todo |
 | T305 | Agent capability model | 4 | T300 | unspec |
-| T310-ANSWER | Arm the host permission verdict for an owned run | 4 | T310-B | todo |
+| T310-ANSWER | Arm the host permission verdict for an owned run | 4 | T310-B | doing |
 | T310-VERDICT-EVENT | Record a permission verdict in a run's ring | 4 | T310-B | unspec |
 | T320 | Context manifest | 4 | T300 | unspec |
 | T310-RESUME | Take over an observed session as an owned run | 4 | T310-B | unspec |
@@ -39,7 +39,7 @@ moves back. Never move a task file by hand.
 | T410 | Attention queue | 5 | T210, T325, T335 | unspec |
 | ADR-017 | Decide the terminal command-block contract (drafted, undecided) | 2 | – | todo |
 | ADR-018A | ADR-018 amendment: a hook that may refuse a write | 4 | T326 | todo |
-| ADR-033 | What [profile.dev] should be: debuginfo and split-debuginfo on macOS | 2 | – | todo |
+| ADR-033 | What [profile.dev] should be: debuginfo and split-debuginfo on macOS | 2 | – | review |
 | [AGENT-TURN-END](AGENT-TURN-END-roster-done-while-generating.md) | The agent roster says Done while the model is still generating | 3 | T220, T221, T223, T231 | doing |
 | BOARD-ARCHIVE | Done and superseded tickets move to a generated archive, so the index lists open work | tools | – | review |
 | BOARD-STALE-REASON | A block reason outlives its block, and show prints it as present tense | tools | – | todo |
@@ -47,7 +47,7 @@ moves back. Never move a task file by hand.
 | CI-LINUX-DARK | Linux CI is dark until the minute allowance resets (1 Oct) or a spending limit is set |  | – | blocked |
 | CONFIRM-DIALOG | Extract a shared confirm dialog before a third copy is written | 2 | – | unspec |
 | [FILE-ICONS](docs/tasks/FILE-ICONS-file-type-icons.md) | File-type icons in the explorer tree and Changes list | 2 | – | review |
-| [LEASE-NOTIFY](docs/tasks/LEASE-NOTIFY-lease-change-notices.md) | Tell a session when the lease registry changes under it | tooling | – | doing |
+| [LEASE-NOTIFY](docs/tasks/LEASE-NOTIFY-lease-change-notices.md) | Tell a session when the lease registry changes under it | tooling | – | review |
 | MARKDOWN-BENCH | A markdown benchmark with a recorded baseline, if a perf gate is wanted | 3 | MARKDOWN-BUDGET-FLAKE | unspec |
 | MARKDOWN-BUDGET-FLAKE | render.test.ts 2000ms wall-clock budget fails under concurrent-build load | 3 | – | review |
 | MONACO-JSDOM-FLAKE | model-eol.dom.test.ts times out its 10s beforeAll under load | 3 | JSDOM-VITEST | review |
