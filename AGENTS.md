@@ -139,8 +139,12 @@ which is blocked on which. So:
   only route to one, so reach for it deliberately rather than by habit.
   `add --force` re-adds rather than edits: `label`, `phase` and `depends` are
   non-`None` by construction (`args.label or args.id`, `args.phase or ""`,
-  `args.depends or "–"`), so **omitting one overwrites it**, and omitting
-  `--status` resets the ticket to `unspec`. Pass every field you want kept.
+  `args.depends or "–"`), and `--title` defaults to `""`, so **omitting one
+  overwrites it** — the title included — and omitting `--status` resets the
+  ticket to `unspec`. Pass every field you want kept. `--link ""` clears a
+  link. **Never link two tickets to one task file**: `render --index` writes
+  each linked ticket's status into that file's `Status:` line, so the last
+  one rendered wins and the other ticket's status is silently overwritten.
   `holder` and `note` are safe: the reducer's `add` branch never writes them,
   so backfilling a link on a ticket a live session is holding does not disturb
   it. Prefer `meta --title` for a title.

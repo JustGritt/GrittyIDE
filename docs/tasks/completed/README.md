@@ -32,6 +32,7 @@ a reopened ticket moves back the same way. Do not move files in or out by hand.
 | [T096](T096-terminal-chrome.md) | Terminal chrome from design artboard 8a | 0/2 | T047, T048, T090, T095 | done |
 | [T098](T098-terminal-colours-and-rooting.md) | Terminal session colours, and starting where you work | 0/2 | T047, T090, T095, T096 | done |
 | [PTY-FLAKE](PTY-FLAKE-process-tree-kill.md) | `pty.rs::kill_terminates_the_whole_process_tree` is flaky under load | 2 | T090 | done |
+| Phase 0 tests | `docs/plans/phase-0-spike.md` sections B–D | 0 | T060, T090 | superseded |
 | ADR-001 | Confirm or reject Tauri | 0 | Phase 0 tests | done |
 | MANUAL-PASS-COVERAGE | The manual pass covers every task sitting at review (review-findings finding 6) | 0 | T041, T045, T051, T210, T220, T221, T231, T232, T325 | done |
 | [T070](T070-file-watcher.md) | File watcher | 1A/2 | T020, T030, ADR-001 | done |
@@ -75,6 +76,7 @@ a reopened ticket moves back the same way. Do not move files in or out by hand.
 | [MONACO-BARREL](MONACO-BARREL-startup-chunk.md) | packages/editor imports monaco whole; the main chunk is 4.6 MB |  | – | superseded |
 | [MONACO-DEFER](MONACO-DEFER-startup-import.md) | Load Monaco on demand, not at startup (measured: -80.8% of the chunk) |  | MONACO-BARREL | done |
 | PLAN-FANOUT | Split the remaining work into fan-out-sized tickets, and the lanes to run them in |  | – | done |
+| PROTO-W2 | Wave 2 wire, in one PR: watcher, git, terminal blocks, diagnostics, violations | 2 | ADR-001, ADR-017, ADR-023 | superseded |
 | [PROTO-W2-GIT](PROTO-W2-GIT-git-wire.md) | The git wire: git.status and git.diff reach the shell | 2 | T100,ADR-023 | done |
 | PROTO-W3 | Wave 3 wire, in one PR: search | 2 | ADR-022 | done |
 | T100-U | Git status and diff, in the shell | 2 | PROTO-W2, T100 | done |

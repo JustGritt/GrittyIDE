@@ -2,9 +2,19 @@
 
 - **Phase:** 2
 - **Status:** todo
-- **Depends on:** ADR-001 (desktop runtime gate, still Proposed), T010 (core
-  protocol), T060 (`PersistenceStatus`), T090 (`TerminalManager::list`), T220
-  (`AgentRoster`), T325 (`OwnershipMap`)
+- **Depends on:** ADR-001 (desktop runtime gate, accepted 2026-09-14), T010
+  (core protocol), T060 (`PersistenceStatus`), T090 (`TerminalManager::list`),
+  T220 (`AgentRoster`), T325 (`OwnershipMap`)
+
+> **Read first — this spec predates two things that have since landed**
+> (noted 2026-09-14, not yet re-specified). **T070** (the file watcher) is
+> done, so the "watchers" row below is no longer absent for lack of a
+> watcher; whether the watch exposes anything countable is for whoever takes
+> this ticket to check. **The T300 run stack** (T300-C/CORE/FAKE/CMD/WIRE,
+> T310-A/B/U) is done, so `AgentRunManager` exists; T305 (the capability
+> model) does not, so per-provider adapter health still has no source. Every
+> "T070 absent" and "T300 does not exist" line below is stale in that sense;
+> re-decide §3–4 and the matching acceptance criterion before building.
 
 ## Objective
 
@@ -29,9 +39,9 @@ else — hard rule 12's sibling for a *display*, not just a completion report.
 
 ## Dependencies
 
-- **ADR-001** — `Proposed`, not `Accepted` (`docs/tasks/README.md`); gates
-  every unstarted Phase 2 task, T070/T080/T100 included. Spec written now;
-  implementation waits.
+- **ADR-001** — accepted 2026-09-14, so Phase 2 is unblocked and this task
+  can be built. (When this spec was written it was still `Proposed` and gated
+  every unstarted Phase 2 task.)
 - **T010** for the command/event/error conventions this task builds on.
 - **T060** for `SessionService::status()`, already synchronous and in-memory.
 - **T090** for `TerminalManager::list()`, the only source of running

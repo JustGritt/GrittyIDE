@@ -122,6 +122,10 @@ taken as written.** It was "watcher, git, terminal blocks, diagnostics,
 violations, in one PR". T070 and T326 shipped their own wire, this ticket takes
 git, and what is left is terminal blocks (behind ADR-017, undecided) and
 diagnostics (T110, unbuilt) — two things that will not travel together.
+*(2026-09-14: superseded. ADR-017 was accepted with blocks kept in the
+renderer, so T097's additive `SpawnTerminalRequest.shellIntegration` field is
+the only terminal wire left and belongs to T097; `diagnostics.recentErrors`
+belongs to T110. Nothing is left for a shared wire PR.)*
 
 **Only T300-CMD claims anything in the Gate D wave.** T300-CORE is core domain
 behind the contract already on `main`, and T300-FAKE is a new crate; neither

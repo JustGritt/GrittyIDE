@@ -21,7 +21,6 @@ moves back. Never move a task file by hand.
 |---|---|---|---|---|
 | [T097](T097-shell-integration-blocks.md) | Shell integration (OSC 133) and command blocks | 2 | T090, T095, T096 | todo |
 | [T099-S](T099-S-terminal-splits.md) | Split terminals: shells side by side in the dock | 2 | T096, T098, T046, T120-T, T120-A | todo |
-| Phase 0 tests | `docs/plans/phase-0-spike.md` sections B–D | 0 | T060, T090 | doing |
 | [T099-E](T099-E-terminal-editor-tab.md) | A terminal as an editor tab | 2 | T099-S, T120-M | todo |
 | [T110](T110-diagnostics.md) | Diagnostics | 2 | T060, T090, T220, T325, ADR-001 | todo |
 | [T224](T224-reveal-terminal.md) | Reveal the terminal a session is running in | 3 | T220 | todo |
@@ -63,7 +62,6 @@ moves back. Never move a task file by hand.
 | MONACO-JSDOM-FLAKE | model-eol.dom.test.ts times out its 10s beforeAll under load | 3 | JSDOM-VITEST | review |
 | MONACO-PREBUNDLE | Pre-bundle monaco-editor so the 9s transform is not paid every run | 3 | MONACO-JSDOM-FLAKE | unspec |
 | [NOTIFY-SETTING-ORPHAN](docs/tasks/NOTIFY-SETTING-ORPHAN-delete.md) | Delete the notification switch nothing mounts | maintenance | T120-U, T120-M | review |
-| PROTO-W2 | Wave 2 wire, in one PR: watcher, git, terminal blocks, diagnostics, violations | 2 | ADR-001, ADR-017, ADR-023 | todo |
 | [RUNS-EVENT-FILTER](RUNS-EVENT-FILTER-subscription.md) | use-runs.ts subscribes to every event of every kind |  | – | review |
 | [SEARCH-WALK-TIME](SEARCH-WALK-TIME-large-repo-timing.md) | Time a search over large-repo against ADR-022's revisit trigger | 2 | T080, ADR-022 | review |
 | [SIDEBAR-ICONS](docs/tasks/SIDEBAR-ICONS-section-tab-icons.md) | Sidebar section tabs as icons, for horizontal room | 2 | – | review |
@@ -79,7 +77,7 @@ moves back. Never move a task file by hand.
 | [T120-U](T120-U-settings-page.md) | The settings page, and retiring the three popovers | 2 | T120-C | review |
 | T222-CODEX | Codex, as one provider file | 3 | T222-SEAM | todo |
 | T222-SEAM | A provider registry, so providers stop being serial | 3 | T220 | unspec |
-| T300-ANSWER | Answer a permission or decision on a run Gritty owns | 4 | T300-WIRE | unspec |
+| T300-ANSWER | Answer a decision on a run Gritty owns | 4 | T300-WIRE | unspec |
 | T300-PANEL | A run belongs on its workstream's island row, not a fourth roster | 4 | T300-WIRE | unspec |
 | T400-R | Worktree create and remove | 5 | T100 | unspec |
 | [TRASH-FALLBACK](docs/tasks/TRASH-FALLBACK-offer-permanent-delete.md) | A delete the Trash refuses offers permanent deletion | maintenance | FILES-PARTIAL, EXPLORER-DISCARD-NOTICE | review |
