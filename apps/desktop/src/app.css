@@ -1161,67 +1161,21 @@ textarea:focus-visible {
   margin: 4px 2px;
 }
 
-/* Disclosure popovers (editor preferences, terminal settings). */
-
-.prefs {
-  position: relative;
+/* The editor bar's way into the settings page (T120-A). Every settings popover
+   went to the page — the editor's, the terminal's (`.terminal-panel__settings`
+   is its way in) and the agent integration's. A plain button: it opens a tab,
+   it does not hang anything off a bar that clips its overflow. */
+.editor__settings {
   flex: none;
-}
-
-.prefs > summary {
-  cursor: pointer;
-  list-style: none;
-  font-size: var(--text-meta);
-  color: var(--fg-muted);
-  border-radius: var(--radius);
   padding: 3px 7px;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: var(--text-meta);
 }
 
-.prefs > summary::-webkit-details-marker {
-  display: none;
-}
-
-.prefs > summary:hover {
+.editor__settings:hover:not(:disabled) {
   background: var(--ghost);
   color: var(--fg);
-}
-
-.prefs__form {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 15;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--gap);
-  align-items: center;
-  width: max-content;
-  max-width: 34rem;
-  padding: 10px;
-  background: var(--surface-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 12px 32px rgb(0 0 0 / 35%);
-  font-size: var(--text-control);
-}
-
-/* The terminal dock is the bottom of the window, so its popover hangs above its
-   summary; anywhere else it hangs below. */
-.prefs--up > .prefs__form {
-  top: auto;
-  bottom: calc(100% + 4px);
-}
-
-.prefs__form label {
-  display: flex;
-  gap: var(--gap-sm);
-  align-items: center;
-  color: var(--fg-muted);
-}
-
-.prefs__form input[type="number"],
-.prefs__form select {
-  width: 4.5rem;
 }
 
 /* T050: Monaco and the Markdown preview side by side */
@@ -2094,74 +2048,20 @@ textarea:focus-visible {
   width: 1px;
 }
 
-/* The bar's ⋯. */
-.terminal-settings > summary {
+/* The bar's ⋯: a way into the settings page's Terminal section (T120-A). */
+.terminal-panel__settings {
+  background: transparent;
+  border-radius: var(--radius);
   color: var(--fg-faint);
+  flex: none;
   font-size: var(--text-body);
   line-height: 1;
   padding: 3px 5px;
 }
 
-/* The settings popover reuses the editor's `.prefs` shell; only what is
-   specific to the shell list is styled here. */
-.terminal-settings__shells {
-  /* `.prefs__form` is a wrapping row; the shell list wants a row of its own. */
-  flex-basis: 100%;
-  background: var(--surface-control);
-  border-radius: var(--radius-md);
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-sm);
-  padding: var(--gap-sm) var(--gap) var(--gap);
-}
-
-.terminal-settings__hint {
-  color: var(--fg-muted);
-  margin: 0;
-  max-width: 32rem;
-}
-
-.terminal-settings__list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.terminal-settings__list li {
-  align-items: baseline;
-  display: flex;
-  font-family: var(--font-mono);
-  font-size: var(--text-control);
-  gap: var(--gap);
-  justify-content: space-between;
-}
-
-/* A shell that no longer runs stays listed, struck through, with the reason:
-   the user typed it, so silence would be worse than an ugly row. */
-.terminal-settings__broken {
-  color: var(--fg-muted);
-  text-decoration: line-through;
-}
-
-.terminal-settings__reason,
-.terminal-settings__error {
-  color: var(--error-text);
-  flex: 1 1 auto;
-  font-family: inherit;
-  margin: 0;
-}
-
-.terminal-settings__add {
-  display: flex;
-  gap: var(--gap-sm);
-}
-
-.terminal-settings__add input {
-  flex: 1 1 auto;
-  min-width: 0;
+.terminal-panel__settings:hover {
+  background: var(--ghost);
+  color: var(--fg);
 }
 
 /* Everything below the bar, and the only part the disclosure hides. Same
@@ -2177,6 +2077,15 @@ textarea:focus-visible {
 
 /* `display: flex` above would otherwise beat the `[hidden]` default. */
 .terminal-panel__body[hidden] {
+  display: none;
+}
+
+/* A gutter dragged far enough down to close the dock shows it closed before the
+   release does it, and opens again if the pointer comes back up. The same
+   `display: none` as `[hidden]`, so xterm sees exactly the state it sees when
+   the dock is collapsed and skips the zero-size fit. The splitter is the
+   panel's preceding sibling in `.shell__dock` (App.tsx). */
+.splitter[data-collapsing] ~ .terminal-panel .terminal-panel__body {
   display: none;
 }
 
@@ -5291,6 +5200,22 @@ textarea:focus-visible {
 /* T042: an editable tree — selection, the roving focus ring, the drag target,
    and the inline input a rename or a new name is typed into. */
 
+/* The whole entry row is the click target (open a file, toggle a folder), so
+   the whole row gets the pointer, and its text is not selectable: without this
+   WebKit shows an I-beam over the name and a drag-select fights the row drag.
+   Safari 17 still needs the prefixed property, and nothing prefixes for us. */
+.tree__row[role="treeitem"] {
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.tree__input input {
+  cursor: text;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 .tree__row--selected {
   background: var(--ghost-strong);
 }
@@ -5490,4 +5415,407 @@ textarea:focus-visible {
   margin-inline-end: var(--gap-xs);
   font-family: var(--font-mono);
   font-size: var(--text-micro);
+}
+
+/* ---------------------------------------------------------------------------
+   The settings page (T120-U, ADR-031).
+
+   A surface inside `editor__surfaces`, so it is shaped like `.agent-console`
+   rather than like a panel: it fills the pane, it owns its own scrolling, and
+   Monaco is `hidden` beside it rather than unmounted.
+
+   The form is drawn from the schema, so these rules are per *widget*, never
+   per setting. Adding a setting to the Rust registry must not need a rule here.
+
+   Every colour is an ADR-016 token; there is no literal in this block.
+   --------------------------------------------------------------------------- */
+
+.settings {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface-editor);
+}
+
+.settings__bar {
+  flex: none;
+  display: flex;
+  gap: var(--gap);
+  align-items: center;
+  height: var(--section-h);
+  padding: 0 var(--gap);
+  border-bottom: 1px solid var(--border);
+}
+
+.settings__title {
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--text-title);
+  font-weight: 600;
+}
+
+.settings__search {
+  flex: 1;
+  min-width: 0;
+  max-width: 22rem;
+  height: var(--row-h);
+  padding: 0 var(--gap-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-control);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-control);
+}
+
+.settings__search::placeholder {
+  color: var(--fg-faint);
+}
+
+.settings__search:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings__location {
+  flex: none;
+  display: flex;
+  gap: var(--gap-sm);
+  align-items: center;
+  margin: 0;
+  padding: var(--gap-xs) var(--gap);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-dim);
+  font-size: var(--text-meta);
+}
+
+/* Selectable, because the path is the answer to "what do I open elsewhere".
+   `user-select` is set explicitly: the shell turns it off globally so a drag
+   on chrome does not select it. */
+.settings__path {
+  overflow: hidden;
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  text-overflow: ellipsis;
+  user-select: text;
+  white-space: nowrap;
+}
+
+.settings__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.settings__rail {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  width: 12rem;
+  padding: var(--gap-sm) 0;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.settings__rail-item {
+  display: flex;
+  gap: var(--gap-sm);
+  align-items: center;
+  min-height: var(--row-h);
+  padding: 0 var(--gap);
+  border: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  font-family: var(--font-ui);
+  font-size: var(--text-control);
+  text-align: start;
+  cursor: default;
+}
+
+.settings__rail-item:hover {
+  background: var(--ghost);
+  color: var(--fg);
+}
+
+.settings__rail-item[aria-selected="true"] {
+  background: var(--surface-active);
+  color: var(--fg);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.settings__rail-count {
+  margin-inline-start: auto;
+  color: var(--fg-faint);
+  font-size: var(--text-micro);
+}
+
+.settings__list {
+  flex: 1;
+  min-width: 0;
+  padding: var(--gap) var(--gap-lg);
+  overflow-y: auto;
+}
+
+.settings__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  max-width: 44rem;
+  padding: var(--gap) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings__row-head {
+  display: flex;
+  gap: var(--gap-sm);
+  align-items: center;
+}
+
+.settings__label {
+  color: var(--fg);
+  font-size: var(--text-control);
+  font-weight: 600;
+}
+
+/* The mark, not a word: the row already carries a Reset beside it, and a badge
+   reading "modified" on every changed row is noise on a page whose whole job
+   is showing what you changed. */
+.settings__modified {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.settings__spacer {
+  flex: 1;
+}
+
+.settings__key {
+  color: var(--fg-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  user-select: text;
+}
+
+.settings__description {
+  margin: 0;
+  color: var(--fg-dim);
+  font-size: var(--text-meta);
+}
+
+.settings__applies,
+.settings__reason,
+.settings__note,
+.settings__summary,
+.settings__placeholder {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-meta);
+}
+
+.settings__placeholder {
+  padding: var(--gap) var(--gap-lg);
+}
+
+.settings__warning {
+  margin: 0;
+  color: var(--warn-text);
+  font-size: var(--text-meta);
+}
+
+.settings__field-error {
+  margin: 0;
+  color: var(--error-text);
+  font-size: var(--text-meta);
+}
+
+.settings__error {
+  flex: none;
+  padding: var(--gap-sm) var(--gap);
+}
+
+.settings__input,
+.settings__select {
+  align-self: flex-start;
+  min-width: 12rem;
+  max-width: 100%;
+  height: var(--row-h);
+  padding: 0 var(--gap-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-control);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-control);
+}
+
+.settings__input[type="number"] {
+  min-width: 6rem;
+}
+
+.settings__input:focus-visible,
+.settings__select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings__input:disabled,
+.settings__select:disabled,
+.settings__toggle:disabled {
+  color: var(--fg-faint);
+  cursor: not-allowed;
+}
+
+.settings__toggle {
+  align-self: flex-start;
+}
+
+.settings__ghost {
+  padding: 2px var(--gap-sm);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: var(--font-ui);
+  font-size: var(--text-micro);
+  cursor: default;
+}
+
+.settings__ghost:hover:not(:disabled) {
+  background: var(--ghost);
+  color: var(--fg);
+}
+
+/* The raw value of a setting this build cannot draw. Read-only by construction:
+   there is no control, because inventing one for a kind we do not understand is
+   how a good value gets overwritten with a bad one. */
+.settings__raw {
+  margin: 0;
+  padding: var(--gap-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  overflow-x: auto;
+  user-select: text;
+}
+
+/* Custom shells: a list of paths, then the box that adds one. */
+
+.settings__shells {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+
+.settings__shell-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings__shell {
+  display: flex;
+  gap: var(--gap-sm);
+  align-items: center;
+  font-size: var(--text-meta);
+}
+
+.settings__shell code {
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  user-select: text;
+}
+
+.settings__shell-broken {
+  color: var(--warn-text);
+  text-decoration: line-through;
+}
+
+.settings__shell-reason {
+  color: var(--fg-faint);
+  font-size: var(--text-micro);
+}
+
+.settings__shell-add {
+  display: flex;
+  gap: var(--gap-sm);
+  align-items: center;
+}
+
+.settings__notifications {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+}
+
+/* The one thing on the page that is not a setting: the hook integration,
+   re-parented from the agents popover. A panel rather than a row, because it is
+   a flow with its own steps. */
+
+.settings__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  max-width: 44rem;
+  margin-top: var(--gap);
+  padding: var(--gap);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+}
+
+.settings__panel-title {
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--text-control);
+  font-weight: 600;
+}
+
+.settings__actions {
+  display: flex;
+  gap: var(--gap-sm);
+  align-items: center;
+  margin-top: var(--gap-xs);
+}
+
+.settings__integration-diff {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+}
+
+.settings__integration-command {
+  margin: 0;
+  padding: var(--gap-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-base);
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  overflow-x: auto;
+  user-select: text;
+}
+
+.settings__integration-events {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  margin: 0;
+  padding-inline-start: var(--gap);
+  color: var(--fg-dim);
+  font-size: var(--text-meta);
 }

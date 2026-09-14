@@ -19,6 +19,7 @@ import { useFileDrop } from './features/drop/use-file-drop';
 import { CloseDialog } from './features/editor/close-dialog';
 import { EditorPane } from './features/editor/editor-pane';
 import { useEditorPreferences } from './features/editor/editor-preferences';
+import { editorPreferencesFromSettings } from './features/editor/editor-settings';
 import { StatusBar } from './features/editor/status-bar';
 import { useCloseFlow } from './features/editor/use-close-flow';
 import { useEditorBinding } from './features/editor/use-editor-binding';
@@ -35,11 +36,16 @@ import { useRuns } from './features/runs/use-runs';
 import { DEFAULT_LAYOUT, type Layout, PANE_LIMITS } from './features/session/persisted-layout';
 import { SessionNotices } from './features/session/session-notices';
 import { useSession } from './features/session/use-session';
+import type { SeedSource } from './features/settings/settings-seed';
+import { initialSettingsTabState, settingsTabReducer } from './features/settings/settings-tab';
+import { useSettings } from './features/settings/use-settings';
+import { useSettingsChord } from './features/settings/use-settings-chord';
 import { AppBar, type HealthState, type QuickOpenMount } from './features/shell/app-bar';
 import { type Accelerator, acceleratorForOs } from './features/shell/open-shortcuts';
 import { useOpenShortcuts } from './features/shell/use-open-shortcuts';
 import { cwdForDocument } from './features/terminal/terminal-cwd';
 import { TerminalPanel } from './features/terminal/terminal-panel';
+import { terminalSettingsFromSettings } from './features/terminal/terminal-settings';
 import { useTerminals } from './features/terminal/use-terminals';
 import { AttentionQueue } from './features/workstreams/attention-queue';
 import { AgentIsland } from './features/workstreams/island';
@@ -54,13 +60,40 @@ export function App() {
   const documents = useDocuments();
   // State the session persists lives here (T060): preferences, per-tab view
   // modes, the editor binding (cursor and scroll) and the explorer layout.
-  const { prefs, update: updatePrefs, replace: replacePrefs } = useEditorPreferences();
+  //
+  // `prefs` is only the session's `preferences` blob now, restored and written
+  // back unchanged: nothing edits it and Monaco does not read it (T120-A). It
+  // is kept because it is what the seed below moves into `settings.json`, and
+  // a blob this build stopped writing could not be seeded by the next one.
+  const { prefs, replace: replacePrefs } = useEditorPreferences();
   const [modes, dispatchMode] = useReducer(viewModesReducer, {});
   useEffect(
     () => dispatchMode({ type: 'prune', open: documents.state.order }),
     [documents.state.order],
   );
-  const editor = useEditorBinding(documents, prefs);
+  // The settings layer (ADR-031), constructed before the editor binding
+  // because Monaco is configured from it. It is here rather than inside the
+  // page for two reasons: `settings.describe` is a build constant and must not
+  // be re-fetched every time the tab is closed and reopened, and the editor and
+  // the theme applier (`features/theme`) need it whether or not anyone has ever
+  // opened the page.
+  //
+  // The seed (ADR-031 §8) is the raw `preferences` and `layout` blobs, handed
+  // over together by the session restore below; `null` until then, and the
+  // seeding waits for it. Both halves at once, now that the editor and the
+  // terminal both read settings (T120-A): seeding one first would leave the
+  // other's keys to a second seeding that never runs.
+  const [seed, setSeed] = useState<SeedSource | null>(null);
+  const settings = useSettings(seed);
+  const { fontSize, tabSize, wordWrap, minimap } = editorPreferencesFromSettings(settings.snapshot);
+  // By value: every settings write replaces the snapshot, including writes to
+  // settings Monaco does not read, and a new object here re-applies options to
+  // every editor.
+  const editorPrefs = useMemo(
+    () => ({ fontSize, tabSize, wordWrap, minimap }),
+    [fontSize, tabSize, wordWrap, minimap],
+  );
+  const editor = useEditorBinding(documents, editorPrefs);
   const [layout, setLayout] = useState<Layout>(DEFAULT_LAYOUT);
   // The workspace lives here (T049), not inside the explorer: the launcher
   // opens folders through the same controller and the top bar names the same
@@ -87,9 +120,13 @@ export function App() {
   // The gutters write their CSS variables straight onto this element while
   // dragging, so a drag never re-renders the shell (T046).
   const shell = useRef<HTMLElement | null>(null);
+  // The dock's shell, custom shells and font are settings (T120-A), like the
+  // editor's above. The layout blob's terminal section is still restored and
+  // written back unchanged, as the seed's source, and nothing reads it.
+  const terminalSettings = terminalSettingsFromSettings(settings.snapshot);
   // Terminal sessions live beside the editor, not inside it: output never
   // passes through editor state (T090).
-  const terminals = useTerminals(layout.terminal.customShells);
+  const terminals = useTerminals(terminalSettings.customShells);
   const [terminalOpen, setTerminalOpen] = useState(false);
   // Closing a tab with unsaved edits asks first. The tab strip raises the
   // request and the status bar does too, so the flow belongs to the shell.
@@ -123,6 +160,25 @@ export function App() {
     documents,
     workspaceId: workspace?.id ?? null,
   });
+  // The settings page, on the same terms as the consoles (T120-M, ADR-026's
+  // stated "Revisit when: a second kind of non-document tab is wanted").
+  const [settingsTab, dispatchSettingsTab] = useReducer(
+    settingsTabReducer,
+    initialSettingsTabState,
+  );
+  // `section` steers the page to one category: the editor bar and the terminal
+  // dock each open settings on their own (T120-A).
+  const showSettings = useCallback(
+    (preview: boolean, section?: string) => {
+      dispatchSettingsTab(
+        section === undefined ? { type: 'open', preview } : { type: 'open', preview, section },
+      );
+      // One surface at a time. Opening settings takes the pane from whichever
+      // console had it, exactly as clicking a console tab does.
+      agentConsole.showDocuments();
+    },
+    [agentConsole],
+  );
   // One list for the sidebar's Agents section: the runs Gritty owns and the
   // sessions it merely observes, projected onto a common row and ordered
   // needs-you first. Sessions are filtered to this workspace inside the model;
@@ -141,6 +197,22 @@ export function App() {
     const row = agentRows.find((item) => item.key === key);
     return row ? { label: row.id, status: row.status.label } : null;
   }, [agentConsole.activeId, agentRows]);
+  // The same rule for the settings tab (T120-M §5): while a non-document
+  // surface has the pane, the bar must not describe a file the user is not
+  // looking at. It rides the existing `agentConsole` prop rather than a second
+  // one — the slot means "what the non-document surface says", and widening its
+  // name is a change to `status-bar.tsx`, which this ticket may not touch.
+  const surfaceFacts = useMemo(() => {
+    if (!settingsTab.active) return consoleFacts;
+    const snapshot = settings.snapshot;
+    if (!snapshot) return { label: 'Settings', status: 'reading…' };
+    if (!snapshot.storage.writable) return { label: 'Settings', status: 'read-only' };
+    const changed = snapshot.modified.length;
+    return {
+      label: 'Settings',
+      status: changed === 0 ? 'all default' : changed === 1 ? '1 changed' : `${changed} changed`,
+    };
+  }, [settingsTab.active, settings.snapshot, consoleFacts]);
   // What the previous window had open, for the launcher's resume rail (T051).
   // Asked for whenever no workspace is open, which is exactly when the
   // launcher is on screen — including after the user closes one mid-run.
@@ -183,6 +255,7 @@ export function App() {
     editor,
     prefs,
     setPrefs: replacePrefs,
+    onRestoredBlobs: setSeed,
     viewModes: modes,
     dispatchViewMode: dispatchMode,
     layout,
@@ -209,6 +282,14 @@ export function App() {
   // rather than guessing which modifier is "the command key".
   const accelerator: Accelerator | null =
     state.status === 'ready' ? acceleratorForOs(state.health.os) : null;
+  // ⌘, / Ctrl+, opens the settings tab, and a second one focuses the tab it
+  // already opened rather than a second tab — the reducer is a singleton, so
+  // that falls out rather than needing a guard. Inert until `accelerator`
+  // lands, like every other chord in the shell.
+  useSettingsChord(
+    accelerator,
+    useCallback(() => showSettings(false), [showSettings]),
+  );
   const openFolder = useCallback(
     (path?: string) => {
       setPathOpen(false);
@@ -429,8 +510,6 @@ export function App() {
           <EditorPane
             documents={documents}
             editor={editor}
-            prefs={prefs}
-            onPrefsChange={updatePrefs}
             modes={modes}
             dispatchMode={dispatchMode}
             session={session}
@@ -440,6 +519,14 @@ export function App() {
             runs={runs}
             rows={agentRows}
             console={agentConsole}
+            settings={{
+              controller: settings,
+              tab: settingsTab,
+              onActivate: (section) => showSettings(false, section),
+              onPromote: () => dispatchSettingsTab({ type: 'keep' }),
+              onClose: () => dispatchSettingsTab({ type: 'close' }),
+              onShowDocuments: () => dispatchSettingsTab({ type: 'documents' }),
+            }}
           />
         </div>
       ) : session.state.phase === 'ready' ? (
@@ -478,6 +565,9 @@ export function App() {
             onCommit={(terminalHeight) =>
               setLayout((current) => ({ ...current, panes: { ...current.panes, terminalHeight } }))
             }
+            // Dragged to the bottom of the window, the dock closes rather than
+            // stopping at its minimum; its height is kept for reopening.
+            onCollapse={() => setTerminalOpen(false)}
           />
         )}
         {/* One 32px row (T096, artboard 8a): the panel owns the label that used
@@ -501,10 +591,14 @@ export function App() {
           // two live handlers would answer a question and switch a terminal on
           // one keystroke.
           chords={!islandOpen}
-          settings={layout.terminal}
-          onSettingsChange={(patch) =>
-            setLayout((current) => ({ ...current, terminal: { ...current.terminal, ...patch } }))
-          }
+          settings={terminalSettings}
+          onShellChange={async (path) => {
+            // The picker is a shortcut to `terminal.shell`, not a copy of it. A
+            // refused write says why on the settings page, which is opened
+            // rather than leaving a picker that silently did not change.
+            if (!(await settings.set('terminal.shell', path))) showSettings(false, 'terminal');
+          }}
+          onOpenSettings={() => showSettings(false, 'terminal')}
         />
       </footer>
       {/* The last 26px of the window, below the dock: what is running, and what
@@ -520,7 +614,7 @@ export function App() {
         permissionsWaiting={askingSessions(agents.roster.sessions).length}
         // While a console has the pane, the bar describes the agent rather
         // than the document that is still the active one underneath it.
-        agentConsole={consoleFacts}
+        agentConsole={surfaceFacts}
       />
       {closeFlow.tab && (
         <CloseDialog

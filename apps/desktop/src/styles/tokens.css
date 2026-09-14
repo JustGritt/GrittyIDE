@@ -122,9 +122,29 @@
 
 /* The light ramp keeps every role and inverts the depth: surfaces get lighter
    toward the front, which is the opposite of the dark theme and the reason the
-   two cannot share one set of numbers. */
+   two cannot share one set of numbers.
+
+   It is declared **twice**, and that is deliberate (T120-T, ADR-016 amendment).
+   Dark is the bare `:root`, so light has to win in two different situations:
+
+   - the operating system asks for light and the user has not overridden it —
+     the media query, narrowed to `:not([data-theme="dark"])` so an explicit
+     Dark choice beats the OS;
+   - the user picked Light outright — `:root[data-theme="dark|light"]` is
+     stamped by `features/theme/theme-signal.ts`, and this block wins wherever
+     the media query does not apply.
+
+   Keeping the media query is what preserves correct **first paint** for system
+   users, who are the default and the majority: resolving the theme in
+   JavaScript alone would introduce a flash of the wrong theme where none
+   exists today.
+
+   The two copies are identical by construction, and
+   `features/theme/tokens-duplication.test.ts` fails if they ever stop being.
+   That is cheaper and more honest than ~110 lines of `var(--light-*)`
+   indirection, and it holds the invariant ADR-016 actually cares about. */
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme="dark"]) {
     --surface-base: #ffffff;
     --surface-chrome: #f6f8fa;
     --surface-editor: #fffffe;
@@ -179,4 +199,61 @@
     --ansi-bright-cyan: #3192aa;
     --ansi-bright-white: #1f2328;
   }
+}
+
+/* The same values, for the user who chose Light while the OS asks for dark. */
+:root[data-theme="light"] {
+  --surface-base: #ffffff;
+  --surface-chrome: #f6f8fa;
+  --surface-editor: #fffffe;
+  --surface-raised: #f0f2f5;
+  --surface-control: #e8ebef;
+  --surface-active: #dbe0e6;
+  --border: #d0d7de;
+
+  --fg: #1f2328;
+  --fg-dim: #3d444d;
+  --fg-muted: #59636e;
+  --fg-faint: #818b98;
+  --fg-gutter: #8c959f;
+
+  --accent: #0969da;
+  --accent-text: #0550ae;
+  --accent-on: #ffffff;
+  --accent-fill: #0969da;
+  --accent-wash: rgba(9, 105, 218, 0.08);
+  --accent-wash-strong: rgba(9, 105, 218, 0.14);
+
+  --ok: #1a7f37;
+  --ok-fill: #dafbe1;
+  --ok-text: #116329;
+  --ok-wash: rgba(26, 127, 55, 0.08);
+  --warn: oklch(0.68 0.13 75);
+  --warn-text: oklch(0.52 0.11 75);
+  --warn-wash: rgba(154, 103, 0, 0.1);
+  --error: #cf222e;
+  --error-text: #a40e26;
+  --error-wash: rgba(207, 34, 46, 0.08);
+
+  --ghost: rgba(31, 35, 40, 0.06);
+  --ghost-strong: rgba(31, 35, 40, 0.11);
+
+  --term-selection: rgba(9, 105, 218, 0.22);
+  --term-cursor-accent: #ffffff;
+  --ansi-black: #24292f;
+  --ansi-red: #cf222e;
+  --ansi-green: #1a7f37;
+  --ansi-yellow: #9a6700;
+  --ansi-blue: #0969da;
+  --ansi-magenta: #8250df;
+  --ansi-cyan: #1b7c83;
+  --ansi-white: #6e7781;
+  --ansi-bright-black: #57606a;
+  --ansi-bright-red: #a40e26;
+  --ansi-bright-green: #116329;
+  --ansi-bright-yellow: #7d4e00;
+  --ansi-bright-blue: #0550ae;
+  --ansi-bright-magenta: #6639ba;
+  --ansi-bright-cyan: #3192aa;
+  --ansi-bright-white: #1f2328;
 }

@@ -162,4 +162,123 @@ pnpm check
 
 ## Completion report
 
-*(filled on completion)*
+### Summary
+
+`apps/desktop/src/features/settings/` is a schema-driven settings page: a
+category rail, a search box, a modified mark with a per-row reset, and the
+three popovers' controls rebuilt on it. It draws whatever `settings.describe`
+declares — adding a setting to the Rust registry needs no line here.
+
+New files only, as the split required. The mount (`App.tsx`, `editor-pane.tsx`,
+`tab-strip.tsx`) is untouched and remains T120-M's, and the three popovers are
+left working where they are: T120-M deletes them once the tab is reachable.
+
+### Files changed
+
+| File | What |
+|---|---|
+| `features/settings/settings-model.ts` (new) | pure: schema → sections → rows, widget per kind, search, the availability union |
+| `features/settings/settings-seed.ts` (new) | pure: the one-time blob → `settings.json` planner (ADR-031 §8) |
+| `features/settings/settings-tab.ts` (new) | the singleton tab's open/preview/active state |
+| `features/settings/use-settings.ts` (new) | the controller: `describe`/`get`, `SettingsChanged`, writes, the seed caller |
+| `features/settings/settings-page.tsx` (new) | the page |
+| `features/settings/settings-fields.tsx` (new) | the draft box, the shell list, the notification switch |
+| `features/settings/agent-integration-section.tsx` (new) | the hook flow, re-parented off the popover |
+| `features/settings/*.test.ts(x)` (new, 5 files) | 87 tests |
+| `apps/desktop/src/app.css` | a `.settings*` block, appended; tokens only, no colour literal |
+
+### Tests actually executed
+
+- `npx vitest run src/features/settings/` → **87 passed** (5 files).
+- `pnpm check` → **exit 0**: Biome, tsc, 1209 vitest tests across 113 files,
+  `cargo fmt --check`, `clippy -D warnings`, `cargo test --workspace`,
+  generated types fresh.
+
+### Architectural decisions
+
+1. **`agents.notifications` is a `custom` widget, not a schema toggle.** A plain
+   `settings.set` writes the file and arms nothing until the next launch —
+   `arm_notifications` is only called from the composition root at startup — so
+   the registry's `applies: LIVE` would have been a lie. The control calls
+   `agents.setNotifications` first (the one call in Gritty that can raise a
+   notification permission prompt, and it must come from the control the user
+   touched, T223 §2) and persists what the platform actually did, not what was
+   asked. Persisting `true` after a refusal would leave a modified mark on a
+   setting that is not in force.
+2. **`absent` in the availability union means the row is not drawn**, and it has
+   exactly one cause: `AgentNotificationSettings.supported === false`, which the
+   protocol defines as the setting being absent rather than broken. Everything
+   else — unwritable storage, a kind this build cannot draw — is
+   `readonly{reason}` and is drawn with its value. A `raw` widget carries the
+   unrenderable case so the failure policy's "shown read-only rather than
+   dropped" holds.
+3. **The tab is `settings`, a literal, and never a `ConsoleKey`.** ADR-026's
+   pattern extended rather than a third tab mechanism; `parseConsoleKey` returns
+   `null` for it, which is correct — there is no id inside it.
+4. **The integration flow keeps an explicit Check button.** In the popover the
+   read was the `<details>` toggle; a section on a page is visible by default,
+   so reading on mount would make opening settings silently open
+   `~/.claude/settings.json` — precisely the side effect ADR-018 §1 forbids.
+   Install/Uninstall are additionally gated on a status having been read, which
+   the popover did not do: without the auto-read there is nothing on screen to
+   act on.
+5. **`DraftField` stays dirty across the in-flight write.** Clearing the flag on
+   the way into the commit let the sync effect put the stored value back for the
+   frame between asking and being answered, so an accepted change visibly
+   flickered to the old value and back. Found by the DOM test; fixed, and both
+   halves are now pinned.
+
+### Known limitations
+
+- **The duplicated bounds are not deleted** (required behaviour 8). `MIN_FONT_SIZE`
+  / `MAX_FONT_SIZE` / `TAB_SIZES` (`packages/editor/src/editor-options.ts`) and
+  `MAX_CUSTOM_SHELLS` / `TERMINAL_FONT_SIZE_RANGE`
+  (`features/session/persisted-layout.ts`) are outside this ticket's allowed
+  scope, and both are still load-bearing: they bound `parseEditorPreferences`
+  and `parseLayout`, which parse the persisted blobs synchronously at restore,
+  where the schema (fetched over `settings.describe`) is not available. ADR-031
+  §8 keeps those blobs written as a mirror for one release anyway.
+
+  What the requirement was *for* is delivered: **the page carries no copy of any
+  bound**. Every `min`, `max` and `max_len` it enforces comes off the wire, so
+  it cannot offer a value the core refuses. Recorded as a follow-up below,
+  gated on the same release the mirrors are.
+- The rail filters to one category at a time rather than scroll-spying a single
+  long list. A search overrides the selection when it empties the chosen
+  category.
+- `addCustomShell`'s absolute-path test is POSIX-only (`startsWith('/')`); reused
+  unchanged, as required. The seed planner's own check accepts a Windows root
+  too, so a Windows layout blob still seeds.
+- The panel is not a tab stop (`noNoninteractiveTabindex`). Every panel today
+  holds focusable controls, so this only bites a panel whose settings are all
+  disabled by unwritable storage.
+
+### Follow-up tasks
+
+1. **Delete the duplicated bounds** once ADR-031 §8's legacy mirrors are
+   removed: `MIN_FONT_SIZE`, `MAX_FONT_SIZE`, `TAB_SIZES`, `MAX_CUSTOM_SHELLS`,
+   `TERMINAL_FONT_SIZE_RANGE`, and the parsers that need them.
+2. **T120-M must repoint the quick-open command.** `App.tsx:262` currently has
+   `openSettings: () => void core.settings.reveal()` — the palette entry opens
+   the *file manager*, not the page. It should open the tab.
+3. A shortcut registry. ⌘, will be the eighth hand-gated `keydown` listener
+   (recorded by T120-M, not built here).
+4. `explorer.showHidden` is a setting by ADR-031 §7's rule and is still in the
+   layout blob.
+5. Reset-all. `SettingsSnapshot.modified` is documented as "what reset all would
+   change" and `settings.reset` with no keys already does it; no control offers
+   it, deliberately (rule 14).
+
+### Remaining risks
+
+- The seed runs once, unattended, and is the only code that writes a user's
+  existing preferences into a new file. It is pure and covered by 12 tests, but
+  it has not been exercised against a real pre-T120 session database — only
+  against blobs shaped like `serializeLayout` / `serializeEditorPreferences`
+  write them.
+- `acceptable()` in the seed planner mirrors `document.rs::validate`. A
+  disagreement costs a skipped seed rather than a bad value, but the two are
+  kept in step by hand.
+- The page has not been exercised in the running app: it is unreachable until
+  T120-M mounts it. That is the split working as intended, and it is the first
+  thing T120-M should do.

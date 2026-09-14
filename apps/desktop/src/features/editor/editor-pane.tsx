@@ -1,10 +1,4 @@
-import {
-  dominantEol,
-  type EditorPreferences,
-  type EolTarget,
-  isEditableEol,
-  normalizeEol,
-} from '@gritty/editor';
+import { dominantEol, type EolTarget, isEditableEol, normalizeEol } from '@gritty/editor';
 import { isInstructionFile } from '@gritty/markdown';
 import { type DocumentId, toCoreError } from '@gritty/protocol';
 import { type Dispatch, useCallback, useEffect, useRef, useState } from 'react';
@@ -30,8 +24,10 @@ import { RunConsole } from '../runs/run-console';
 import type { RunsController } from '../runs/use-runs';
 import { RecoveryPrompt } from '../session/recovery-prompt';
 import type { SessionController } from '../session/use-session';
+import { SettingsPage } from '../settings/settings-page';
+import type { SettingsTabState } from '../settings/settings-tab';
+import type { SettingsController } from '../settings/use-settings';
 import { OrphansPanel } from './orphans-panel';
-import { PreferencesPopover } from './preferences-popover';
 import { TabStrip } from './tab-strip';
 import type { EditorBinding } from './use-editor-binding';
 import { workerStatus } from './worker-status';
@@ -47,8 +43,9 @@ const EXTERNAL_MESSAGES: Record<PendingExternalState, string> = {
  * The Monaco editing surface (T040): tabs, one editor bound to the core's
  * buffers, the external-change / conflict banners, placeholders for binary
  * and large documents, the mixed line-ending notice, and the status bar.
- * Preferences, view modes and the editor binding are owned by `App` so the
- * session (T060) can restore and persist them.
+ * View modes and the editor binding are owned by `App` so the session (T060)
+ * can restore and persist them; the editor's preferences are settings
+ * (T120-A), edited on the settings page and applied by `App`.
  *
  * It also draws an agent console when one is the active tab (T233-C, ADR-026).
  * The console takes the place of the surfaces, not of the pane: Monaco's own
@@ -64,8 +61,6 @@ const EXTERNAL_MESSAGES: Record<PendingExternalState, string> = {
 export function EditorPane({
   documents,
   editor,
-  prefs,
-  onPrefsChange,
   modes,
   dispatchMode,
   session,
@@ -75,11 +70,10 @@ export function EditorPane({
   runs,
   rows,
   console: consoleController,
+  settings,
 }: {
   documents: DocumentsController;
   editor: EditorBinding;
-  prefs: EditorPreferences;
-  onPrefsChange: (patch: Partial<EditorPreferences>) => void;
   modes: ViewModes;
   dispatchMode: Dispatch<ViewModesAction>;
   session: SessionController;
@@ -95,6 +89,20 @@ export function EditorPane({
    */
   rows?: readonly RosterRow[];
   console?: AgentConsoleController;
+  /**
+   * The settings page as a surface (T120-M). Absent where it is not mounted;
+   * `tab.active` is what puts it on screen, the way a console key does.
+   */
+  settings?: {
+    readonly controller: SettingsController;
+    readonly tab: SettingsTabState;
+    /** Show the page; on `section` when a button asks for one (T120-A). */
+    onActivate: (section?: string) => void;
+    onPromote: () => void;
+    onClose: () => void;
+    /** A document was clicked: hand the pane back. */
+    onShowDocuments: () => void;
+  };
 }) {
   const { state } = documents;
   const [workers, setWorkers] = useState(workerStatus.snapshot());
@@ -117,6 +125,13 @@ export function EditorPane({
       ? (runs.runs.find((run) => run.id === target.runId) ?? null)
       : null;
   const showConsole = consoleSession !== null || consoleRun !== null;
+  const showSettings = settings?.tab.active === true;
+  // **The generalisation, not a second condition beside it** (T120-M §2).
+  // Every suppression below asked "is a console showing"; what it always meant
+  // is "does something other than a document have the pane". Settings is the
+  // second such thing, and adding a parallel `&& !showSettings` to each site is
+  // how the third one gets missed.
+  const showSurface = showConsole || showSettings;
   const consoleRows = rows ?? [];
   const agentTabs = consoleController
     ? agentTabItems(consoleController.openTabs, consoleController.previewId, consoleRows)
@@ -132,9 +147,9 @@ export function EditorPane({
   const mode = active
     ? viewModeFor(modes, active.document.id, active.document.languageId)
     : 'source';
-  const showPreview = !showConsole && isMarkdown && mode !== 'source';
+  const showPreview = !showSurface && isMarkdown && mode !== 'source';
   const showEditor =
-    !showConsole && active !== null && active.text !== null && !(isMarkdown && mode === 'preview');
+    !showSurface && active !== null && active.text !== null && !(isMarkdown && mode === 'preview');
 
   const followLink = useCallback(
     async (action: NonNullable<PreviewLinkAction>) => {
@@ -206,26 +221,48 @@ export function EditorPane({
             // `documents.activate` still runs, so the document the session
             // restores to is the one that was last actually chosen.
             consoleController?.showDocuments();
+            // A file was clicked: whichever non-document surface had the pane
+            // gives it back, which is the same event to both of them.
+            settings?.onShowDocuments();
             documents.activate(documentId);
           }}
           onPromote={documents.promoteTab}
           onClose={onRequestClose}
           onCloseMany={onRequestCloseMany}
           onReorder={documents.reorder}
+          settings={
+            settings && {
+              open: settings.tab.open,
+              preview: settings.tab.preview,
+              active: settings.tab.active,
+              // Wrapped: the strip hands its click event to this, and an event
+              // is not a section.
+              onActivate: () => settings.onActivate(),
+              onPromote: settings.onPromote,
+              onClose: settings.onClose,
+            }
+          }
           agents={
             consoleController && {
               items: agentTabs,
               activeId: consoleController.activeId,
-              onActivate: consoleController.show,
+              onActivate: (key: string) => {
+                consoleController.show(key);
+                // The mirror of `onShowDocuments` above: a console taking the
+                // pane hands it away from the settings tab, which stays open
+                // and inactive rather than closing.
+                settings?.onShowDocuments();
+              },
               onPromote: consoleController.keep,
               onClose: consoleController.close,
             }
           }
         />
         {/* Source / Split / Preview and the editor settings both describe a
-            document. While a console is showing there is no document they
-            could be about, so they are not drawn rather than drawn inert. */}
-        {!showConsole && isMarkdown && active && (
+            document. While a console or the settings page is showing there is
+            no document they could be about, so they are not drawn rather than
+            drawn inert. */}
+        {!showSurface && isMarkdown && active && (
           <MarkdownToolbar
             mode={mode}
             onMode={(next) =>
@@ -236,7 +273,18 @@ export function EditorPane({
             onDismissNotice={() => setPreviewNotice(null)}
           />
         )}
-        {!showConsole && <PreferencesPopover prefs={prefs} onChange={onPrefsChange} />}
+        {/* A way into the settings page, not a second place to edit them: the
+            popover that used to hang here was clipped by this bar, and it was
+            a copy of four settings the page already owns (T120-A). */}
+        {!showSurface && settings && (
+          <button
+            type="button"
+            className="editor__settings"
+            onClick={() => settings.onActivate('editor')}
+          >
+            Editor settings
+          </button>
+        )}
       </div>
 
       {documents.error && (
@@ -260,7 +308,7 @@ export function EditorPane({
 
       <RecoveryPrompt session={session} />
 
-      {!showConsole && active && <Banners tab={active} eol={activeEol} documents={documents} />}
+      {!showSurface && active && <Banners tab={active} eol={activeEol} documents={documents} />}
 
       <div className="editor__surfaces">
         <section
@@ -282,6 +330,15 @@ export function EditorPane({
             pending={consoleController.pendingId === consoleController.activeId}
           />
         )}
+        {showSettings && settings && (
+          <SettingsPage
+            // The page reads its section once, on mount; a new ask remounts it
+            // so a second press of the dock's button still lands (T120-A).
+            key={settings.tab.sectionRequest}
+            controller={settings.controller}
+            initialSection={settings.tab.section ?? undefined}
+          />
+        )}
         {showPreview && active && (
           <MarkdownPreview
             key={active.document.id}
@@ -296,20 +353,20 @@ export function EditorPane({
           />
         )}
       </div>
-      {!active && !showConsole && (
+      {!active && !showSurface && (
         <p className="editor__empty">
           {state.order.length === 0
             ? 'No document open. Click a file in the explorer.'
             : 'Select a tab.'}
         </p>
       )}
-      {!showConsole && active && !active.document.binary && editor.engineStatus === 'failed' && (
+      {!showSurface && active && !active.document.binary && editor.engineStatus === 'failed' && (
         <p className="editor__placeholder">
           The editor failed to load. The file is safe and unmodified — reopen the window to try
           again. The explorer, terminal and source control are unaffected.
         </p>
       )}
-      {!showConsole && active?.document.binary && (
+      {!showSurface && active?.document.binary && (
         <p className="editor__placeholder">
           Binary file ({active.document.size.toLocaleString()} bytes). It is not shown and cannot be
           edited; saving is disabled so it can never be corrupted.

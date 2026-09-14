@@ -53,6 +53,25 @@ export function sizeFromDelta(
 }
 
 /**
+ * Whether a drag has gone far enough past the minimum to close the pane.
+ *
+ * Measured on the *unclamped* size, because the clamped one stops at the
+ * minimum and could never say how much further the pointer went. Half the
+ * minimum past it is the line: a pointer that only overshoots a little while
+ * making the pane small still leaves it open, and dragging all the way to the
+ * window's edge always closes it. The same rule answers the way back, so
+ * dragging up again inside one gesture reopens the pane.
+ */
+export function collapsesAt(
+  startSize: number,
+  delta: number,
+  direction: Direction,
+  bounds: SplitterBounds,
+): boolean {
+  return startSize + delta * direction < bounds.min / 2;
+}
+
+/**
  * The size a key press asks for, or `null` when the key is not ours — which
  * is what lets the component leave every other key to the browser.
  *

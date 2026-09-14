@@ -8,7 +8,6 @@ import { TERMINAL_CHORD_HINT, terminalChordIndex } from './terminal-chords';
 import { normalizeTerminalName, type PillWorkspace } from './terminal-naming';
 import { TerminalPill } from './terminal-pill';
 import { selectedProfile, spawnShell } from './terminal-profiles';
-import { TerminalSettings } from './terminal-settings';
 import { TerminalView } from './terminal-view';
 import type { TerminalsController } from './use-terminals';
 
@@ -33,7 +32,8 @@ export function TerminalPanel({
   cwd,
   chords,
   settings,
-  onSettingsChange,
+  onShellChange,
+  onOpenSettings,
 }: {
   terminals: TerminalsController;
   /**
@@ -57,9 +57,16 @@ export function TerminalPanel({
    * terminal and answer a question on one keystroke.
    */
   chords: boolean;
-  /** The persisted terminal settings (T095): shell, custom shells, font. */
+  /**
+   * The `terminal.*` settings in force (T120-A): shell, custom shells, font.
+   * In the shape T095 persisted them in, which is why the shell is still
+   * `profilePath`.
+   */
   settings: TerminalLayout;
-  onSettingsChange: (patch: Partial<TerminalLayout>) => void;
+  /** The picker chose a shell for new terminals: `terminal.shell`. */
+  onShellChange: (path: string) => void;
+  /** Open the settings page on its Terminal section, where the rest are edited. */
+  onOpenSettings: () => void;
 }) {
   const { workspaceId, active, error, profiles, ready } = terminals;
   // A remembered shell that no longer exists falls back to the default rather
@@ -149,7 +156,7 @@ export function TerminalPanel({
 
   const shellItems: readonly MenuItem[] = startable.map((candidate) => ({
     label: `${candidate.name}${candidate.isDefault ? ' (default)' : ''}`,
-    onSelect: () => onSettingsChange({ profilePath: candidate.path }),
+    onSelect: () => onShellChange(candidate.path),
   }));
 
   return (
@@ -232,7 +239,19 @@ export function TerminalPanel({
           )}
         </div>
 
-        <TerminalSettings settings={settings} profiles={profiles} onChange={onSettingsChange} />
+        {/* The bar's ⋯ (artboard 8a) is a way into the settings page, not a
+            second place to edit them: the popover that hung here was a copy of
+            settings the page owns (T120-A). A broken custom shell is explained
+            there too, which is why the picker above leaves it out. */}
+        <button
+          type="button"
+          className="terminal-panel__settings"
+          aria-label="Terminal settings"
+          title="Terminal settings"
+          onClick={onOpenSettings}
+        >
+          ⋯
+        </button>
       </header>
 
       <div className="terminal-panel__body" id={bodyId} hidden={!open}>

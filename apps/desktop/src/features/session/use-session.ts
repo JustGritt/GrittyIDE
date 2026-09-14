@@ -32,6 +32,14 @@ export interface SessionDeps {
   readonly editor: EditorBinding;
   readonly prefs: EditorPreferences;
   setPrefs(prefs: EditorPreferences): void;
+  /**
+   * The `preferences` and `layout` blobs exactly as the restore returned them,
+   * before parsing, in one call (T120-A). The settings seed needs them raw: a
+   * parser fills every missing field with its default, so a parsed blob cannot
+   * be told apart from an absent one (`settings-seed.ts`). Together, because
+   * the seeding runs once and must see both.
+   */
+  onRestoredBlobs?(blobs: { readonly preferences: unknown; readonly layout: unknown }): void;
   readonly viewModes: ViewModes;
   dispatchViewMode(action: ViewModesAction): void;
   readonly layout: Layout;
@@ -173,7 +181,14 @@ export function useSession(deps: SessionDeps): SessionController {
     const first = restoreInFlight === null;
     if (restoreInFlight === null) {
       restoreInFlight = runRestore({
-        restore: () => core.session.restore(),
+        restore: async () => {
+          const response = await core.session.restore();
+          depsRef.current.onRestoredBlobs?.({
+            preferences: response.preferences,
+            layout: response.layout,
+          });
+          return response;
+        },
         adoptWorkspace: (workspace) => depsRef.current.adoptWorkspace(workspace),
         rehydrate: () => depsRef.current.documents.rehydrate(),
         openFile: (workspaceId, path) =>

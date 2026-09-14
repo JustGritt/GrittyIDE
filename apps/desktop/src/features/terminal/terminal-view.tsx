@@ -3,6 +3,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { type ITheme, Terminal } from '@xterm/xterm';
 import { useEffect, useRef } from 'react';
 import '@xterm/xterm/css/xterm.css';
+import { themeFollowingSettings } from '../theme/theme-settings';
 import type { OutputBus } from './output-bus';
 import { terminalChordIndex } from './terminal-chords';
 import { describeTerminal } from './terminal-reducer';
@@ -127,17 +128,22 @@ export function TerminalView({
     if (container && fit.current) fitIfVisible(container, fit.current);
   }, [fontFamily, fontSize]);
 
-  // The palette changes when the OS does. Applied in place, like the font:
+  // The palette changes when the theme does. Applied in place, like the font:
   // recreating the terminal would lose the scrollback of a running shell.
   // Without this a live terminal kept the theme it was born with.
+  //
+  // The theme signal rather than `matchMedia` (T120-T): an explicit Light or
+  // Dark choice is precisely what the media query cannot see, so watching it
+  // directly would leave a live terminal on the OS's appearance while the rest
+  // of the window followed the picker.
   useEffect(() => {
-    const query = window.matchMedia('(prefers-color-scheme: dark)');
-    const update = () => {
+    const signal = themeFollowingSettings();
+    return signal.subscribe(() => {
       const terminal = term.current;
+      // The signal stamps `data-theme` before it notifies, so the tokens this
+      // re-reads are the ones the new theme produced.
       if (terminal) terminal.options.theme = readTheme();
-    };
-    query.addEventListener('change', update);
-    return () => query.removeEventListener('change', update);
+    });
   }, []);
 
   // A hidden view cannot be measured, so it is fitted when it becomes visible.

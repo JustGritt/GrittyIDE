@@ -1,4 +1,3 @@
-import { AgentIntegrationSettings } from './agent-integration-settings';
 import { AgentStatusBadge } from './agent-status-badge';
 import { mostUrgent, runningCount, taskLine } from './agents-reducer';
 import { AGENTS_SECTION_CHORD_HINT } from './agents-section-chords';
@@ -33,11 +32,6 @@ export function AgentsSection({ controller }: { controller: AgentsController }) 
           The sidebar lists them all{' '}
           <kbd className="island__chord">{AGENTS_SECTION_CHORD_HINT}</kbd>
         </span>
-        {/* The hook integration (T221) lives here, in settings, and not as a
-            control on a session row: it changes a file the user owns, and that
-            is a decision about the machine rather than about any one session
-            (ADR-018 §1). It reads nothing until it is opened. */}
-        <AgentIntegrationSettings />
       </div>
 
       {/* The envelope itself belongs to the sidebar section, which is where

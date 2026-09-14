@@ -1,7 +1,7 @@
 # Task T120-M — Mount the settings tab, and the comma chord
 
 - **Phase:** 2
-- **Status:** todo
+- **Status:** review
 - **Depends on:** T120-U (the page), **T310-U** (the files), T101-D (queue order)
 
 ## Objective
@@ -111,4 +111,139 @@ pnpm dev
 
 ## Completion report
 
-*(filled on completion)*
+### Summary
+
+The settings page is reachable: ⌘, / Ctrl+, opens it as a tab, it renders as a
+surface inside `.editor__surfaces` with Monaco `hidden` beside it, it closes
+like a console, and no document tab is active while it shows. Roughly the
+thirty lines the ticket forecast, across the three files it named.
+
+**One thing the ticket asked for is deliberately not done: the three popovers
+are still there.** See "The popovers stay" below — it is the most important
+paragraph in this report.
+
+### Files changed
+
+| File | What |
+|---|---|
+| `App.tsx` | `useSettings`, the tab reducer, `showSettings`, the chord, the surface prop, the status-bar facts |
+| `features/editor/editor-pane.tsx` | `showSurface` generalisation, the page as a surface, the strip's third group, the hand-backs |
+| `features/editor/tab-strip.tsx` | the settings group after the consoles, and the document-active rule widened |
+| `features/settings/settings-chord.ts` (new) | pure: ⌘, / Ctrl+, |
+| `features/settings/use-settings-chord.ts` (new) | the window listener |
+| `features/settings/settings-chord.test.ts` (new) | 6 tests |
+| `features/settings/settings-mount.dom.test.tsx` (new) | 9 tests: the chord, focus-not-duplicate, the textarea case |
+| `features/editor/tab-strip-render.test.tsx` (new) | 11 tests: the three groups, ordering, what is active |
+
+### Tests actually executed
+
+- `npx vitest run src/features/settings/ src/features/editor/` → **124 passed**
+  (10 files). The existing agent-console tab tests pass unchanged.
+- `pnpm check` → **exit 0**: Biome, tsc, 1259 vitest tests across 118 files,
+  `cargo fmt --check`, `clippy -D warnings`, `cargo test --workspace`,
+  generated types fresh.
+- `npx vite build` → exit 0. Run deliberately: `App.tsx` now imports the
+  settings feature statically, and `monaco-deferred.test.ts`'s property is that
+  nothing reaches Monaco that way. Monaco is still its own chunk.
+
+### The popovers stay, and this is the finding
+
+T120-U's task file says "the old popovers are deleted by T120-M". **They are
+not, and deleting them would have shipped a regression.**
+
+Nothing applies the editor and terminal settings yet. `workbench.theme` is
+applied (T120-T) and `agents.notifications` is armed by the core at startup
+(T120-R). The other eight — `editor.fontSize`, `editor.tabSize`,
+`editor.wordWrap`, `editor.minimap`, `terminal.shell`,
+`terminal.customShells`, `terminal.fontFamily`, `terminal.fontSize` — are read
+by **nothing** outside `features/settings/` (checked by grep). Monaco still
+takes its preferences from the `preferences` blob through
+`useEditorPreferences`, and the terminal still takes its font and shells from
+the `layout` blob.
+
+So today the popovers are the only controls that *do* anything for those eight,
+and the settings page writes a file no one reads them from. Deleting the
+popovers would have left a build in which font size cannot be changed at all.
+
+Two further reasons not to force it: their mount points (`terminal-panel.tsx`,
+the agents section) are outside **both** T120-U's and T120-M's allowed scope, so
+neither ticket could have removed them cleanly; and this ticket's own acceptance
+criterion says the diff touches only the three files plus the settings feature
+directory.
+
+The missing piece is a ticket nobody has written: **make the editor and the
+terminal obey their settings.** It is what turns the page from a writer into a
+control surface, and it is what makes deleting the popovers correct rather than
+destructive. Until it lands the page is honest but partly inert, and that should
+be weighed before this reaches a user.
+
+### Architectural decisions
+
+1. **`showConsole` became `showSurface`, as §2 asked.** Every suppression in the
+   pane asked "is a console showing"; what each meant is "does something other
+   than a document have the pane". All eight sites moved to the general
+   predicate rather than gaining `&& !showSettings`, which is how the third kind
+   of surface gets missed.
+2. **The chord does not yield to `ownsRawKeystrokes`**, and that is the one way
+   it differs from `useQuickOpenChord`. That listener stands aside for a
+   `<textarea>` because on Linux and Windows `Ctrl+P` is readline's "previous
+   command". `Comma` is not a readline binding, and "I am editing a file and I
+   press ⌘," is the case this chord exists for — yielding would cost exactly it
+   and buy nothing. Quick open needed a second registration inside Monaco to
+   solve the same problem; this does not.
+3. **The status bar rides the existing `agentConsole` prop.** That slot already
+   means "what the non-document surface says"; widening its name is a change to
+   `status-bar.tsx`, which this ticket may not touch. While settings shows, the
+   bar reads `Settings · N changed` rather than describing a file the user is
+   not looking at (§5). Recorded as a rename follow-up.
+4. **Opening settings and activating a console are the same event to each
+   other.** Each takes the pane and hands it away from the other; neither
+   closes the other's tab. `dispatch({type:'documents'})` and
+   `consoleController.showDocuments()` are the two halves.
+
+### Known limitations
+
+- **The one-time seeding does not run.** `useSettings` is constructed with a
+  `null` seed source. The planner and its 12 tests exist (`settings-seed.ts`),
+  but the raw `preferences` / `layout` blobs are parsed and discarded inside
+  `restore-flow.ts`, which `use-session.ts` owns — another ticket's file.
+  Seeding from the *parsed* values was considered and rejected: a parsed blob
+  cannot be told apart from an absent one, and ADR-031 §8 is explicit that
+  seeding a default nobody chose pins them to it forever. Skipping a migration
+  is recoverable; performing it wrongly is not, because a key once written is
+  reported `explicit` and never seeded again.
+- `pnpm dev` was not run — see the risks below.
+
+### Follow-up tasks
+
+1. **Apply the settings** — the blocking one. `editor.*` into
+   `useEditorPreferences` / Monaco, `terminal.*` into `use-terminals` and
+   `terminal-view`. Only then can the popovers be deleted, which is the second
+   half of the same ticket and touches `terminal-panel.tsx` and the agents
+   section.
+2. **Wire the seed**: capture the raw blobs where `restore-flow.ts` currently
+   parses and drops them, and hand them to `useSettings`.
+3. **Repoint the quick-open command.** `App.tsx`'s `openSettings` still calls
+   `core.settings.reveal()` — the palette entry opens the file manager rather
+   than the tab. Left alone here because it is a behaviour change to an existing
+   command rather than part of the mount; it should now open the tab.
+4. Rename `StatusBar`'s `agentConsole` prop to something that admits it has two
+   kinds of caller.
+5. **A shortcut registry.** ⌘, is the eighth hand-gated `keydown` listener and
+   the sixth file to apologise for there being no registry.
+
+### Remaining risks
+
+- **The manual pass was not run.** `pnpm dev` needs a window and eyes on it, and
+  I have neither. Everything asserted here is asserted by a test or a build: the
+  chord opens the tab and a second press does not duplicate it (jsdom), the
+  three groups draw in order and only one tab is selected (static markup), the
+  pane's suppressions all moved to one predicate (typecheck plus the unchanged
+  console tests), the bundle builds. What is **not** verified is how it looks
+  and feels in the real window — the surface filling the pane, Monaco hidden
+  rather than unmounted, and T120-T's theme actually flipping three surfaces,
+  which is the pass that ticket also owes and which is only now performable,
+  because the picker exists.
+- Another session is editing `docs/decisions/ADR-032-ui-framework.md` and
+  `docs/testing/phase-0-manual-pass.md` in this working tree. Neither is touched
+  here; noted so whoever commits this does not sweep them in.

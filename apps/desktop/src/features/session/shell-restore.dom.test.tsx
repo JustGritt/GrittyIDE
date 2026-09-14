@@ -13,6 +13,8 @@ import type {
   RecentWorkspace,
   RecoveryCandidate,
   SessionRestoreResponse,
+  SettingsSchema,
+  SettingsSnapshot,
   Terminal,
   TerminalProfile,
   Workspace,
@@ -198,6 +200,54 @@ function stubCore(restored: Workspace | null): void {
 }
 
 /**
+ * A settings file that sets nothing, and a registry with only the keys the seed
+ * test reads, so `settings.set` can be watched. Every `settings.set` request is
+ * pushed onto `sets`.
+ */
+function stubSettings(sets: Record<string, unknown>[]): void {
+  const integer = { type: 'integer', min: 8, max: 32 } as const;
+  const spec = (key: string, kind: SettingsSchema['settings'][number]['kind'], value: unknown) => ({
+    key,
+    section: key.split('.')[0] ?? '',
+    label: key,
+    description: key,
+    kind,
+    default: value as SettingsSchema['settings'][number]['default'],
+    scope: 'USER' as const,
+    applies: 'LIVE' as const,
+  });
+  const schema: SettingsSchema = {
+    sections: [
+      { id: 'editor', label: 'Editor' },
+      { id: 'terminal', label: 'Terminal' },
+    ],
+    settings: [
+      spec('editor.fontSize', integer, 13),
+      spec('editor.minimap', { type: 'bool' }, true),
+      spec('terminal.shell', { type: 'nullablePath' }, null),
+      spec('terminal.customShells', { type: 'pathList', max_len: 16 }, []),
+      spec('terminal.fontFamily', { type: 'nullableString', max_len: 200 }, null),
+      spec('terminal.fontSize', integer, 13),
+    ],
+  };
+  const snapshot: SettingsSnapshot = {
+    values: Object.fromEntries(schema.settings.map((entry) => [entry.key, entry.default])),
+    explicit: [],
+    modified: [],
+    invalid: [],
+    unknown: [],
+    diagnostics: [],
+    storage: { writable: true, path: '/tmp/gritty-fixture/settings.json' },
+  };
+  seam.handlers.set('settings_describe', (): SettingsSchema => schema);
+  seam.handlers.set('settings_get', (): SettingsSnapshot => snapshot);
+  seam.handlers.set('settings_set', (args): SettingsSnapshot => {
+    sets.push(args?.request as Record<string, unknown>);
+    return snapshot;
+  });
+}
+
+/**
  * Queries are scoped to this render's own container rather than to `screen`
  * (which is `document.body`): if one case fails mid-flight its DOM can outlive
  * the assertion, and a body-wide query would then see two shells.
@@ -263,6 +313,43 @@ describe('the shell after a startup restore', () => {
     // subscription onto a single transport listener, so this set never holds
     // more than one however many hooks are mounted.
     expect(seam.listeners.size).toBeGreaterThan(0);
+  });
+
+  it('seeds settings.json from the preferences and the layout together', async () => {
+    // T120-A: the editor and the terminal both read settings now, so the
+    // one-time seed (ADR-031 §8) has to carry both blobs' values in its one
+    // write. It runs once per session; a seed handed only the preferences
+    // would leave the terminal's keys to a second seeding that never comes.
+    stubCore(null);
+    const sets: Record<string, unknown>[] = [];
+    stubSettings(sets);
+    seam.handlers.set(
+      'session_restore',
+      (): SessionRestoreResponse => ({
+        ...restoreResponse(null),
+        preferences: { version: 1, fontSize: 15 },
+        layout: {
+          version: 1,
+          terminal: {
+            profilePath: '/opt/homebrew/bin/fish',
+            customShells: ['/opt/homebrew/bin/fish'],
+            fontFamily: null,
+            fontSize: 16,
+          },
+        },
+      }),
+    );
+    renderShell();
+
+    await waitFor(() => expect(sets).toHaveLength(1));
+    expect(sets[0]).toEqual({
+      values: {
+        'editor.fontSize': 15,
+        'terminal.shell': '/opt/homebrew/bin/fish',
+        'terminal.customShells': ['/opt/homebrew/bin/fish'],
+        'terminal.fontSize': 16,
+      },
+    });
   });
 
   it('shows the launcher when the restore reopened nothing', async () => {

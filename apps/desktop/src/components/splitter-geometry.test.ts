@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   boundsWithin,
   clampSize,
+  collapsesAt,
   type SplitterBounds,
   sizeFromDelta,
   sizeFromKey,
@@ -43,6 +44,29 @@ describe('sizeFromDelta', () => {
   it('stops at the bounds instead of running past them', () => {
     expect(sizeFromDelta(390, 999, 1, bounds)).toBe(400);
     expect(sizeFromDelta(110, -999, 1, bounds)).toBe(100);
+  });
+});
+
+describe('collapsesAt', () => {
+  it('closes a dock dragged down past half its minimum', () => {
+    // Minimum 100, so the line is 50: dragging a 200px dock down 151px leaves 49.
+    expect(collapsesAt(200, 151, -1, bounds)).toBe(true);
+    expect(collapsesAt(200, 150, -1, bounds)).toBe(false);
+  });
+
+  it('keeps a pane open while the pointer only overshoots the minimum a little', () => {
+    // Clamped, this drag already reads as 100; unclamped it is 60, still open.
+    expect(sizeFromDelta(200, 140, -1, bounds)).toBe(100);
+    expect(collapsesAt(200, 140, -1, bounds)).toBe(false);
+  });
+
+  it('closes whatever the pointer does past the window edge', () => {
+    expect(collapsesAt(200, 5000, -1, bounds)).toBe(true);
+  });
+
+  it('respects direction, so dragging a dock taller never closes it', () => {
+    expect(collapsesAt(200, -5000, -1, bounds)).toBe(false);
+    expect(collapsesAt(200, -151, 1, bounds)).toBe(true);
   });
 });
 

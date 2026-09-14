@@ -1,6 +1,7 @@
 import { type RefObject, useCallback, useEffect, useRef, useState } from 'react';
 import {
   clampSize,
+  collapsesAt,
   type Direction,
   type SplitterBounds,
   sizeFromDelta,
@@ -20,6 +21,7 @@ export function Splitter({
   property,
   bounds,
   onCommit,
+  onCollapse,
 }: {
   /**
    * The *separator's* own orientation, as `aria-orientation` means it: a
@@ -41,6 +43,14 @@ export function Splitter({
   /** Evaluated when a drag or a key press starts, against the live layout. */
   bounds: (target: HTMLElement) => SplitterBounds;
   onCommit: (size: number) => void;
+  /**
+   * Close the pane instead of sizing it, when a drag is released far enough
+   * past the minimum (`collapsesAt`). Absent, the minimum is a hard stop.
+   *
+   * The size is not committed on a close: reopening the pane brings back the
+   * height it had before the drag, not the minimum it was dragged through.
+   */
+  onCollapse?: () => void;
 }) {
   // A drag writes the CSS variable directly and never touches React state:
   // re-rendering the shell — Monaco and every xterm with it — on each pointer
@@ -52,6 +62,7 @@ export function Splitter({
     startSize: number;
     bounds: SplitterBounds;
     latest: number;
+    collapsing: boolean;
   } | null>(null);
 
   const preview = useCallback(
@@ -80,6 +91,7 @@ export function Splitter({
         startSize: clampSize(value, limits),
         bounds: limits,
         latest: clampSize(value, limits),
+        collapsing: false,
       };
       // Capture so the drag survives the pointer leaving this thin element,
       // and so a release outside the window still ends it.
@@ -92,16 +104,21 @@ export function Splitter({
     (event: React.PointerEvent<HTMLDivElement>) => {
       const state = drag.current;
       if (!state || state.pointerId !== event.pointerId) return;
-      const size = sizeFromDelta(
-        state.startSize,
-        axis(event) - state.origin,
-        direction,
-        state.bounds,
-      );
+      const delta = axis(event) - state.origin;
+      const size = sizeFromDelta(state.startSize, delta, direction, state.bounds);
       state.latest = size;
       preview(size);
+      const collapsing =
+        onCollapse !== undefined && collapsesAt(state.startSize, delta, direction, state.bounds);
+      if (collapsing !== state.collapsing) {
+        state.collapsing = collapsing;
+        // The preview of a close is an attribute, not React state, for the
+        // same reason the size is a CSS variable: it can flip on any pointer
+        // event. The stylesheet decides what "about to close" looks like.
+        event.currentTarget.toggleAttribute('data-collapsing', collapsing);
+      }
     },
-    [axis, direction, preview],
+    [axis, direction, onCollapse, preview],
   );
 
   const endDrag = useCallback(
@@ -112,10 +129,19 @@ export function Splitter({
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
+      event.currentTarget.removeAttribute('data-collapsing');
+      // Only a release closes the pane. A cancelled pointer is the system
+      // taking the gesture away, not the user letting go at the edge.
+      if (state.collapsing && event.type === 'pointerup' && onCollapse) {
+        // Put back the height the drag started from, so it is what reopens.
+        preview(value);
+        onCollapse();
+        return;
+      }
       // Committing an unchanged size would still rewrite the session blob.
       if (state.latest !== value) onCommit(state.latest);
     },
-    [onCommit, value],
+    [onCollapse, onCommit, preview, value],
   );
 
   const onKeyDown = useCallback(

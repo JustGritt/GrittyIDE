@@ -4,6 +4,7 @@ import { type DragEvent, type MouseEvent, useCallback, useState } from 'react';
 import { Menu, type MenuAnchor, type MenuItem } from '../../components/menu';
 import type { AgentTabItem } from '../agents/agent-console';
 import { type DocumentsState, isPreview, isUnsaved } from '../documents/documents-reducer';
+import { SETTINGS_TAB_LABEL } from '../settings/settings-tab';
 import { tabsToTheRight } from './close-plan';
 import { fileName } from './file-name';
 
@@ -42,6 +43,11 @@ interface OpenMenu {
  * - **They are grouped at the end** rather than interleaved. That is the
  *   legible half of T231's objection kept: one strip, two kinds, still telling
  *   them apart at a glance. Reordering is a document affair for now.
+ *
+ * The settings page is the third group and the second kind of non-document tab
+ * (T120-M, ADR-026's stated "Revisit when"). Both rules above hold for it
+ * unchanged: it is a singleton with a literal key rather than a fake
+ * `DocumentTab`, and it sits after the consoles rather than among anything.
  */
 export function TabStrip({
   state,
@@ -51,6 +57,7 @@ export function TabStrip({
   onCloseMany,
   onReorder,
   agents,
+  settings,
 }: {
   state: DocumentsState;
   onActivate: (documentId: DocumentId) => void;
@@ -73,14 +80,32 @@ export function TabStrip({
     onPromote: (key: string) => void;
     onClose: (key: string) => void;
   };
+  /**
+   * The settings tab: a singleton, so a flag rather than a list (T120-M).
+   * Absent where settings are not mounted at all.
+   */
+  settings?: {
+    readonly open: boolean;
+    readonly preview: boolean;
+    /** True while the page has the pane, which also deactivates the documents. */
+    readonly active: boolean;
+    onActivate: () => void;
+    onPromote: () => void;
+    onClose: () => void;
+  };
 }) {
   const [dragging, setDragging] = useState<DocumentId | null>(null);
   const [menu, setMenu] = useState<OpenMenu | null>(null);
   const dismissMenu = useCallback(() => setMenu(null), []);
   const agentItems = agents?.items ?? [];
+  const settingsOpen = settings?.open === true;
   // A console outlives the last file: closing every document must not take the
-  // agent you are watching off the screen with them.
-  if (state.order.length === 0 && agentItems.length === 0) return null;
+  // agent you are watching off the screen with them. The settings tab is the
+  // same case — ⌘, with nothing open must produce a strip to close it from.
+  if (state.order.length === 0 && agentItems.length === 0 && !settingsOpen) return null;
+  // A non-document tab showing is what deactivates the documents, whichever
+  // kind it is.
+  const nonDocumentActive = agents?.activeId != null || settings?.active === true;
 
   function onDrop(event: DragEvent<HTMLButtonElement>, index: number) {
     event.preventDefault();
@@ -124,7 +149,7 @@ export function TabStrip({
         // A document tab cannot be the active one while a console is showing.
         // `documents.state.activeId` is deliberately left pointing at it — that
         // is what session restore persists — so the check is here, in the view.
-        const isActive = id === state.activeId && agents?.activeId == null;
+        const isActive = id === state.activeId && !nonDocumentActive;
         const unsaved = isUnsaved(tab);
         const preview = isPreview(state, id);
         const name = fileName(tab.document.path);
@@ -233,6 +258,39 @@ export function TabStrip({
           </div>
         );
       })}
+      {settingsOpen && settings && (
+        <div
+          role="presentation"
+          className={`tabs__item tabs__item--agent${settings.active ? ' tabs__item--active' : ''}`}
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={settings.active}
+            className={`tabs__tab${settings.preview ? ' tabs__tab--preview' : ''}`}
+            title={
+              settings.preview
+                ? `${SETTINGS_TAB_LABEL} — preview, double-click to keep`
+                : SETTINGS_TAB_LABEL
+            }
+            onClick={settings.onActivate}
+            onDoubleClick={settings.onPromote}
+            onAuxClick={(event) => {
+              if (event.button === 1) settings.onClose();
+            }}
+          >
+            {SETTINGS_TAB_LABEL}
+          </button>
+          <button
+            type="button"
+            className="tabs__close"
+            aria-label={`Close ${SETTINGS_TAB_LABEL}`}
+            onClick={settings.onClose}
+          >
+            ×
+          </button>
+        </div>
+      )}
       {menu && menuTab && (
         <Menu
           label={`${fileName(menuTab.document.path)} tab actions`}

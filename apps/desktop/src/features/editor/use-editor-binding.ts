@@ -11,6 +11,7 @@ import type { CursorPosition, EditorHost, ScrollState } from '@gritty/editor/mon
 import type { DocumentId } from '@gritty/protocol';
 import { type RefObject, useCallback, useEffect, useRef, useState } from 'react';
 import type { DocumentsController } from '../documents/use-documents';
+import { themeFollowingSettings } from '../theme/theme-settings';
 import type { MonacoModel } from './monaco-setup';
 
 interface Engine {
@@ -188,7 +189,9 @@ export function useEditorBinding(
           anchor: { line: selection.anchor.lineNumber, column: selection.anchor.column },
         }));
       });
-      const unwatchTheme = watchColorScheme();
+      // The app's theme signal, not the OS preference: an explicit Light or
+      // Dark choice is what `matchMedia` alone cannot see (T120-T).
+      const unwatchTheme = watchColorScheme(undefined, themeFollowingSettings());
       disposeEngine = () => {
         unwatchTheme();
         unsubscribeCursor();
