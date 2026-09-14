@@ -118,3 +118,12 @@ the tree to implement it. Or when a measured walk over `fixtures/large-repo`
 (10,500 files) is too slow with the token checked at
 `CANCEL_CHECK_INTERVAL`, which would argue for `ignore`'s parallel walker and
 its own cancellation, not for a process.
+
+**2026-09-14, both triggers checked.** The first is the subject of ADR-034
+(Proposed), which drafts the meaning of "ignored" this ADR deferred. The second
+did not fire (SEARCH-WALK-TIME, `docs/tasks/SEARCH-WALK-TIME-large-repo-timing.md`):
+over `large-repo`'s 10,429 files a full content scan takes a median 197 ms in
+release and 242 ms in debug, and a cancellation is honoured within 2.3 ms at
+worst, against the plan's only perceptual figure of 100 ms. The walk polls
+between every file and every `SCAN_CHUNK_BYTES`; `CANCEL_CHECK_INTERVAL` is
+quick-open's, in `rank.rs`, which the wording above conflated.
