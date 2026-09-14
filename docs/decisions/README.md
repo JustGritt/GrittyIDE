@@ -23,7 +23,7 @@ requires updating the relevant ADR.
 | [ADR-015](ADR-015-terminal-pty.md) | Terminal sessions over a PTY: portable-pty, output batching, process-tree termination, shell and environment policy | Accepted |
 | [ADR-016](ADR-016-design-tokens.md) | Design tokens: CSS custom properties are the single source of truth; Monaco and xterm read them back | Accepted |
 | [ADR-017](ADR-017-terminal-command-blocks.md) | Terminal command blocks are a renderer-side view of xterm's scrollback | Accepted |
-| [ADR-018](ADR-018-agent-integration-bridge.md) | Gritty may install a hook into another tool's configuration, additively and with consent | Accepted; amendment ADR-018A (a hook that may refuse a write) Proposed |
+| [ADR-018](ADR-018-agent-integration-bridge.md) | Gritty may install a hook into another tool's configuration, additively and with consent | Accepted, amended by ADR-018A (a hook that may refuse a write) |
 | [ADR-019](ADR-019-workspace-ownership.md) | Write ownership is a logical lease held by a workstream, and it is observed rather than enforced | Accepted |
 | [ADR-020](ADR-020-agent-permission-verdicts.md) | A hook may wait for Gritty's verdict on a permission prompt, bounded and fail-open | Accepted |
 | [ADR-021](ADR-021-agent-run-persistence.md) | A run Gritty owns is persisted as an account of itself, never as something to resume | Accepted |

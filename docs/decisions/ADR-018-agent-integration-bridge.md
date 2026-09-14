@@ -282,12 +282,25 @@ prompt. Failed and rate-limited turns all wrote `turn_duration` (41 of 41).
 
 ## Amendment (ADR-018A, 2026-09-14): the hook may refuse a write on ground another workstream holds
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-14
-- **Decided by:** nobody yet. Drafted by an agent session;
-  `docs/plans/execution-board.md` reserves every ADR verdict for lane H, so this
-  stays `Proposed` until Alexis records one — as ADR-022, ADR-023, ADR-024,
-  ADR-025 and ADR-028 also do.
+- **Accepted:** 2026-09-14 by Alexis, as drafted, taking the recommended answer
+  to each question the draft left open:
+  1. With Gritty not running, nothing is refused (§4, item 2).
+  2. A stale lease still refuses a claim and no longer refuses a write (§2).
+  3. An unlinked session is never refused (§2).
+  4. Shell writes are not refused by pattern; they stay named as not enforced
+     (*Alternatives rejected*).
+  5. Consent is one switch per provider over every live lease, not a per-lease
+     mode; an `OwnershipMode` stays undecided (§5, *Not decided here*).
+  6. The refusal verb is `deny`, and the override lives in Gritty (§6).
+  7. An owned run stays observed until T330-R has measured `PreToolUse` under
+     `-p` (§7). **Whether Gritty may pass `--settings` when it launches a run is
+     not decided by this acceptance**: T330-R brings that back with its
+     measurement if the installed entry turns out not to fire.
+
+  Nothing is enforced until T330 ships, so ADR-019's "observed rather than
+  enforced" and `docs/architecture/ownership.md` stay true until then (§8).
 - **Amends:** §5, §6 and §7 of this ADR; ADR-020's "The core never synthesises
   one" and "Enforcement is still not this"; ADR-019 §7, whose own *Revisit when*
   names this amendment.
