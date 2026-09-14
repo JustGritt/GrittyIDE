@@ -80,6 +80,7 @@ moves back. Never move a task file by hand.
 | T300-ANSWER | Answer a permission or decision on a run Gritty owns | 4 | T300-WIRE | unspec |
 | T300-PANEL | A run belongs on its workstream's island row, not a fourth roster | 4 | T300-WIRE | unspec |
 | T400-R | Worktree create and remove | 5 | T100 | unspec |
+| [TRASH-FALLBACK](docs/tasks/TRASH-FALLBACK-offer-permanent-delete.md) | A delete the Trash refuses offers permanent deletion | maintenance | FILES-PARTIAL, EXPLORER-DISCARD-NOTICE | review |
 | [TREE-DISCLOSURE](docs/tasks/TREE-DISCLOSURE-chevron-transition.md) | Tree chevron and expand/collapse transition | 2 | FILE-ICONS | review |
 | [TURN-START-DEQUEUE](docs/tasks/TURN-START-DEQUEUE-measure.md) | Measure whether a dequeued message should start a turn | maintenance | AGENT-TURN-END | review |
 | [TURN-START-QUEUED](docs/tasks/TURN-START-QUEUED-dequeue-and-shell.md) | A dequeued message or a ! command starts a turn | maintenance | TURN-START-DEQUEUE, AGENT-TURN-END | review |

@@ -391,9 +391,9 @@ fn remove_native(native: &Path, path: &WorkspacePath) -> Result<(), WorkspaceErr
 /// delete instead, and the user chooses.
 pub fn trash(root: &WorkspaceRoot, path: &WorkspacePath) -> Result<(), WorkspaceError> {
     let native = resolve_existing(root, path, "path")?;
-    trash::delete(&native).map_err(|error| WorkspaceError::Io {
+    trash::delete(&native).map_err(|error| WorkspaceError::TrashRefused {
         context: format!("{path} could not be moved to the trash"),
-        source: io::Error::other(error.to_string()),
+        reason: error.to_string(),
     })
 }
 

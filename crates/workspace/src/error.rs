@@ -37,6 +37,12 @@ pub enum WorkspaceError {
         #[source]
         source: io::Error,
     },
+    /// The OS trash would not take the entry — most often a network or
+    /// removable volume that has none (TRASH-FALLBACK). Not `Io`, because the
+    /// caller has an answer to this failure and to no other: offer to delete
+    /// permanently, and let the user choose (ADR-028).
+    #[error("{context}: {reason}")]
+    TrashRefused { context: String, reason: String },
     /// The caller asked to stop; partial results were discarded.
     #[error("cancelled")]
     Cancelled,

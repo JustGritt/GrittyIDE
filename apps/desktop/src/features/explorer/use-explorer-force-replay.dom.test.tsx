@@ -392,3 +392,91 @@ describe('isDirtyDocumentRefusal', () => {
     expect(isDirtyDocumentRefusal(null)).toBe(false);
   });
 });
+
+/**
+ * TRASH-FALLBACK, through the hook: a Trash refusal is a question, not an
+ * error — it sets `trashRefusal` and leaves `error` empty, so the panel shows
+ * no envelope — and answering it sends exactly what was left.
+ */
+describe('a delete the Trash refused', () => {
+  afterEach(cleanup);
+
+  beforeEach(() => {
+    seam.handlers.clear();
+    calls.length = 0;
+    seam.handlers.set('workspace_current', (): Workspace => WORKSPACE);
+    seam.handlers.set(
+      'workspace_list',
+      (args): ListDirectoryResponse => ({
+        status: 'ready',
+        page: {
+          path: ((args?.request as { path?: string })?.path ?? '') as WorkspacePath,
+          entries: [],
+          total: 0,
+          truncated: false,
+        },
+      }),
+    );
+  });
+
+  async function opened() {
+    const rendered = renderHook(() => useExplorer());
+    await waitFor(() => expect(rendered.result.current.state.workspace).not.toBeNull());
+    return rendered;
+  }
+
+  it('becomes a question carrying what is left, not an error', async () => {
+    seam.handlers.set('files_delete', (args): FileOperationResponse => {
+      const request = record('files_delete', args);
+      if (request.mode === 'PERMANENT') return OK;
+      throw {
+        code: 'Io',
+        message: 'b.txt could not be moved to the trash: no trash',
+        retryable: false,
+        details: { kind: 'Other', reason: 'TRASH_REFUSED', completed: 1, requested: 3 },
+      };
+    });
+
+    const rendered = await opened();
+    await act(async () => {
+      await rendered.result.current.deleteEntries(['a.txt', 'b.txt', 'c.txt'], 'TRASH', true);
+    });
+    expect(rendered.result.current.error).toBeNull();
+    expect(rendered.result.current.trashRefusal).toEqual({
+      paths: ['b.txt', 'c.txt'],
+      force: true,
+      reason: 'b.txt could not be moved to the trash: no trash',
+    });
+
+    await act(async () => {
+      await rendered.result.current.deletePermanentlyInstead();
+    });
+    expect(calls[1]?.request).toEqual({
+      workspaceId: WORKSPACE.id,
+      paths: ['b.txt', 'c.txt'],
+      mode: 'PERMANENT',
+      force: true,
+    });
+    expect(rendered.result.current.trashRefusal).toBeNull();
+  });
+
+  it('leaves any other failure an error, and a permanent delete is never asked twice', async () => {
+    seam.handlers.set('files_delete', (args) => {
+      record('files_delete', args);
+      throw {
+        code: 'Io',
+        message: 'no trash',
+        retryable: false,
+        details: { reason: 'TRASH_REFUSED', completed: 0, requested: 1 },
+      };
+    });
+
+    const rendered = await opened();
+    // The same reason on a PERMANENT request is not a Trash refusal to answer.
+    await act(async () => {
+      await rendered.result.current.deleteEntries(['a.txt'], 'PERMANENT');
+    });
+    expect(rendered.result.current.error?.code).toBe('Io');
+    expect(rendered.result.current.trashRefusal).toBeNull();
+  });
+});

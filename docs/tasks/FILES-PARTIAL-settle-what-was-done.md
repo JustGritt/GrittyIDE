@@ -131,9 +131,10 @@ early.
   directory once; a refusal re-lists nothing.
 - **Mutation checks:** restore `?` in the loop, and move `CancelOnDrop` back
   inside `async move`. The named tests fail.
-- **Manual, for Alexis:** select three files, delete one of them in Finder, then
-  drag the three onto a folder. The two that existed move, an open tab for the
-  first follows, and ⌘Z puts them back.
+- **Manual, for Alexis:** open `a.txt` in a tab, select `a.txt`, `b.txt` and
+  `c.txt`, delete `b.txt` in Finder, then drag the three onto a folder. `a.txt`
+  moves and its tab follows; the batch stops at `b.txt` with an error saying 1
+  of 3 was already moved; `c.txt` stays; ⌘Z puts `a.txt` back.
 
 ## Commands to run
 

@@ -45,6 +45,11 @@ type Draft =
 interface PendingDelete {
   readonly paths: readonly string[];
   readonly permanent: boolean;
+  /**
+   * Why a permanent delete is being offered instead of the Trash, when the
+   * Trash refused (TRASH-FALLBACK). Absent for an ordinary Shift+Delete.
+   */
+  readonly trashRefusedBecause?: string;
 }
 
 /**
@@ -468,13 +473,26 @@ export function ExplorerTree({
         />
       )}
 
-      {pendingDelete && (
+      {pendingDelete ? (
         <DeleteDialog
           pending={pendingDelete}
           nameOf={nameOf}
           onConfirm={() => void confirmDelete()}
           onCancel={() => setPendingDelete(null)}
         />
+      ) : (
+        explorer.trashRefusal && (
+          <DeleteDialog
+            pending={{
+              paths: explorer.trashRefusal.paths,
+              permanent: true,
+              trashRefusedBecause: explorer.trashRefusal.reason,
+            }}
+            nameOf={nameOf}
+            onConfirm={() => void explorer.deletePermanentlyInstead()}
+            onCancel={explorer.dismissTrashRefusal}
+          />
+        )
       )}
     </>
   );
@@ -798,6 +816,10 @@ function DraftInput({
 /**
  * Only a *permanent* delete asks. Moving to the Trash is recoverable outside
  * Gritty, and a prompt in front of every delete trains people to dismiss it.
+ *
+ * It also asks when the Trash refused and a permanent delete is the remaining
+ * way to do what the user asked (TRASH-FALLBACK): the same decision, so the
+ * same dialog, saying why it is being asked.
  */
 function DeleteDialog({
   pending,
@@ -828,8 +850,22 @@ function DeleteDialog({
           if (event.key === 'Escape') onCancel();
         }}
       >
-        <h3 id="delete-dialog-title">Delete {what} permanently?</h3>
-        <p id="delete-dialog-text">This does not use the Trash and cannot be undone from Gritty.</p>
+        {pending.trashRefusedBecause === undefined ? (
+          <>
+            <h3 id="delete-dialog-title">Delete {what} permanently?</h3>
+            <p id="delete-dialog-text">
+              This does not use the Trash and cannot be undone from Gritty.
+            </p>
+          </>
+        ) : (
+          <>
+            <h3 id="delete-dialog-title">The Trash refused {what}. Delete permanently instead?</h3>
+            <p id="delete-dialog-text">
+              {pending.trashRefusedBecause}. A permanent delete does not use the Trash and cannot be
+              undone from Gritty.
+            </p>
+          </>
+        )}
         <div className="dialog__actions">
           <button type="button" ref={cancelButton} onClick={onCancel}>
             Cancel

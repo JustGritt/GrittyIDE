@@ -600,10 +600,20 @@ impl From<WorkspaceError> for CoreError {
                 mapped.message = format!("{context}: {}", mapped.message);
                 mapped
             }
+            // `Io`, as before, with a reason the explorer keys on to offer a
+            // permanent delete in place of a generic error (TRASH-FALLBACK).
+            WorkspaceError::TrashRefused { context, reason } => {
+                Self::new(CoreErrorCode::Io, format!("{context}: {reason}"))
+                    .with_details(serde_json::json!({ "kind": "Other", "reason": TRASH_REFUSED }))
+            }
             WorkspaceError::Cancelled => Self::cancelled("directory listing cancelled"),
         }
     }
 }
+
+/// `details.reason` of an `Io` error the OS trash caused: the one I/O failure
+/// a caller can answer, by offering a permanent delete (TRASH-FALLBACK).
+pub const TRASH_REFUSED: &str = "TRASH_REFUSED";
 
 #[cfg(test)]
 mod tests {
@@ -1212,6 +1222,28 @@ mod tests {
             "a closed workspace still reported changes: {:?}",
             h.sink.names()
         );
+    }
+
+    #[test]
+    fn a_trash_refusal_is_io_with_a_reason_the_explorer_can_answer() {
+        let error = CoreError::from(WorkspaceError::TrashRefused {
+            context: "notes.md could not be moved to the trash".to_string(),
+            reason: "no trash on this volume".to_string(),
+        });
+        assert_eq!(error.code, CoreErrorCode::Io);
+        assert_eq!(
+            error.message,
+            "notes.md could not be moved to the trash: no trash on this volume"
+        );
+        assert_eq!(error.details.expect("details")["reason"], TRASH_REFUSED);
+
+        // Any other I/O failure carries no such reason, so nothing offers to
+        // delete permanently in answer to it.
+        let other = CoreError::from(WorkspaceError::Io {
+            context: "notes.md".to_string(),
+            source: std::io::Error::other("disk"),
+        });
+        assert!(other.details.expect("details").get("reason").is_none());
     }
 
     #[test]

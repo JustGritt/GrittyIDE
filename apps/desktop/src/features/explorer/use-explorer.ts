@@ -58,10 +58,36 @@ type Refusal =
  */
 export function isDirtyDocumentRefusal(error: CoreError | null): boolean {
   if (error?.code !== 'Conflict') return false;
-  const details = error.details;
-  if (typeof details !== 'object' || details === null || Array.isArray(details)) return false;
-  const dirty = (details as { dirtyDocuments?: unknown }).dirtyDocuments;
+  const dirty = detailsOf(error).dirtyDocuments;
   return Array.isArray(dirty) && dirty.length > 0;
+}
+
+/** An error's `details` as an object, or an empty one when it is anything else. */
+function detailsOf(error: CoreError): Record<string, unknown> {
+  const details = error.details;
+  return typeof details === 'object' && details !== null && !Array.isArray(details)
+    ? (details as Record<string, unknown>)
+    : {};
+}
+
+/**
+ * `details.reason` of an `Io` error the OS trash caused (the core's
+ * `TRASH_REFUSED`): the one I/O failure the explorer answers, by offering to
+ * delete permanently instead (TRASH-FALLBACK).
+ */
+const TRASH_REFUSED = 'TRASH_REFUSED';
+
+/**
+ * A Trash delete the OS refused, waiting for the user to choose a permanent
+ * delete instead or to keep the files (TRASH-FALLBACK).
+ */
+export interface TrashRefusal {
+  /** What the Trash did not take: the batch from the entry it refused on. */
+  readonly paths: readonly string[];
+  /** Carried from the refused request, so the dirty-document guard answers the same way. */
+  readonly force: boolean;
+  /** The core's message, which says why. */
+  readonly reason: string;
 }
 
 /**
@@ -298,6 +324,16 @@ export function useExplorer(options: ExplorerOptions = {}) {
   /** What ⌘Z would reverse, as the core last reported it. */
   const [history, setHistory] = useState<{ undo?: string; redo?: string }>({});
 
+  /** A Trash delete the OS refused, until the user answers it (TRASH-FALLBACK). */
+  const [trashRefusal, setTrashRefusal] = useState<TrashRefusal | null>(null);
+  // It names paths in one workspace; another workspace's tree is not what the
+  // user would be agreeing to delete.
+  const workspaceId = state.workspace?.id;
+  useEffect(() => {
+    void workspaceId;
+    setTrashRefusal(null);
+  }, [workspaceId]);
+
   /** Take a command's answer: re-list what it changed, and remember the labels. */
   const settle = useCallback((result: FileOperationResult | undefined) => {
     if (!result) return undefined;
@@ -325,11 +361,7 @@ export function useExplorer(options: ExplorerOptions = {}) {
     try {
       return await send();
     } catch (cause: unknown) {
-      const details = toCoreError(cause).details;
-      const completed =
-        typeof details === 'object' && details !== null && !Array.isArray(details)
-          ? (details as { completed?: unknown }).completed
-          : undefined;
+      const completed = detailsOf(toCoreError(cause)).completed;
       if (typeof completed === 'number') dispatch({ type: 'invalidate', paths: [], all: true });
       throw cause;
     }
@@ -388,20 +420,49 @@ export function useExplorer(options: ExplorerOptions = {}) {
     (paths: readonly string[], mode: DeleteMode, force = false) =>
       run(async () => {
         if (!workspace || paths.length === 0) return undefined;
-        const response = await refusable({ kind: 'delete', paths, mode }, () =>
-          relistIfPartial(() =>
-            core.files.delete({
-              workspaceId: workspace.id,
-              paths: [...paths],
-              mode,
-              ...(force ? { force: true } : {}),
-            }),
-          ),
-        );
-        return settleResponse(response);
+        setTrashRefusal(null);
+        try {
+          const response = await refusable({ kind: 'delete', paths, mode }, () =>
+            relistIfPartial(() =>
+              core.files.delete({
+                workspaceId: workspace.id,
+                paths: [...paths],
+                mode,
+                ...(force ? { force: true } : {}),
+              }),
+            ),
+          );
+          return settleResponse(response);
+        } catch (cause: unknown) {
+          const error = toCoreError(cause);
+          const details = detailsOf(error);
+          if (mode !== 'TRASH' || error.code !== 'Io' || details.reason !== TRASH_REFUSED) {
+            throw cause;
+          }
+          // Not an error to show: a question to ask. The entries before the
+          // refused one are already in the Trash (FILES-PARTIAL); the rest are
+          // what a permanent delete would take.
+          const completed = typeof details.completed === 'number' ? details.completed : 0;
+          setTrashRefusal({ paths: paths.slice(completed), force, reason: error.message });
+          return undefined;
+        }
       }),
     [run, workspace, settleResponse, refusable, relistIfPartial],
   );
+
+  /**
+   * Answer a Trash refusal by deleting what is left permanently. Only ever
+   * reached from the confirmation dialog, which says it cannot be undone.
+   */
+  const deletePermanentlyInstead = useCallback(async () => {
+    const refusal = trashRefusal;
+    if (!refusal) return;
+    setTrashRefusal(null);
+    await deleteEntries(refusal.paths, 'PERMANENT', refusal.force);
+  }, [trashRefusal, deleteEntries]);
+
+  /** Answer a Trash refusal by keeping the files. Sends nothing. */
+  const dismissTrashRefusal = useCallback(() => setTrashRefusal(null), []);
 
   /**
    * Whether "discard them and continue" means something right now: the error
@@ -492,6 +553,9 @@ export function useExplorer(options: ExplorerOptions = {}) {
     renameEntry,
     transfer,
     deleteEntries,
+    trashRefusal,
+    deletePermanentlyInstead,
+    dismissTrashRefusal,
     revealInFileManager,
     paste,
     undo,

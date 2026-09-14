@@ -270,6 +270,95 @@ describe('the operations', () => {
     expect(calledWith('files_delete')).toMatchObject({ paths: ['src'], mode: 'TRASH' });
   });
 
+  describe('when the Trash refuses (TRASH-FALLBACK)', () => {
+    /** Select all three root rows and press Delete. */
+    async function trashEverything(view: ReturnType<typeof render>) {
+      const tree = view.container.querySelector('[role="tree"]') as HTMLElement;
+      fireEvent.keyDown(tree, { code: 'ArrowDown' });
+      fireEvent.keyDown(tree, { code: 'ArrowDown', shiftKey: true });
+      fireEvent.keyDown(tree, { code: 'ArrowDown', shiftKey: true });
+      await act(async () => {
+        fireEvent.keyDown(tree, { code: 'Backspace' });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    }
+
+    function deleteRequests(): Record<string, unknown>[] {
+      return seam.calls
+        .filter((entry) => entry.command === 'files_delete')
+        .map((entry) => entry.args?.request as Record<string, unknown>);
+    }
+
+    function refuseTrashAfterOne() {
+      seam.handlers.set('files_delete', (args) => {
+        const request = args?.request as { mode: string };
+        if (request.mode === 'PERMANENT')
+          return { status: 'ready', result: { changed: [''], moved: [] } };
+        throw {
+          code: 'Io',
+          message: 'README.md could not be moved to the trash: no trash on this volume',
+          retryable: false,
+          details: { kind: 'Other', reason: 'TRASH_REFUSED', completed: 1, requested: 3 },
+        };
+      });
+    }
+
+    it('offers a permanent delete of what the Trash did not take', async () => {
+      refuseTrashAfterOne();
+      const { view } = await mountTree();
+      await trashEverything(view);
+
+      const dialog = view.container.querySelector('[role="alertdialog"]');
+      expect(dialog, 'the refusal is asked about, not shown as an error').not.toBeNull();
+      expect(dialog?.textContent).toMatch(/The Trash refused 2 items/);
+      expect(dialog?.textContent).toMatch(/no trash on this volume/);
+
+      await act(async () => {
+        fireEvent.click(view.container.querySelector('.dialog__danger') as HTMLButtonElement);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      // `src` went to the Trash before the refusal; only the rest goes now.
+      expect(deleteRequests()).toEqual([
+        { workspaceId: WORKSPACE.id, paths: ['src', 'README.md', 'notes.txt'], mode: 'TRASH' },
+        { workspaceId: WORKSPACE.id, paths: ['README.md', 'notes.txt'], mode: 'PERMANENT' },
+      ]);
+      expect(view.container.querySelector('[role="alertdialog"]')).toBeNull();
+    });
+
+    it('sends nothing more when the user keeps the files', async () => {
+      refuseTrashAfterOne();
+      const { view } = await mountTree();
+      await trashEverything(view);
+
+      await act(async () => {
+        const buttons =
+          view.container.querySelectorAll<HTMLButtonElement>('.dialog__actions button');
+        fireEvent.click(buttons[0] as HTMLButtonElement);
+        await Promise.resolve();
+      });
+      expect(view.container.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(deleteRequests().map((request) => request.mode)).toEqual(['TRASH']);
+    });
+
+    it('does not offer it for any other I/O failure', async () => {
+      seam.handlers.set('files_delete', () => {
+        throw {
+          code: 'Io',
+          message: 'README.md: disk full',
+          retryable: false,
+          details: { kind: 'Other', completed: 0, requested: 3 },
+        };
+      });
+      const { view } = await mountTree();
+      await trashEverything(view);
+
+      expect(view.container.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(deleteRequests().map((request) => request.mode)).toEqual(['TRASH']);
+    });
+  });
+
   it('cut then paste moves the selection into the folder under the cursor', async () => {
     const { view } = await mountTree();
     const tree = view.container.querySelector('[role="tree"]') as HTMLElement;
