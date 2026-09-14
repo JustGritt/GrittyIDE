@@ -2859,6 +2859,179 @@ done
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// A run's permission ask, answered through the real IPC (T310-ANSWER).
+///
+/// The stub asks three times — once per prompt — and performs a side effect
+/// only when the answer it reads allowed it, so the assertions are about files
+/// on disk rather than about anything Gritty logged. Allow creates the file;
+/// deny does not and the run carries on; cancelling while the third ask is on
+/// screen tells the child no, and leaves no child behind.
+#[cfg(unix)]
+#[test]
+fn a_run_asks_the_user_and_does_only_what_the_answer_allowed() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = std::env::temp_dir().join(format!("gritty-run-ask-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a stub directory");
+    let program = dir.join("claude-stub");
+    let log = dir.join("answers.log");
+    let pidfile = dir.join("stub.pid");
+    std::fs::write(
+        &program,
+        format!(
+            r#"#!/bin/sh
+trap '' TERM
+echo $$ > {pid}
+printf '%s\n' '{{"type":"system","subtype":"init","session_id":"s","tools":[]}}'
+n=0
+while IFS= read -r prompt; do
+  n=$((n+1))
+  printf '%s\n' '{{"type":"user","isReplay":true,"message":{{"role":"user","content":"echoed"}}}}'
+  printf '%s\n' "{{\"type\":\"control_request\",\"request_id\":\"req-$n\",\"request\":{{\"subtype\":\"can_use_tool\",\"tool_name\":\"Bash\",\"input\":{{\"command\":\"touch effect-$n\"}}}}}}"
+  IFS= read -r answer
+  printf '%s\n' "$answer" >> {log}
+  case "$answer" in *'"behavior":"allow"'*) touch {dir}/effect-$n ;; esac
+  printf '%s\n' "$answer"
+  printf '%s\n' '{{"type":"result","subtype":"success","is_error":false,"result":"done"}}'
+done
+"#,
+            pid = pidfile.display(),
+            log = log.display(),
+            dir = dir.display(),
+        ),
+    )
+    .expect("write the stub");
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))
+        .expect("make it executable");
+
+    let root = TempWorkspace::new("run-ask");
+    let harness = Harness::with_agent(program);
+    let (workspace_id, workstream_id) = harness.workspace_and_workstream(&root.0);
+    let run_id = harness
+        .session(
+            "runs_start",
+            json!({
+                "workspaceId": workspace_id,
+                "workstreamId": workstream_id,
+                "provider": "CLAUDE_CODE",
+                "prompt": "first",
+            }),
+        )
+        .expect("start the run")["id"]
+        .clone();
+
+    let ask = |n: u32| -> String {
+        let blocked = harness.run_until(&run_id, &workspace_id, |state| state == "BLOCKED");
+        let pending = &blocked["pending"];
+        assert_eq!(pending["tool"], "Bash", "the ask names its tool: {blocked}");
+        assert_eq!(pending["verb"], "RUN_COMMAND");
+        assert_eq!(pending["target"], format!("touch effect-{n}"));
+        assert!(
+            !dir.join(format!("effect-{n}")).exists(),
+            "nothing ran before the answer"
+        );
+        pending["askId"].as_str().expect("an ask id").to_owned()
+    };
+
+    // Allow: the side effect happens and the run parks, waiting.
+    let first = ask(1);
+    let answered = harness
+        .session(
+            "runs_answer_permission",
+            json!({ "runId": run_id, "askId": first, "verdict": "ALLOW_ONCE" }),
+        )
+        .expect("answer the first ask");
+    assert!(
+        answered.get("pending").is_none(),
+        "the ask is gone at once: {answered}"
+    );
+    harness.run_until(&run_id, &workspace_id, |state| state == "WAITING");
+    assert!(
+        dir.join("effect-1").exists(),
+        "an allowance lets the tool run"
+    );
+
+    // The answer that remembers is not one a run takes.
+    let refused = harness
+        .session(
+            "runs_answer_permission",
+            json!({ "runId": run_id, "askId": first, "verdict": "ALLOW_FOR_RUN" }),
+        )
+        .expect_err("no remembered grants for a run");
+    assert_eq!(refused["code"], "InvalidInput");
+
+    // Deny: no side effect, and the run carries on rather than failing.
+    harness
+        .session("runs_prompt", json!({ "runId": run_id, "text": "second" }))
+        .expect("a second turn");
+    let second = ask(2);
+    harness
+        .session(
+            "runs_answer_permission",
+            json!({ "runId": run_id, "askId": second, "verdict": "DENY" }),
+        )
+        .expect("answer the second ask");
+    let parked = harness.run_until(&run_id, &workspace_id, |state| {
+        state == "WAITING" || is_terminal(state)
+    });
+    assert_eq!(
+        parked["state"], "WAITING",
+        "a denial is not a failure: {parked}"
+    );
+    assert!(!dir.join("effect-2").exists(), "a denied tool did not run");
+
+    // An answer to an ask that has gone changes nothing and is not an error.
+    let stale = harness
+        .session(
+            "runs_answer_permission",
+            json!({ "runId": run_id, "askId": second, "verdict": "ALLOW_ONCE" }),
+        )
+        .expect("a stale answer is not an error");
+    assert_eq!(stale["state"], "WAITING");
+    assert!(!dir.join("effect-2").exists());
+
+    // Cancel with the third ask on screen: the child is told no, then killed.
+    harness
+        .session("runs_prompt", json!({ "runId": run_id, "text": "third" }))
+        .expect("a third turn");
+    ask(3);
+    let pid: i32 = std::fs::read_to_string(&pidfile)
+        .expect("the stub recorded its pid")
+        .trim()
+        .parse()
+        .expect("a pid");
+    harness
+        .session("runs_cancel", json!({ "runId": run_id }))
+        .expect("cancel the run");
+    let ended = harness.run_until(&run_id, &workspace_id, is_terminal);
+    assert_eq!(ended["state"], "CANCELLED");
+    assert!(
+        ended.get("pending").is_none(),
+        "no ask outlives its run: {ended}"
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let answers = std::fs::read_to_string(&log).unwrap_or_default();
+        if answers.lines().count() >= 3 && !is_running(pid) {
+            let third = answers.lines().nth(2).expect("a third answer");
+            assert!(
+                third.contains(r#""behavior":"deny""#),
+                "the stop answered no: {third}"
+            );
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the child was not told no, or survived the cancel: {answers}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!dir.join("effect-3").exists(), "the tool never ran");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 /// Alive, without reaping: signal 0 asks the kernel rather than parsing `ps`.
 #[cfg(unix)]
 fn is_running(pid: i32) -> bool {

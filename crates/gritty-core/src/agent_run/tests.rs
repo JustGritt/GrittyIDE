@@ -1236,3 +1236,850 @@ async fn a_prompt_queue_is_bounded_and_refuses_rather_than_grows() {
     assert_eq!(after.state, AgentRunState::Running);
     assert!(after.activity.is_none());
 }
+
+// ---------------------------------------------------------------------------
+// Permission asks (T310-ANSWER)
+// ---------------------------------------------------------------------------
+
+use super::manager::{PendingVerdict, PermissionAskDraft};
+use super::wire::{
+    AgentRunPermissionVerb, AgentRunPermissionVerdict, MAX_ASK_TARGET, MAX_DETAIL, MAX_TOOL,
+};
+
+fn draft(target: &str) -> PermissionAskDraft {
+    PermissionAskDraft {
+        tool: "Bash".to_owned(),
+        verb: AgentRunPermissionVerb::RunCommand,
+        target: target.to_owned(),
+        detail: None,
+    }
+}
+
+fn asking_events() -> Vec<AgentRunEvent> {
+    vec![
+        AgentRunEvent::PermissionRequested {
+            tool: "Bash".to_owned(),
+            detail: None,
+        },
+        AgentRunEvent::RunBlocked {
+            reason: "Bash needs permission".to_owned(),
+        },
+    ]
+}
+
+fn requesting() -> Option<AgentRunActivity> {
+    Some(AgentRunActivity::new(
+        AgentRunActivityKind::RequestingPermission,
+        Timestamp::from_millis(1),
+    ))
+}
+
+impl Script {
+    /// Raise an ask from inside the driver and hand its verdict end back.
+    async fn ask(&self, draft: PermissionAskDraft) -> Result<PendingVerdict, CoreError> {
+        let (tx, rx) = oneshot::channel();
+        self.act(move |ctx| {
+            let pending = ctx.ask_permission(draft, asking_events(), requesting())?;
+            let _ = tx.send(pending);
+            Ok(())
+        })
+        .await?;
+        Ok(rx.await.expect("the verdict end was handed back"))
+    }
+}
+
+/// Resolves when `pending` does, or reports that it had not yet.
+async fn resolved(pending: &mut PendingVerdict) -> Option<Option<AgentRunPermissionVerdict>> {
+    timeout(Duration::from_millis(50), pending.wait())
+        .await
+        .ok()
+}
+
+#[tokio::test]
+async fn an_ask_blocks_the_run_and_sits_on_it_in_one_change() {
+    let harness = start();
+    let (run, script) = harness.scripted();
+    script.to(AgentRunState::Running).await.unwrap();
+    let before = harness.states(&run.id).len();
+
+    let _pending = script
+        .ask(draft("cargo test"))
+        .await
+        .expect("the ask is accepted");
+
+    let blocked = harness.manager.get(&run.id).expect("the run exists");
+    assert_eq!(blocked.state, AgentRunState::Blocked);
+    assert_eq!(
+        blocked.activity.map(|activity| activity.kind),
+        Some(AgentRunActivityKind::RequestingPermission)
+    );
+    let ask = blocked.pending.expect("the ask is on the run");
+    assert_eq!(ask.tool, "Bash");
+    assert_eq!(ask.verb, AgentRunPermissionVerb::RunCommand);
+    assert_eq!(ask.target, "cargo test");
+    assert!(
+        uuid::Uuid::try_parse(&ask.ask_id).is_ok(),
+        "the core mints the id"
+    );
+
+    // One `AgentRunChanged` for the state, the activity and the ask together,
+    // and it carries the ask: no consumer sees a run blocked on nothing.
+    let changes: Vec<AgentRun> = harness
+        .sink
+        .recorded()
+        .iter()
+        .filter_map(|envelope| match &envelope.event {
+            CoreEvent::AgentRunChanged(payload) if payload.run.id == run.id => {
+                Some(payload.run.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(changes.len(), before + 1);
+    assert!(changes.last().unwrap().pending.is_some());
+    // The events explaining the stop arrived before the change.
+    let kinds = harness.kinds(&run.id);
+    assert!(
+        kinds.ends_with(&["PERMISSION_REQUESTED", "RUN_BLOCKED"]),
+        "{kinds:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_answer_reaches_the_driver_once_and_takes_the_ask_off_the_run() {
+    let harness = start();
+    let (run, script) = harness.scripted();
+    script.to(AgentRunState::Running).await.unwrap();
+    let mut pending = script.ask(draft("cargo test")).await.unwrap();
+    let ask_id = harness
+        .manager
+        .get(&run.id)
+        .unwrap()
+        .pending
+        .unwrap()
+        .ask_id;
+
+    let answered = harness
+        .manager
+        .answer_permission(
+            &run.id,
+            &ask_id,
+            AgentRunPermissionVerdict::AllowOnce,
+            Actor::User,
+        )
+        .expect("the answer is accepted");
+    assert!(
+        answered.pending.is_none(),
+        "the ask stops being answerable at once"
+    );
+    // The run leaves BLOCKED when the child acknowledges, not here.
+    assert_eq!(answered.state, AgentRunState::Blocked);
+    assert_eq!(
+        resolved(&mut pending).await,
+        Some(Some(AgentRunPermissionVerdict::AllowOnce))
+    );
+
+    // A second click is not a second verdict, and not an error either.
+    let again = harness
+        .manager
+        .answer_permission(
+            &run.id,
+            &ask_id,
+            AgentRunPermissionVerdict::Deny,
+            Actor::User,
+        )
+        .expect("an answer to a gone ask is not an error");
+    assert_eq!(again, harness.manager.get(&run.id).unwrap());
+}
+
+#[tokio::test]
+async fn an_answer_addressed_to_another_ask_changes_nothing() {
+    let harness = start();
+    let (run, script) = harness.scripted();
+    script.to(AgentRunState::Running).await.unwrap();
+    let mut pending = script.ask(draft("cargo test")).await.unwrap();
+
+    let unchanged = harness
+        .manager
+        .answer_permission(
+            &run.id,
+            "not-the-ask",
+            AgentRunPermissionVerdict::AllowOnce,
+            Actor::User,
+        )
+        .expect("not an error");
+    assert!(
+        unchanged.pending.is_some(),
+        "the real ask is still outstanding"
+    );
+    assert_eq!(resolved(&mut pending).await, None, "nothing was delivered");
+
+    let unknown = harness
+        .manager
+        .answer_permission(
+            &AgentRunId::from_raw("no-such-run"),
+            "ask",
+            AgentRunPermissionVerdict::AllowOnce,
+            Actor::User,
+        )
+        .expect_err("an unknown run");
+    assert_eq!(unknown.code, CoreErrorCode::NotFound);
+}
+
+#[tokio::test]
+async fn a_second_ask_while_one_is_outstanding_is_refused_and_the_first_stands() {
+    let harness = start();
+    let (run, script) = harness.scripted();
+    script.to(AgentRunState::Running).await.unwrap();
+    let _first = script.ask(draft("first")).await.unwrap();
+    let first_id = harness
+        .manager
+        .get(&run.id)
+        .unwrap()
+        .pending
+        .unwrap()
+        .ask_id;
+    let kinds_before = harness.kinds(&run.id);
+
+    let error = script
+        .ask(draft("second"))
+        .await
+        .expect_err("one ask at a time");
+    assert_eq!(error.code, CoreErrorCode::Conflict);
+
+    let after = harness.manager.get(&run.id).unwrap();
+    let pending = after.pending.expect("the first ask is untouched");
+    assert_eq!(pending.ask_id, first_id);
+    assert_eq!(pending.target, "first");
+    assert_eq!(
+        harness.kinds(&run.id),
+        kinds_before,
+        "a refused ask records nothing: it did not stop the run"
+    );
+}
+
+/// The rule the task exists to protect: an ask nobody answers is never an
+/// allowance, however long it is left.
+#[tokio::test(start_paused = true)]
+async fn an_unanswered_ask_never_resolves_on_its_own() {
+    let harness = start();
+    let (run, script) = harness.scripted();
+    script.to(AgentRunState::Running).await.unwrap();
+    let mut pending = script.ask(draft("rm -rf target")).await.unwrap();
+
+    tokio::time::advance(Duration::from_secs(24 * 60 * 60)).await;
+    assert_eq!(
+        resolved(&mut pending).await,
+        None,
+        "a day later, still no verdict"
+    );
+    assert!(harness.manager.get(&run.id).unwrap().pending.is_some());
+}
+
+#[tokio::test]
+async fn cancelling_a_blocked_run_withdraws_its_ask_as_no_answer() {
+    let mut harness = start();
+    let (run, script) = harness.scripted();
+    script.to(AgentRunState::Running).await.unwrap();
+    let mut pending = script.ask(draft("cargo test")).await.unwrap();
+    let ask_id = harness
+        .manager
+        .get(&run.id)
+        .unwrap()
+        .pending
+        .unwrap()
+        .ask_id;
+
+    let stopping = harness.manager.cancel(&run.id, Actor::User).unwrap();
+    assert!(
+        stopping.pending.is_none(),
+        "the stop is the answer; a prompt must not offer a choice that is gone"
+    );
+    // `None` is what the driver denies on. It is never an allowance.
+    assert_eq!(resolved(&mut pending).await, Some(None));
+    let late = harness
+        .manager
+        .answer_permission(
+            &run.id,
+            &ask_id,
+            AgentRunPermissionVerdict::AllowOnce,
+            Actor::User,
+        )
+        .expect("a withdrawn ask is not an error");
+    assert!(late.pending.is_none());
+
+    let ended = harness.ended(&run.id).await;
+    assert_eq!(ended.state, AgentRunState::Cancelled);
+    assert!(ended.pending.is_none());
+}
+
+#[tokio::test]
+async fn a_run_that_ends_while_asking_withdraws_the_ask() {
+    let mut harness = start();
+    let (run, script) = harness.scripted();
+    script.to(AgentRunState::Running).await.unwrap();
+    let mut pending = script.ask(draft("cargo test")).await.unwrap();
+
+    script.fail("the child died").await.unwrap();
+    let ended = harness.ended(&run.id).await;
+    assert_eq!(ended.state, AgentRunState::Failed);
+    assert!(
+        ended.pending.is_none(),
+        "an ask about a gone process is withdrawn"
+    );
+    assert_eq!(resolved(&mut pending).await, Some(None));
+}
+
+#[tokio::test]
+async fn resuming_without_an_answer_clears_the_ask() {
+    let harness = start();
+    let (run, script) = harness.scripted();
+    script.to(AgentRunState::Running).await.unwrap();
+    let mut pending = script.ask(draft("cargo test")).await.unwrap();
+
+    script.to(AgentRunState::Running).await.unwrap();
+    assert!(harness.manager.get(&run.id).unwrap().pending.is_none());
+    assert_eq!(resolved(&mut pending).await, Some(None));
+}
+
+#[tokio::test]
+async fn a_run_that_cannot_block_cannot_ask() {
+    let harness = start();
+    let (run, script) = harness.scripted();
+    // STARTING reaches only RUNNING.
+    let early = script.ask(draft("x")).await.expect_err("not from STARTING");
+    assert_eq!(early.code, CoreErrorCode::Conflict);
+    script.to(AgentRunState::Running).await.unwrap();
+    script.to(AgentRunState::Waiting).await.unwrap();
+    let waiting = script.ask(draft("x")).await.expect_err("not from WAITING");
+    assert_eq!(waiting.code, CoreErrorCode::Conflict);
+    assert!(harness.manager.get(&run.id).unwrap().pending.is_none());
+    assert!(
+        !harness.kinds(&run.id).contains(&"RUN_BLOCKED"),
+        "a refused ask records no block"
+    );
+
+    script.to(AgentRunState::Running).await.unwrap();
+    // A parked driver cannot act once a stop lands (it is aborted), so the
+    // stopping edge is asked of the manager directly — it is only reachable
+    // from a driver in a race, and a race is not something to test by hoping.
+    script.park();
+    harness.manager.cancel(&run.id, Actor::User).unwrap();
+    let stopping = harness
+        .manager
+        .raise_permission(&run.id, draft("x"), asking_events(), requesting())
+        .expect_err("not while stopping");
+    assert_eq!(stopping.code, CoreErrorCode::Conflict);
+    assert!(
+        stopping.message.contains("stopping"),
+        "{}",
+        stopping.message
+    );
+}
+
+#[tokio::test]
+async fn an_answer_that_cannot_be_delivered_is_refused_and_the_ask_is_gone() {
+    let harness = start();
+    let (run, script) = harness.scripted();
+    script.to(AgentRunState::Running).await.unwrap();
+    let pending = script.ask(draft("cargo test")).await.unwrap();
+    let ask_id = harness
+        .manager
+        .get(&run.id)
+        .unwrap()
+        .pending
+        .unwrap()
+        .ask_id;
+    // The driver's end is gone: what a driver that died mid-ask leaves.
+    drop(pending);
+
+    let error = harness
+        .manager
+        .answer_permission(
+            &run.id,
+            &ask_id,
+            AgentRunPermissionVerdict::AllowOnce,
+            Actor::User,
+        )
+        .expect_err("the caller must not believe it was delivered");
+    assert_eq!(error.code, CoreErrorCode::Conflict);
+    assert!(harness.manager.get(&run.id).unwrap().pending.is_none());
+}
+
+#[tokio::test]
+async fn an_asks_strings_are_bounded_on_the_run() {
+    let harness = start();
+    let (run, script) = harness.scripted();
+    script.to(AgentRunState::Running).await.unwrap();
+    let long = "x\n".repeat(20_000);
+    let _pending = script
+        .ask(PermissionAskDraft {
+            tool: long.clone(),
+            verb: AgentRunPermissionVerb::Other,
+            target: long.clone(),
+            detail: Some(format!("{long}!")),
+        })
+        .await
+        .unwrap();
+    let ask = harness.manager.get(&run.id).unwrap().pending.unwrap();
+    assert_eq!(ask.tool.chars().count(), MAX_TOOL);
+    assert_eq!(ask.target.chars().count(), MAX_ASK_TARGET);
+    assert_eq!(ask.detail.unwrap().chars().count(), MAX_DETAIL);
+}
+
+// ---------------------------------------------------------------------------
+// The Claude driver's permission loop, against a real child (T310-ANSWER)
+//
+// A `/bin/sh` stub stands in for the CLI: it asks, reads whatever Gritty
+// writes back, logs it, and performs its side effect **only** if the answer
+// allowed it. Every assertion below is about that side effect or that log —
+// never about the absence of a log line in Gritty's own tracing (rule 12).
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+mod claude_permissions {
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::agent_run::claude_driver::{self, ClaudeDriverOptions, ClaudeLaunch};
+
+    const SESSION: &str = "3f8a1c2e-9b40-4d17-8e55-6a2b7c4d9f10";
+
+    const INIT: &str = r#"{"type":"system","subtype":"init","session_id":"s","tools":[]}"#;
+    const REPLAY: &str =
+        r#"{"type":"user","isReplay":true,"message":{"role":"user","content":"go"}}"#;
+    const ASK: &str = r#"{"type":"control_request","request_id":"req-1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"touch side-effect"},"description":"touch side-effect"}}"#;
+    const RESULT: &str =
+        r#"{"type":"result","subtype":"success","is_error":false,"result":"done"}"#;
+    /// An ordinary `tool_use`: a line whose handling is observable (it records
+    /// `COMMAND_STARTED`), used to prove everything before it was handled.
+    const MARKER: &str = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_m","name":"Bash","input":{"command":"marker"}}]}}"#;
+
+    struct Stub {
+        dir: TempDir,
+        program: PathBuf,
+    }
+
+    impl Stub {
+        /// `body` runs after `init` and the first prompt's replay. `$LOG`,
+        /// `$EFFECT` and `$PIDFILE` name files in the stub's own directory.
+        fn new(name: &str, body: &str) -> Self {
+            use std::os::unix::fs::PermissionsExt;
+            let dir = TempDir::new(name);
+            let program = dir.path().join("claude-stub");
+            let script = format!(
+                "#!/bin/sh\nLOG='{log}'\nEFFECT='{effect}'\necho $$ > '{pid}'\n\
+                 printf '%s\\n' '{INIT}'\nIFS= read -r prompt\nprintf '%s\\n' '{REPLAY}'\n{body}\n",
+                log = dir.path().join("answers.log").display(),
+                effect = dir.path().join("side-effect").display(),
+                pid = dir.path().join("stub.pid").display(),
+            );
+            std::fs::write(&program, script).expect("write the stub");
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))
+                .expect("make it executable");
+            Self { dir, program }
+        }
+
+        fn path(&self, name: &str) -> PathBuf {
+            self.dir.path().join(name)
+        }
+
+        fn effect_happened(&self) -> bool {
+            self.path("side-effect").exists()
+        }
+
+        fn answers(&self) -> String {
+            std::fs::read_to_string(self.path("answers.log")).unwrap_or_default()
+        }
+
+        fn pid(&self) -> i32 {
+            std::fs::read_to_string(self.path("stub.pid"))
+                .expect("the stub wrote its pid")
+                .trim()
+                .parse()
+                .expect("a pid")
+        }
+    }
+
+    /// Ask once, act on the answer, echo it, end the turn, then idle.
+    const ASK_AND_ACT: &str = r#"
+printf '%s\n' "$ASK"
+IFS= read -r answer
+printf '%s\n' "$answer" >> "$LOG"
+case "$answer" in *'"behavior":"allow"'*) touch "$EFFECT" ;; esac
+printf '%s\n' "$answer"
+printf '%s\n' "$RESULT"
+while IFS= read -r line; do :; done
+"#;
+
+    fn with_lines(body: &str) -> String {
+        format!("ASK='{ASK}'\nRESULT='{RESULT}'\nMARKER='{MARKER}'\n{body}",)
+    }
+
+    impl Harness {
+        fn claude(&self, stub: &Stub) -> AgentRun {
+            let (inbox, receiver) = RunInbox::pair();
+            inbox.seed("go".to_owned());
+            let launch = ClaudeLaunch::new(SESSION, self.workspace.root.clone())
+                .expect("a valid session id")
+                .with_program(&stub.program);
+            let spec = AgentRunSpec {
+                provider: AgentRunProvider::ClaudeCode,
+                ..self.spec()
+            };
+            self.manager
+                .start_with_inbox(
+                    spec,
+                    inbox,
+                    OwnedProviderSession {
+                        session_id: SESSION.to_owned(),
+                        pid: None,
+                    },
+                    claude_driver::drive(launch, receiver, ClaudeDriverOptions::default()),
+                )
+                .expect("the run starts")
+        }
+
+        /// The first announcement of this run that satisfies `accept`.
+        async fn until(&mut self, id: &AgentRunId, accept: impl Fn(&AgentRun) -> bool) -> AgentRun {
+            timeout(Duration::from_secs(20), async {
+                loop {
+                    let envelope = self.rx.recv().await.expect("the event stream is open");
+                    if let CoreEvent::AgentRunChanged(payload) = &envelope.event
+                        && payload.run.id == *id
+                        && accept(&payload.run)
+                    {
+                        return payload.run.clone();
+                    }
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("run {id} never reached the expected state"))
+        }
+
+        /// Wait until the run has recorded `kind`, on the event stream.
+        async fn until_event(&mut self, id: &AgentRunId, kind: &str) {
+            timeout(Duration::from_secs(20), async {
+                loop {
+                    let envelope = self.rx.recv().await.expect("the event stream is open");
+                    if let CoreEvent::AgentRunEventAppended(payload) = &envelope.event
+                        && payload.run_id == *id
+                        && payload
+                            .events
+                            .iter()
+                            .any(|record| record.event.as_str() == kind)
+                    {
+                        return;
+                    }
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("run {id} never recorded {kind}"));
+        }
+    }
+
+    async fn eventually(what: &str, mut condition: impl FnMut() -> bool) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+        while !condition() {
+            assert!(tokio::time::Instant::now() < deadline, "{what}");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    fn alive(pid: i32) -> bool {
+        std::process::Command::new("/bin/kill")
+            .args(["-0", &pid.to_string()])
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
+    async fn blocked(harness: &mut Harness, run: &AgentRun) -> String {
+        let blocked = harness.until(&run.id, |run| run.pending.is_some()).await;
+        assert_eq!(blocked.state, AgentRunState::Blocked);
+        let ask = blocked.pending.expect("an ask");
+        assert_eq!(ask.target, "touch side-effect");
+        assert_eq!(ask.verb, AgentRunPermissionVerb::RunCommand);
+        ask.ask_id
+    }
+
+    #[tokio::test]
+    async fn an_allowed_ask_lets_the_tool_run_and_the_run_carries_on() {
+        let mut harness = start();
+        let stub = Stub::new("allow", &with_lines(ASK_AND_ACT));
+        let run = harness.claude(&stub);
+        let ask_id = blocked(&mut harness, &run).await;
+        assert!(
+            !stub.effect_happened(),
+            "nothing runs while the ask is outstanding"
+        );
+
+        harness
+            .manager
+            .answer_permission(
+                &run.id,
+                &ask_id,
+                AgentRunPermissionVerdict::AllowOnce,
+                Actor::User,
+            )
+            .expect("answered");
+        let waiting = harness
+            .until(&run.id, |run| run.state == AgentRunState::Waiting)
+            .await;
+        assert!(waiting.pending.is_none());
+        assert!(
+            stub.effect_happened(),
+            "the side effect is what an allowance means"
+        );
+        assert!(
+            stub.answers()
+                .contains(r#""response":{"behavior":"allow"}"#),
+            "the allowance carried no input back: {}",
+            stub.answers()
+        );
+        let kinds = harness.kinds(&run.id);
+        assert!(kinds.contains(&"RUN_RESUMED"), "{kinds:?}");
+        harness.manager.cancel(&run.id, Actor::User).unwrap();
+        harness.ended(&run.id).await;
+    }
+
+    #[tokio::test]
+    async fn a_denied_ask_does_not_run_and_the_run_carries_on() {
+        let mut harness = start();
+        let stub = Stub::new("deny", &with_lines(ASK_AND_ACT));
+        let run = harness.claude(&stub);
+        let ask_id = blocked(&mut harness, &run).await;
+
+        harness
+            .manager
+            .answer_permission(
+                &run.id,
+                &ask_id,
+                AgentRunPermissionVerdict::Deny,
+                Actor::User,
+            )
+            .expect("answered");
+        let waiting = harness
+            .until(&run.id, |run| {
+                run.state.is_terminal() || run.state == AgentRunState::Waiting
+            })
+            .await;
+        assert_eq!(
+            waiting.state,
+            AgentRunState::Waiting,
+            "a denial is not a failure"
+        );
+        assert!(!stub.effect_happened(), "a denied tool did not run");
+        assert!(
+            stub.answers()
+                .contains(gritty_agent_claude::USER_DENIED_REASON),
+            "the model is told the user said no: {}",
+            stub.answers()
+        );
+        harness.manager.cancel(&run.id, Actor::User).unwrap();
+        harness.ended(&run.id).await;
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_blocked_run_denies_then_kills_and_leaves_no_child() {
+        let mut harness = start();
+        // Deaf to SIGTERM, so the kill is the SIGKILL after the grace period —
+        // and so there is time for the stub to log the denial it was sent.
+        let stub = Stub::new(
+            "cancel",
+            &with_lines(&format!("trap '' TERM\n{ASK_AND_ACT}")),
+        );
+        let run = harness.claude(&stub);
+        blocked(&mut harness, &run).await;
+        let pid = stub.pid();
+        assert!(alive(pid));
+
+        harness.manager.cancel(&run.id, Actor::User).unwrap();
+        let ended = harness.ended(&run.id).await;
+        assert_eq!(ended.state, AgentRunState::Cancelled);
+        assert!(ended.pending.is_none());
+
+        eventually("the child was never told no", || {
+            stub.answers().contains(r#""behavior":"deny""#)
+        })
+        .await;
+        eventually("the child survived the cancel", || !alive(pid)).await;
+        assert!(!stub.effect_happened(), "the tool never ran");
+    }
+
+    #[tokio::test]
+    async fn shutdown_with_an_ask_outstanding_denies_and_interrupts() {
+        let mut harness = start();
+        let stub = Stub::new(
+            "shutdown",
+            &with_lines(&format!("trap '' TERM\n{ASK_AND_ACT}")),
+        );
+        let run = harness.claude(&stub);
+        blocked(&mut harness, &run).await;
+        let pid = stub.pid();
+
+        harness.manager.shutdown(Duration::from_secs(5)).await;
+        let ended = harness
+            .manager
+            .get(&run.id)
+            .expect("the run is still listed");
+        assert_eq!(ended.state, AgentRunState::Interrupted);
+        assert!(ended.pending.is_none());
+        eventually("the child was never told no", || {
+            stub.answers().contains(r#""behavior":"deny""#)
+        })
+        .await;
+        eventually("the child survived shutdown", || !alive(pid)).await;
+        assert!(!stub.effect_happened());
+    }
+
+    #[tokio::test]
+    async fn a_child_that_dies_while_asking_withdraws_the_ask() {
+        let mut harness = start();
+        let stub = Stub::new(
+            "die",
+            &with_lines("printf '%s\\n' \"$ASK\"\nIFS= read -r answer\nexit 3"),
+        );
+        let run = harness.claude(&stub);
+        let ask_id = blocked(&mut harness, &run).await;
+        // Let the child go: it reads nothing it acts on and exits.
+        harness
+            .manager
+            .answer_permission(
+                &run.id,
+                &ask_id,
+                AgentRunPermissionVerdict::Deny,
+                Actor::User,
+            )
+            .ok();
+        let ended = harness.ended(&run.id).await;
+        assert_eq!(ended.state, AgentRunState::Failed);
+        assert!(
+            ended.pending.is_none(),
+            "no ask outlives the process it was about"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_child_that_dies_before_anyone_answers_withdraws_the_ask() {
+        let mut harness = start();
+        let stub = Stub::new(
+            "die-unanswered",
+            &with_lines("printf '%s\\n' \"$ASK\"\nexit 3"),
+        );
+        let run = harness.claude(&stub);
+        let ended = harness.ended(&run.id).await;
+        assert_eq!(ended.state, AgentRunState::Failed);
+        assert!(ended.pending.is_none());
+    }
+
+    /// A second ask while the first is outstanding is the child breaking the
+    /// protocol: it is denied on the spot, its echo does not resume the run,
+    /// and the first ask is still the one on screen.
+    #[tokio::test]
+    async fn a_second_ask_is_denied_and_its_echo_does_not_unblock_the_run() {
+        let mut harness = start();
+        let second = ASK.replace("req-1", "req-2");
+        let body = format!(
+            r#"
+SECOND='{second}'
+printf '%s\n' "$ASK"
+printf '%s\n' "$SECOND"
+IFS= read -r answer
+printf '%s\n' "$answer" >> "$LOG"
+printf '%s\n' "$answer"
+printf '%s\n' "$MARKER"
+IFS= read -r answer
+printf '%s\n' "$answer" >> "$LOG"
+case "$answer" in *'"behavior":"allow"'*) touch "$EFFECT" ;; esac
+printf '%s\n' "$answer"
+printf '%s\n' "$RESULT"
+while IFS= read -r line; do :; done
+"#
+        );
+        let stub = Stub::new("second", &with_lines(&body));
+        let run = harness.claude(&stub);
+        let ask_id = blocked(&mut harness, &run).await;
+
+        // The marker comes after the echo of the second ask's denial, so once
+        // it is recorded that echo has been handled.
+        harness.until_event(&run.id, "COMMAND_STARTED").await;
+        let still = harness.manager.get(&run.id).unwrap();
+        assert_eq!(
+            still.state,
+            AgentRunState::Blocked,
+            "the echo did not resume it"
+        );
+        assert_eq!(
+            still.pending.as_ref().map(|ask| ask.ask_id.as_str()),
+            Some(ask_id.as_str())
+        );
+        let first_answer = stub.answers();
+        assert!(first_answer.contains("req-2"), "{first_answer}");
+        assert!(
+            first_answer.contains(gritty_agent_claude::ONE_ASK_AT_A_TIME_REASON),
+            "{first_answer}"
+        );
+        assert!(!harness.kinds(&run.id).contains(&"RUN_RESUMED"));
+
+        // The first ask is still answerable, and answering it works.
+        harness
+            .manager
+            .answer_permission(
+                &run.id,
+                &ask_id,
+                AgentRunPermissionVerdict::AllowOnce,
+                Actor::User,
+            )
+            .expect("answered");
+        harness
+            .until(&run.id, |run| run.state == AgentRunState::Waiting)
+            .await;
+        assert!(stub.effect_happened());
+        harness.manager.cancel(&run.id, Actor::User).unwrap();
+        harness.ended(&run.id).await;
+    }
+
+    /// Malformed and unsupported requests are refused without ever putting a
+    /// question in front of the user.
+    #[tokio::test]
+    async fn malformed_and_unsupported_requests_are_refused_unasked() {
+        let mut harness = start();
+        let body = r#"
+printf '%s\n' '{"type":"control_request","request_id":"bad-1","request":{"subtype":"can_use_tool"}}'
+IFS= read -r answer
+printf '%s\n' "$answer" >> "$LOG"
+printf '%s\n' "$answer"
+printf '%s\n' '{"type":"control_request","request_id":"odd-1","request":{"subtype":"mcp_message"}}'
+IFS= read -r answer
+printf '%s\n' "$answer" >> "$LOG"
+printf '%s\n' "$MARKER"
+printf '%s\n' "$RESULT"
+while IFS= read -r line; do :; done
+"#;
+        let stub = Stub::new("malformed", &with_lines(body));
+        let run = harness.claude(&stub);
+        harness.until_event(&run.id, "COMMAND_STARTED").await;
+
+        let answers = stub.answers();
+        let mut lines = answers.lines();
+        let malformed = lines.next().expect("the malformed ask was answered");
+        assert!(
+            malformed.contains("bad-1") && malformed.contains(r#""behavior":"deny""#),
+            "{malformed}"
+        );
+        assert!(malformed.contains(gritty_agent_claude::MALFORMED_ASK_REASON));
+        let unsupported = lines.next().expect("the unsupported request was answered");
+        assert!(
+            unsupported.contains("odd-1") && unsupported.contains(r#""subtype":"error""#),
+            "{unsupported}"
+        );
+        assert!(
+            !harness.states(&run.id).contains(&"BLOCKED"),
+            "nobody was asked: {:?}",
+            harness.states(&run.id)
+        );
+        assert!(!harness.kinds(&run.id).contains(&"RUN_RESUMED"));
+        harness.manager.cancel(&run.id, Actor::User).unwrap();
+        harness.ended(&run.id).await;
+    }
+}

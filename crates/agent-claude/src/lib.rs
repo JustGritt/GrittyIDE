@@ -102,7 +102,10 @@ pub use observation::{
 pub use process::{
     ClaudeProcess, MAX_STDERR_TAIL_BYTES, READY_TIMEOUT, REAP_GRACE, TERMINATE_GRACE,
 };
-pub use request::{ClaudeVerdict, DENY_BY_DEFAULT_REASON, permission_response, user_turn};
+pub use request::{
+    ClaudeVerdict, DENY_BY_DEFAULT_REASON, MALFORMED_ASK_REASON, ONE_ASK_AT_A_TIME_REASON,
+    USER_DENIED_REASON, permission_response, unsupported_response, user_turn,
+};
 pub use stream::{
     ClaudeStream, ClaudeStreamStats, MAX_KIND_BYTES, MAX_LINE_BYTES, MAX_OUTSTANDING_TOOLS,
 };

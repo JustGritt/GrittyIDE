@@ -74,6 +74,14 @@ pub enum ClaudeObservation {
     /// denial is **not** a failure — the agent is told no and carries on,
     /// exactly as it does in a terminal — so this resumes the run either way.
     PermissionAnswered { request_id: String, allowed: bool },
+    /// A `control_request` of a subtype this crate does not answer.
+    ///
+    /// Not [`Self::Unknown`], because unlike a line nobody modelled it is a
+    /// *question*: the CLI may be holding on it, so it has to be refused
+    /// rather than skipped (T310-ANSWER: "a malformed `control_request` is
+    /// logged and denied, never guessed at"). A request with no `request_id`
+    /// cannot be addressed at all and stays `Unknown`.
+    RequestUnsupported { request_id: String, subtype: String },
     /// `result`: the turn is over and the process is waiting for the next one.
     TurnFinished(ClaudeTurnEnd),
     /// The child is gone, or the pipe to it is.
@@ -175,13 +183,30 @@ pub enum ClaudeToolIntent {
 /// an unanswered ask, and in particular none that resolves it to `allow`.
 ///
 /// So the safe default is available: hold, and let the run sit in `BLOCKED`
-/// with the ask visible, until a policy answers. Never `allow` by default and
+/// with the ask visible, until the user answers. Never `allow` by default and
 /// never on a timeout.
+///
+/// # What the ask carries of the call's input, and what it does not
+///
+/// The CLI sends the call's whole `input`. What crosses this type is what the
+/// call is *about* — [`Self::intent`], classified from the input exactly as a
+/// `tool_use` is — plus a one-line rendering of the input for a tool this crate
+/// cannot classify, because for an MCP tool the arguments are the only honest
+/// answer to "what is it asking to do". A `Write`'s file content never leaves
+/// the adapter: it is not what the user is deciding on, and it is precisely
+/// the kind of text that holds a secret (rule 13).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClaudePermissionAsk {
     /// What the answer has to quote back. Opaque; never parsed.
     pub request_id: String,
+    /// Empty when the CLI named none, which makes the ask malformed: there is
+    /// nothing to put in front of a person, so the driver denies it unasked.
     pub tool: String,
+    /// What the call is about, from its input.
+    pub intent: ClaudeToolIntent,
+    /// The input as one compact line, only for [`ClaudeToolIntent::Other`].
+    /// Raw and unbounded here; clipping it is the core's.
+    pub input: Option<String>,
     /// The CLI's own one-line rendering of the call — for `Bash`, the command
     /// itself. Untrusted text, shown and never run.
     pub detail: Option<String>,
@@ -250,6 +275,7 @@ impl ClaudeObservation {
             Self::ToolFinished(_) => "toolFinished",
             Self::PermissionRequested(_) => "permissionRequested",
             Self::PermissionAnswered { .. } => "permissionAnswered",
+            Self::RequestUnsupported { .. } => "requestUnsupported",
             Self::TurnFinished(_) => "turnFinished",
             Self::Exited(_) => "exited",
             Self::Unknown { .. } => "unknown",
@@ -302,8 +328,12 @@ impl ClaudeObservation {
                 // cancellation, and has no event of its own.
                 _ => &[],
             },
-            // Activity only, or nothing at all.
-            Self::Thought | Self::Said { .. } | Self::Unknown { .. } => &[],
+            // Activity only, or nothing at all. A refused request is answered
+            // on the pipe and is not something the run did.
+            Self::Thought
+            | Self::Said { .. }
+            | Self::RequestUnsupported { .. }
+            | Self::Unknown { .. } => &[],
         }
     }
 
@@ -332,8 +362,9 @@ impl ClaudeObservation {
             // to do until someone speaks, which is what `WAITING` means.
             Self::TurnFinished(_) => Some("WAITING"),
             Self::Exited(_) => None,
-            // A line nobody modelled says nothing about what the run is doing.
-            Self::Unknown { .. } => None,
+            // A line nobody modelled says nothing about what the run is doing,
+            // and neither does a request the adapter refused.
+            Self::Unknown { .. } | Self::RequestUnsupported { .. } => None,
         }
     }
 
@@ -358,6 +389,7 @@ impl ClaudeObservation {
             | Self::Said { .. }
             | Self::ToolStarted(_)
             | Self::ToolFinished(_)
+            | Self::RequestUnsupported { .. }
             | Self::Unknown { .. } => None,
         }
     }
@@ -460,6 +492,10 @@ mod tests {
             ClaudeObservation::PermissionRequested(ClaudePermissionAsk {
                 request_id: "r".to_owned(),
                 tool: "Bash".to_owned(),
+                intent: ClaudeToolIntent::RunCommand {
+                    command: "ls".to_owned(),
+                },
+                input: None,
                 detail: None,
                 blocked_path: None,
                 tool_use_id: None,
@@ -467,6 +503,10 @@ mod tests {
             ClaudeObservation::PermissionAnswered {
                 request_id: "r".to_owned(),
                 allowed: false,
+            },
+            ClaudeObservation::RequestUnsupported {
+                request_id: "r".to_owned(),
+                subtype: "mcp_message".to_owned(),
             },
             ClaudeObservation::TurnFinished(ClaudeTurnEnd {
                 subtype: "success".to_owned(),
@@ -591,6 +631,10 @@ mod tests {
         let ask = ClaudeObservation::PermissionRequested(ClaudePermissionAsk {
             request_id: "r".to_owned(),
             tool: "Bash".to_owned(),
+            intent: ClaudeToolIntent::RunCommand {
+                command: "touch x".to_owned(),
+            },
+            input: None,
             detail: Some("touch x".to_owned()),
             blocked_path: None,
             tool_use_id: None,
@@ -676,5 +720,18 @@ mod tests {
         assert_eq!(unknown.run_events(), &[] as &[&str]);
         assert_eq!(unknown.run_activity(), None);
         assert_eq!(unknown.run_state(), None);
+    }
+
+    /// A refused request is an answer on the pipe, not something the run did:
+    /// no event, no activity, no state.
+    #[test]
+    fn an_unsupported_request_changes_nothing_about_the_run() {
+        let refused = ClaudeObservation::RequestUnsupported {
+            request_id: "r".to_owned(),
+            subtype: "mcp_message".to_owned(),
+        };
+        assert_eq!(refused.run_events(), &[] as &[&str]);
+        assert_eq!(refused.run_activity(), None);
+        assert_eq!(refused.run_state(), None);
     }
 }

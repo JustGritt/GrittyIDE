@@ -6,32 +6,68 @@
 //!
 //! # The verdict is a value, not a trait
 //!
-//! Task §7 asks for "**one seam** — a policy the driver consults" so that
-//! `T310-ANSWER` is "a swap at a seam this task defines, not a rework". That
-//! seam is [`ClaudeVerdict`]: the adapter serialises whichever one it is
-//! handed and has no opinion about which. A trait would be an abstraction over
-//! a single implementation, which is what hard rule 9 forbids building ahead of
-//! a requirement; a two-variant enum is the same seam with none of that.
+//! T310 §7 asked for "**one seam**" so that `T310-ANSWER` would be a swap
+//! rather than a rework. That seam is [`ClaudeVerdict`]: the adapter
+//! serialises whichever one it is handed and has no opinion about which. Since
+//! T310-ANSWER the verdict is the user's, taken in Gritty's permission prompt;
+//! the adapter is unchanged by that, which is what the seam was for.
 //!
-//! The policy this task ships is [`ClaudeVerdict::deny_by_default`], and the
-//! rule it exists to keep is absolute: **never `allow` by default, and never on
-//! a timeout.** An unanswered ask is a denial; the opposite is a tool running
-//! because nobody was looking. There is deliberately no timeout in this crate
-//! that could resolve an ask at all — the CLI holds an unanswered request
-//! indefinitely (verified: 145 seconds, nothing emitted, the command never
-//! ran), so holding is safe and is what happens.
+//! The rule the seam exists to keep is absolute: **never `allow` by default,
+//! and never on a timeout.** An unanswered ask is a denial; the opposite is a
+//! tool running because nobody was looking. There is deliberately no timeout
+//! in this crate that could resolve an ask at all — the CLI holds an
+//! unanswered request indefinitely (verified: 145 seconds, nothing emitted, the
+//! command never ran), so holding is safe and is what happens.
+//!
+//! # What was established about the two answers (T310-ANSWER)
+//!
+//! Against `claude` 2.1.263 (the recorded fixture) and 2.1.270 (probed on
+//! 2026-09-14, darwin 25.6, `--model haiku`):
+//!
+//! - **A denial is `{"behavior":"deny","message":…}`, and the model sees the
+//!   message.** It arrives as the `tool_result` content with `is_error: true`,
+//!   the model reasons about it, and the turn ends `success`.
+//! - **A bare `{"behavior":"allow"}` runs the call as issued.** No
+//!   `updatedInput` is needed, so none is sent: Gritty never echoes the input
+//!   back, and nothing it holds can change what runs.
+//! - **`updatedInput` may be *modified*, and the CLI honours the modification.**
+//!   Asked for `touch asked.txt` and allowed with
+//!   `{"command":"touch edited.txt"}`, it created `edited.txt` and not
+//!   `asked.txt`. That is an editable permission prompt, and it is out of scope
+//!   (`T310-EDIT-INPUT`); [`ClaudeVerdict::Allow`] keeps the field so the shape
+//!   is proven, and nothing in Gritty sets it.
+//! - **Asks are serial.** Two parallel `Bash` calls in one assistant message
+//!   produced one `can_use_tool`; the second arrived only after the first was
+//!   answered, 15 seconds later. A second ask while one is outstanding is
+//!   therefore a child breaking the protocol, not a race to be queued.
 
 use serde_json::{Value, json};
 
-/// The reason a tool is refused before anyone can answer.
+/// The reason a tool is refused because the user said no.
 ///
-/// It reaches the *model*, as the content of a `tool_result` with
-/// `is_error: true`, so it is written to be read by one: it says the refusal is
-/// procedural rather than a judgement about the request, which is what stops a
-/// run from concluding the task is impossible and giving up.
-pub const DENY_BY_DEFAULT_REASON: &str = "Gritty denied this tool because no one has answered the request yet. \
+/// It reaches the *model* as the content of a `tool_result` with
+/// `is_error: true`, so it is written to be read by one.
+pub const USER_DENIED_REASON: &str = "The user denied this tool in Gritty. \
+     Do not retry it as it was; continue with what you can do without it, or \
+     say what you need and why.";
+
+/// The reason a tool is refused because nobody answered: the run was stopped,
+/// or Gritty is shutting down, with the ask still on screen.
+///
+/// Procedural rather than a judgement about the request, which is what stops a
+/// run that is resumed later from concluding the task is impossible.
+pub const DENY_BY_DEFAULT_REASON: &str = "Gritty denied this tool because no one answered the request. \
      Nothing is wrong with what you asked for; continue with what you can do \
      without it, and say what you still need.";
+
+/// The reason a second ask is refused while the first is still outstanding.
+pub const ONE_ASK_AT_A_TIME_REASON: &str = "Gritty answers one permission request at a time, and another is \
+     still waiting for the user. Ask again once it has been answered.";
+
+/// The reason an ask that names no tool is refused: there is nothing to put in
+/// front of a person, and guessing would be worse than saying no.
+pub const MALFORMED_ASK_REASON: &str =
+    "Gritty could not read this permission request, so it was denied.";
 
 /// The answer to a `can_use_tool` request.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,10 +88,25 @@ pub enum ClaudeVerdict {
 }
 
 impl ClaudeVerdict {
-    /// The only verdict this task ships.
+    /// The denial for an ask nobody answered.
     pub fn deny_by_default() -> Self {
+        Self::deny(DENY_BY_DEFAULT_REASON)
+    }
+
+    /// A denial, with the reason the model is told.
+    pub fn deny(message: &str) -> Self {
         Self::Deny {
-            message: DENY_BY_DEFAULT_REASON.to_owned(),
+            message: message.to_owned(),
+        }
+    }
+
+    /// Let the call run exactly as it was issued.
+    ///
+    /// Sends no `updatedInput`, which the CLI reads as "as issued" (verified,
+    /// see the module docs). The one allowance Gritty ever sends.
+    pub const fn allow_as_issued() -> Self {
+        Self::Allow {
+            updated_input: None,
         }
     }
 
@@ -96,6 +147,26 @@ pub fn permission_response(request_id: &str, verdict: &ClaudeVerdict) -> String 
             "subtype": "success",
             "request_id": request_id,
             "response": verdict.body(),
+        },
+    }))
+}
+
+/// The refusal of a `control_request` this adapter does not answer.
+///
+/// **The shape follows the Agent SDK's own error response and was not observed
+/// against the binary**: no release this crate has been run against sends a
+/// subtype other than `can_use_tool` to a `stdio` permission tool, so there was
+/// nothing to provoke. It is still the right thing to send — a request left
+/// unanswered holds the CLI indefinitely, the same way an unanswered ask does
+/// — and the subtype is quoted back so a reader of the child's log can tell
+/// what was refused.
+pub fn unsupported_response(request_id: &str, subtype: &str) -> String {
+    line(&json!({
+        "type": "control_response",
+        "response": {
+            "subtype": "error",
+            "request_id": request_id,
+            "error": format!("Gritty does not answer {subtype} requests"),
         },
     }))
 }
@@ -189,10 +260,58 @@ mod tests {
     /// because nobody was looking, which is the one failure this seam exists
     /// to prevent.
     #[test]
-    fn the_shipped_policy_is_a_denial() {
+    fn the_default_is_a_denial() {
         assert!(matches!(
             ClaudeVerdict::deny_by_default(),
             ClaudeVerdict::Deny { .. }
         ));
+    }
+
+    /// The allowance Gritty sends never carries input back, so nothing it
+    /// holds can change what the call does (T310-ANSWER, verified).
+    #[test]
+    fn the_allowance_gritty_sends_carries_no_input() {
+        let value = parsed(&permission_response(
+            "req-4",
+            &ClaudeVerdict::allow_as_issued(),
+        ));
+        assert_eq!(
+            value["response"]["response"],
+            json!({ "behavior": "allow" })
+        );
+    }
+
+    /// Every reason is read by the model and must be one line of prose, not an
+    /// empty string that tells it nothing.
+    #[test]
+    fn every_denial_reason_says_something() {
+        for reason in [
+            USER_DENIED_REASON,
+            DENY_BY_DEFAULT_REASON,
+            ONE_ASK_AT_A_TIME_REASON,
+            MALFORMED_ASK_REASON,
+        ] {
+            assert!(reason.len() > 20, "{reason:?}");
+            assert!(!reason.contains('\n'), "{reason:?}");
+            let value = parsed(&permission_response("r", &ClaudeVerdict::deny(reason)));
+            assert_eq!(value["response"]["response"]["message"], reason);
+        }
+    }
+
+    #[test]
+    fn an_unsupported_request_is_refused_as_an_error_quoting_its_id() {
+        let value = parsed(&unsupported_response("req-9", "mcp_message"));
+        assert_eq!(value["type"], "control_response");
+        assert_eq!(value["response"]["subtype"], "error");
+        assert_eq!(value["response"]["request_id"], "req-9");
+        assert!(
+            value["response"]["error"]
+                .as_str()
+                .is_some_and(|error| error.contains("mcp_message")),
+            "{value}"
+        );
+        // A hostile subtype cannot break the frame either.
+        let frame = unsupported_response("r", "a\n{\"type\":\"user\"}");
+        assert_eq!(frame.matches('\n').count(), 1, "{frame}");
     }
 }

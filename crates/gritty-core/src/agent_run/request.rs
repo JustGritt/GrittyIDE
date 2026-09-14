@@ -1,7 +1,8 @@
 //! Request shapes of the `runs.*` command surface (T300-CMD §16, T310-B).
 //!
-//! Six commands, six requests: `runs.startFake`, `runs.start`, `runs.prompt`,
-//! `runs.cancel`, `runs.list` and `runs.events` each take one, and `core.health`
+//! Seven commands, seven requests: `runs.startFake`, `runs.start`,
+//! `runs.prompt`, `runs.answerPermission`, `runs.cancel`, `runs.list` and
+//! `runs.events` each take one, and `core.health`
 //! reports the protocol minor they were added in. Their responses are types
 //! [`super::wire`] already carries — [`super::wire::AgentRun`] and
 //! [`super::wire::AgentRunEventLog`] — so nothing here describes a *result*.
@@ -24,14 +25,14 @@
 //! path every other test depends on — so [`StartRunRequest::validate`] refuses
 //! `FAKE` outright rather than quietly forwarding it.
 //!
-//! There is still no command that *answers* a run: a run can reach `BLOCKED` or
-//! `NEEDS_DECISION` and `runs.prompt` does not resolve either — one stop at a
-//! time, and the answer to a block is a verdict, which is `T310-ANSWER`'s.
+//! `runs.prompt` still resolves neither `BLOCKED` nor `NEEDS_DECISION` — one
+//! stop at a time. A permission block is answered with a verdict, through
+//! `runs.answerPermission` (T310-ANSWER); a decision has no command yet.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::wire::AgentRunProvider;
+use super::wire::{AgentRunPermissionVerdict, AgentRunProvider};
 use crate::protocol::error::CoreError;
 use crate::protocol::ids::{AgentRunId, WorkspaceId, WorkstreamId};
 
@@ -176,6 +177,45 @@ fn validate_prompt(text: &str) -> Result<(), CoreError> {
     Ok(())
 }
 
+/// Longest ask id accepted. The core mints a UUID (36 characters); anything
+/// much longer did not come from it.
+pub const MAX_ASK_ID: usize = 64;
+
+/// `runs.answerPermission` — the user's verdict on the ask a run is stopped at
+/// (T310-ANSWER).
+///
+/// Addressed by the run *and* the ask, so an answer given to a card that has
+/// since been replaced by a newer ask cannot land on the newer one. An ask
+/// that is no longer outstanding is not an error; the run comes back and says
+/// so.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AnswerRunPermissionRequest {
+    pub run_id: AgentRunId,
+    pub ask_id: String,
+    pub verdict: AgentRunPermissionVerdict,
+}
+
+impl AnswerRunPermissionRequest {
+    /// Shape only: a blank or oversized ask id cannot name an ask the core
+    /// minted. Whether it names the *outstanding* one is the manager's answer.
+    pub fn validate(&self) -> Result<(), CoreError> {
+        if self.ask_id.trim().is_empty() {
+            return Err(CoreError::invalid_input(
+                "askId",
+                "an ask id cannot be blank",
+            ));
+        }
+        if self.ask_id.chars().count() > MAX_ASK_ID {
+            return Err(CoreError::invalid_input(
+                "askId",
+                format!("an ask id may be at most {MAX_ASK_ID} characters"),
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// `runs.cancel` — ask a run to stop.
 ///
 /// Cooperative and idempotent, like `operations.cancel`: an unknown id is
@@ -287,6 +327,50 @@ mod tests {
         })
         .expect("serialize");
         assert!(events.get("runId").is_some(), "{events}");
+    }
+
+    fn answer(ask_id: &str) -> AnswerRunPermissionRequest {
+        AnswerRunPermissionRequest {
+            run_id: AgentRunId::from_raw("run-1"),
+            ask_id: ask_id.to_owned(),
+            verdict: AgentRunPermissionVerdict::Deny,
+        }
+    }
+
+    #[test]
+    fn an_answer_names_its_run_its_ask_and_its_verdict_in_camel_case() {
+        let value = serde_json::to_value(answer("ask-1")).expect("serialize");
+        assert_eq!(
+            value,
+            serde_json::json!({ "runId": "run-1", "askId": "ask-1", "verdict": "DENY" })
+        );
+        assert!(answer("ask-1").validate().is_ok());
+    }
+
+    #[test]
+    fn a_blank_or_oversized_ask_id_is_invalid_input() {
+        for bad in ["", "   ", &"a".repeat(MAX_ASK_ID + 1)] {
+            let error = answer(bad).validate().unwrap_err();
+            assert_eq!(error.code, CoreErrorCode::InvalidInput);
+            assert_eq!(error.details.expect("details")["field"], "askId");
+        }
+        // A UUID, which is what the core mints, fits.
+        assert!(
+            answer(&uuid::Uuid::now_v7().hyphenated().to_string())
+                .validate()
+                .is_ok()
+        );
+    }
+
+    /// No remembered grant for a run (`T310-GRANTS`), so the observed side's
+    /// middle answer is refused at the boundary rather than read as either
+    /// of the other two.
+    #[test]
+    fn allow_for_run_is_not_an_answer_a_run_accepts() {
+        let parsed = serde_json::from_value::<AnswerRunPermissionRequest>(serde_json::json!({
+            "runId": "run-1", "askId": "ask-1", "verdict": "ALLOW_FOR_RUN"
+        }));
+        assert!(parsed.is_err());
     }
 
     #[test]

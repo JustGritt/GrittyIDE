@@ -17,6 +17,7 @@ import {
   type AgentTimeline,
   type AgentTimelineRequest,
   type AnswerPermissionRequest,
+  type AnswerRunPermissionRequest,
   type CancelRunRequest,
   type CandidatesRequest,
   type CheckOwnershipRequest,
@@ -533,6 +534,20 @@ export interface CoreClient {
      */
     prompt(request: PromptRunRequest): Promise<AgentRun>;
     /**
+     * Answer the permission ask a run is stopped at (T310-ANSWER): `ALLOW_ONCE`
+     * lets that one call run exactly as it was asked, `DENY` tells the agent no
+     * and the run carries on.
+     *
+     * The returned run no longer carries the ask, but may still be `BLOCKED`:
+     * the run moves on when its agent acknowledges, and `AgentRunChanged`
+     * reports that. An ask that has already gone — answered, withdrawn by a
+     * stop, or ended with its run — is not an error; the run comes back
+     * unchanged. Rejects with `NotFound` for an unknown run, `InvalidInput`
+     * for a blank or oversized ask id, and `Conflict` when the answer could
+     * not be delivered because the run's driver has stopped.
+     */
+    answerPermission(request: AnswerRunPermissionRequest): Promise<AgentRun>;
+    /**
      * Ask a run to stop. Cooperative and idempotent, like `operations.cancel`:
      * an unknown id rejects with `NotFound`, a run that already ended returns
      * its snapshot unchanged, and anything else ends `CANCELLED`.
@@ -953,6 +968,7 @@ export function createCoreClient(
       startFake: (request) => command<AgentRun>('runs.startFake', { request }),
       start: (request) => command<AgentRun>('runs.start', { request }),
       prompt: (request) => command<AgentRun>('runs.prompt', { request }),
+      answerPermission: (request) => command<AgentRun>('runs.answerPermission', { request }),
       cancel: (request) => command<AgentRun>('runs.cancel', { request }),
       list: (request) => command<AgentRun[]>('runs.list', { request }),
       events: (request) => command<AgentRunEventLog>('runs.events', { request }),

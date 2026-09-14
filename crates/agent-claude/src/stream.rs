@@ -227,16 +227,9 @@ impl ClaudeStream {
 
     fn unknown(&mut self, kind: &str) -> ClaudeObservation {
         self.stats.unknown += 1;
-        let mut kind = kind.to_owned();
-        if kind.len() > MAX_KIND_BYTES {
-            kind.truncate(
-                (0..=MAX_KIND_BYTES)
-                    .rev()
-                    .find(|&at| kind.is_char_boundary(at))
-                    .unwrap_or(0),
-            );
+        ClaudeObservation::Unknown {
+            kind: clip_kind(kind),
         }
-        ClaudeObservation::Unknown { kind }
     }
 
     fn system(&mut self, value: &Value, out: &mut Vec<ClaudeObservation>) {
@@ -362,19 +355,39 @@ impl ClaudeStream {
             out.push(self.unknown("control_request"));
             return;
         };
-        if line.request.subtype != "can_use_tool" {
+        // A request that names no id cannot be answered, whatever it asks: a
+        // response has to quote the id back. Recorded, and left for the run's
+        // own cancellation rather than guessed at.
+        if line.request_id.is_empty() {
             let kind = format!("control_request/{}", line.request.subtype);
             out.push(self.unknown(&kind));
+            return;
+        }
+        if line.request.subtype != "can_use_tool" {
+            out.push(ClaudeObservation::RequestUnsupported {
+                request_id: line.request_id,
+                subtype: clip_kind(&line.request.subtype),
+            });
             return;
         }
         if self.asks.len() >= MAX_OUTSTANDING_TOOLS {
             self.asks.pop_front();
         }
         self.asks.push_back(line.request_id.clone());
+        let tool = line.request.tool_name.unwrap_or_default();
+        let intent = intent_for(&tool, &line.request.input);
+        // Only for a call nothing more specific can be said about; a classified
+        // call already names its path or command, and a write's content is
+        // not what the user is deciding on (see `ClaudePermissionAsk`).
+        let input = matches!(intent, ClaudeToolIntent::Other)
+            .then(|| line.request.input.to_string())
+            .filter(|rendered| rendered != "null");
         out.push(ClaudeObservation::PermissionRequested(
             ClaudePermissionAsk {
                 request_id: line.request_id,
-                tool: line.request.tool_name.unwrap_or_default(),
+                tool,
+                intent,
+                input,
                 detail: line.request.description,
                 blocked_path: line.request.blocked_path,
                 tool_use_id: line.request.tool_use_id,
@@ -421,6 +434,22 @@ impl ClaudeStream {
         let at = self.outstanding.iter().position(|call| call.id == id)?;
         self.outstanding.remove(at)
     }
+}
+
+/// A discriminator the child chose, cut to [`MAX_KIND_BYTES`] on a character
+/// boundary. A resource bound, not a tidying: the string is carried into an
+/// observation and a hostile child picks its length.
+fn clip_kind(kind: &str) -> String {
+    let mut kind = kind.to_owned();
+    if kind.len() > MAX_KIND_BYTES {
+        kind.truncate(
+            (0..=MAX_KIND_BYTES)
+                .rev()
+                .find(|&at| kind.is_char_boundary(at))
+                .unwrap_or(0),
+        );
+    }
+    kind
 }
 
 /// What a tool call means to Gritty, by the names Claude Code ships.

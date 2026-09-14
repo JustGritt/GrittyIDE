@@ -42,19 +42,56 @@
 //! [`super::manager::MAX_QUEUED_PROMPTS`] the only bound there is: a driver that
 //! took a message it could not act on and held it in a local would have made a
 //! second, unbounded queue behind the first.
+//!
+//! # The user's verdict (T310-ANSWER)
+//!
+//! T310 left a seam here — a `PermissionPolicy` value consulted inline, whose
+//! only variant denied — and said the user's verdict would be "a swap at a
+//! seam, not a rework". It was not quite a swap, and the reason is worth
+//! keeping: an answer that waits for a person **cannot be awaited inline**.
+//! While the loop sat in `decide().await` it could not see a cancellation, and
+//! it could not see the child die, so the two failure rows the task cares most
+//! about — "cancelling a blocked run answers the ask" and "the child dies while
+//! an ask is on screen" — would have been unreachable. Nor could the verdict
+//! travel the inbox, as `RunInput`'s docs anticipated: an ask arrives mid-turn,
+//! which is exactly when the inbox arm above is not polled.
+//!
+//! So the ask is raised with the manager ([`AgentRunContext::ask_permission`]),
+//! which puts it on the run for the queue to draw and hands back a
+//! [`PendingVerdict`], and the loop gains **one arm** that waits on it beside
+//! cancellation and the child's stdout. What the adapter writes is still a
+//! [`ClaudeVerdict`], so that half of the seam held exactly as drawn.
+//!
+//! Every way an ask can end without the user saying yes is a denial:
+//!
+//! | The ask ends because | The child is told |
+//! |---|---|
+//! | the user denied it | `USER_DENIED_REASON` |
+//! | the run was cancelled, or Gritty is shutting down | `DENY_BY_DEFAULT_REASON`, then the child is killed |
+//! | the ask was withdrawn with no answer | `DENY_BY_DEFAULT_REASON` |
+//! | a second ask arrived while one is outstanding | `ONE_ASK_AT_A_TIME_REASON`; the first is untouched |
+//! | it names no tool | `MALFORMED_ASK_REASON` |
+//! | the run could not accept an ask at all | `DENY_BY_DEFAULT_REASON` |
+//!
+//! There is no row for a timeout, because there is no timeout.
 
+use std::collections::VecDeque;
 use std::time::Duration;
 
 use gritty_agent_claude::{
     ClaudeError, ClaudeExit, ClaudeObservation, ClaudePermissionAsk, ClaudeProcess, ClaudeToolDone,
-    ClaudeToolIntent, ClaudeToolUse, ClaudeTurnEnd, ClaudeVerdict, READY_TIMEOUT,
+    ClaudeToolIntent, ClaudeToolUse, ClaudeTurnEnd, ClaudeVerdict, DENY_BY_DEFAULT_REASON,
+    MALFORMED_ASK_REASON, ONE_ASK_AT_A_TIME_REASON, READY_TIMEOUT, USER_DENIED_REASON,
 };
 use gritty_workspace::WorkspacePath;
 
-use super::manager::{AgentRunContext, RunInboxReceiver, RunInput};
+use super::manager::{
+    AgentRunContext, PendingVerdict, PermissionAskDraft, RunInboxReceiver, RunInput,
+};
 use super::state::AgentRunState;
 use super::wire::{
     AgentRunActivity, AgentRunActivityKind as ActivityKind, AgentRunEvent, AgentRunPath,
+    AgentRunPermissionVerb, AgentRunPermissionVerdict,
 };
 use crate::protocol::error::{CoreError, CoreErrorCode};
 use crate::protocol::time::Timestamp;
@@ -67,44 +104,15 @@ use crate::protocol::time::Timestamp;
 /// little of the adapter as it can get away with.
 pub use gritty_agent_claude::ClaudeLaunch;
 
-/// Who answers a `can_use_tool`.
+/// How many asks answered *without* blocking the run are remembered, so their
+/// echoes do not resume it.
 ///
-/// **The seam task §7 asks for**, and a value rather than a trait — the same
-/// choice the adapter made for [`ClaudeVerdict`], and for the same reason: a
-/// trait over one implementation is the abstraction hard rule 9 forbids
-/// building ahead of a requirement.
-///
-/// `T310-ANSWER` adds a variant carrying the user's own verdict, which is a
-/// compile error at every match rather than a rework — which is the point of
-/// naming the seam now instead of inlining the denial.
-#[derive(Debug, Clone, Default)]
-pub enum PermissionPolicy {
-    /// Refuse every gated call, with a reason the agent is told.
-    ///
-    /// The only default that is safe before anyone can answer. A denial is
-    /// **not** a failure: the run continues and the agent carries on, exactly
-    /// as it does in a terminal.
-    #[default]
-    DenyAll,
-}
-
-impl PermissionPolicy {
-    /// The verdict for one ask.
-    ///
-    /// `async` although the only policy today answers instantly, so that
-    /// `T310-ANSWER` — which has to wait for a person — changes this body and
-    /// nothing at the call site.
-    ///
-    /// **Never `allow` by default, and never on a timeout.** An unanswered ask
-    /// is a denial; the opposite is a tool running because nobody was looking.
-    /// The adapter verified there is no CLI-side timeout that could resolve one
-    /// the other way.
-    pub async fn decide(&self, _ask: &ClaudePermissionAsk) -> ClaudeVerdict {
-        match self {
-            Self::DenyAll => ClaudeVerdict::deny_by_default(),
-        }
-    }
-}
+/// A denied second ask, or a malformed one, is still echoed back by the CLI,
+/// and an echo is what moves a run from `BLOCKED` to `RUNNING`. Resuming on
+/// the echo of an ask the run never stopped for would unblock it while the
+/// real ask is still on screen. Bounded because the ids come from the child;
+/// the CLI answers serially, so in practice this holds one at a time.
+const MAX_QUIET_ANSWERS: usize = 16;
 
 /// How the caller wants the run driven.
 #[derive(Debug, Clone)]
@@ -115,14 +123,12 @@ pub struct ClaudeDriverOptions {
     /// it when the session announces itself, **not** when the process spawns,
     /// which is the case phase 0 found and the state was introduced for.
     pub ready_timeout: Duration,
-    pub policy: PermissionPolicy,
 }
 
 impl Default for ClaudeDriverOptions {
     fn default() -> Self {
         Self {
             ready_timeout: READY_TIMEOUT,
-            policy: PermissionPolicy::DenyAll,
         }
     }
 }
@@ -151,6 +157,8 @@ pub fn drive(
 /// answer or a prompt — without fighting the borrow the arm took.
 enum Step {
     Cancelled,
+    /// The user answered the outstanding ask, or it was withdrawn (`None`).
+    Answered(Option<AgentRunPermissionVerdict>),
     Observed(ClaudeObservation),
     /// stdout is over. The adapter guarantees the last observation before this
     /// is always an `Exited`, so the ending has already been reported.
@@ -160,6 +168,52 @@ enum Step {
     /// again. The arm is disabled from here rather than busy-looping on a
     /// receiver that is permanently ready with `None`.
     InboxClosed,
+}
+
+/// The ask the child is held on, and where its answer will arrive.
+struct Outstanding {
+    /// The CLI's id, quoted back in the answer. Never shown and never sent to
+    /// the renderer; the ask the user sees has an id the core minted.
+    request_id: String,
+    verdict: PendingVerdict,
+}
+
+/// The permission side of the loop: at most one outstanding ask, and the
+/// echoes to swallow.
+#[derive(Default)]
+struct Asks {
+    outstanding: Option<Outstanding>,
+    quiet: VecDeque<String>,
+}
+
+impl Asks {
+    /// Resolves with the outstanding ask's verdict, and never while there is
+    /// none — so the arm that awaits this needs no guard, and no `unwrap`
+    /// behind one (`select!` builds a disabled branch's future anyway).
+    async fn next_verdict(&mut self) -> Option<AgentRunPermissionVerdict> {
+        match self.outstanding.as_mut() {
+            Some(outstanding) => outstanding.verdict.wait().await,
+            None => std::future::pending().await,
+        }
+    }
+
+    fn remember_quiet(&mut self, request_id: String) {
+        if self.quiet.len() >= MAX_QUIET_ANSWERS {
+            self.quiet.pop_front();
+        }
+        self.quiet.push_back(request_id);
+    }
+
+    /// Whether this echo belongs to an ask the run never stopped for.
+    fn take_quiet(&mut self, request_id: &str) -> bool {
+        match self.quiet.iter().position(|id| id == request_id) {
+            Some(at) => {
+                self.quiet.remove(at);
+                true
+            }
+            None => false,
+        }
+    }
 }
 
 async fn run(
@@ -183,12 +237,14 @@ async fn run(
     }
     tracing::debug!(run = %context.run_id(), pid = ?process.pid(), "driving a claude code run");
 
+    let mut asks = Asks::default();
+
     // The bounded wait for `system`/`init`. Everything seen on the way is
     // reported, so the run records the same events it would have from the loop.
     match process.wait_ready(options.ready_timeout).await {
         Ok(seen) => {
             for observation in seen {
-                if apply(&context, &observation)?.is_some() {
+                if observe(&context, &mut process, &mut asks, observation).await? {
                     return Ok(());
                 }
             }
@@ -212,6 +268,9 @@ async fn run(
             // records it; reporting one here would be the supervised thing
             // answering a question that is the supervisor's.
             () = context.cancelled() => Step::Cancelled,
+            // Before stdout: an answer the user gave should not wait behind a
+            // burst of output the child produced while it was held.
+            verdict = asks.next_verdict() => Step::Answered(verdict),
             observed = process.next() => match observed {
                 Some(observation) => Step::Observed(observation),
                 None => Step::Drained,
@@ -226,8 +285,34 @@ async fn run(
 
         match step {
             Step::Cancelled => {
+                // Deny, then kill (T310-ANSWER §5). Best effort: the child is
+                // about to die either way, and a pipe that is already gone
+                // must not stop the kill.
+                if let Some(outstanding) = asks.outstanding.take() {
+                    let _ = process
+                        .answer(
+                            &outstanding.request_id,
+                            &ClaudeVerdict::deny(DENY_BY_DEFAULT_REASON),
+                        )
+                        .await;
+                }
                 process.terminate().await;
                 return Ok(());
+            }
+            Step::Answered(verdict) => {
+                let Some(outstanding) = asks.outstanding.take() else {
+                    continue;
+                };
+                if let Err(error) = process
+                    .answer(&outstanding.request_id, &claude_verdict(verdict))
+                    .await
+                {
+                    // Gritty stopped being able to supervise the child. The
+                    // contract collision the module docs describe applies:
+                    // `FAILED`, with a message that says so.
+                    context.fail(claude_error(error))?;
+                    return Ok(());
+                }
             }
             Step::Drained => return Ok(()),
             Step::InboxClosed => inbox_open = false,
@@ -235,17 +320,8 @@ async fn run(
                 if let ClaudeObservation::TurnFinished(_) = &observation {
                     in_turn = false;
                 }
-                if apply(&context, &observation)?.is_some() {
+                if observe(&context, &mut process, &mut asks, observation).await? {
                     return Ok(());
-                }
-                // The ask holds the child until an answer goes back, and the
-                // run is already `BLOCKED` and visible by the time we decide.
-                if let ClaudeObservation::PermissionRequested(ask) = &observation {
-                    let verdict = options.policy.decide(ask).await;
-                    if let Err(error) = process.answer(&ask.request_id, &verdict).await {
-                        context.fail(claude_error(error))?;
-                        return Ok(());
-                    }
                 }
             }
             Step::Prompt(text) => {
@@ -256,6 +332,137 @@ async fn run(
                 in_turn = true;
             }
         }
+    }
+}
+
+/// What the child is told for the user's verdict, or for the absence of one.
+///
+/// `None` is an ask withdrawn with no answer, and it is a denial: **never an
+/// allowance by default**. The allowance carries no input, so it runs exactly
+/// the call the user was shown.
+fn claude_verdict(verdict: Option<AgentRunPermissionVerdict>) -> ClaudeVerdict {
+    match verdict {
+        Some(AgentRunPermissionVerdict::AllowOnce) => ClaudeVerdict::allow_as_issued(),
+        Some(AgentRunPermissionVerdict::Deny) => ClaudeVerdict::deny(USER_DENIED_REASON),
+        None => ClaudeVerdict::deny(DENY_BY_DEFAULT_REASON),
+    }
+}
+
+/// Handle one observation. `true` once the run has been ended.
+///
+/// The permission lines are taken here, before the general translation,
+/// because each of them needs the pipe and none of them is only a report.
+async fn observe(
+    context: &AgentRunContext,
+    process: &mut ClaudeProcess,
+    asks: &mut Asks,
+    observation: ClaudeObservation,
+) -> Result<bool, CoreError> {
+    match &observation {
+        ClaudeObservation::PermissionRequested(ask) => {
+            return raise(context, process, asks, ask, &observation).await;
+        }
+        // The echo of an answer the run never stopped for. Applying it would
+        // resume a run that is still blocked on the ask the user can see.
+        ClaudeObservation::PermissionAnswered { request_id, .. } if asks.take_quiet(request_id) => {
+            return Ok(false);
+        }
+        ClaudeObservation::RequestUnsupported {
+            request_id,
+            subtype,
+        } => {
+            // The subtype is the child's text: counted by kind, not logged.
+            tracing::warn!(run = %context.run_id(), "refusing a control request this adapter does not answer");
+            if let Err(error) = process.refuse(request_id, subtype).await {
+                context.fail(claude_error(error))?;
+                return Ok(true);
+            }
+            return Ok(false);
+        }
+        _ => {}
+    }
+    Ok(apply(context, &observation)?.is_some())
+}
+
+/// A `can_use_tool`: put it in front of the user, or deny it on the spot.
+async fn raise(
+    context: &AgentRunContext,
+    process: &mut ClaudeProcess,
+    asks: &mut Asks,
+    ask: &ClaudePermissionAsk,
+    observation: &ClaudeObservation,
+) -> Result<bool, CoreError> {
+    let refusal = if asks.outstanding.is_some() {
+        // The CLI asks serially (verified, see `gritty_agent_claude::request`),
+        // so this is the child breaking the protocol. The first ask stands.
+        tracing::warn!(run = %context.run_id(), "a second permission ask arrived while one is outstanding; denying it");
+        Some(ONE_ASK_AT_A_TIME_REASON)
+    } else if ask.tool.trim().is_empty() {
+        tracing::warn!(run = %context.run_id(), "a permission ask named no tool; denying it");
+        Some(MALFORMED_ASK_REASON)
+    } else {
+        match context.ask_permission(
+            ask_draft(ask),
+            events_for(observation),
+            activity_for(observation),
+        ) {
+            Ok(verdict) => {
+                asks.outstanding = Some(Outstanding {
+                    request_id: ask.request_id.clone(),
+                    verdict,
+                });
+                None
+            }
+            // Stopping, ended, or not in a state that can block. Nobody will
+            // be shown this ask, so nobody can answer it.
+            Err(error) => {
+                tracing::debug!(run = %context.run_id(), %error, "a permission ask could not be raised; denying it");
+                Some(DENY_BY_DEFAULT_REASON)
+            }
+        }
+    };
+    if let Some(reason) = refusal {
+        asks.remember_quiet(ask.request_id.clone());
+        if let Err(error) = process
+            .answer(&ask.request_id, &ClaudeVerdict::deny(reason))
+            .await
+        {
+            context.fail(claude_error(error))?;
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// The ask as the run reports it: a verb and the thing it is about.
+///
+/// Built from the adapter's classification of the call's input, so an ask and
+/// the `tool_use` it belongs to agree about what it is. Unbounded here; the
+/// manager bounds it once, on the way onto the run.
+fn ask_draft(ask: &ClaudePermissionAsk) -> PermissionAskDraft {
+    let (verb, target) = match &ask.intent {
+        ClaudeToolIntent::WriteFile { path } => (AgentRunPermissionVerb::WriteFile, path.clone()),
+        ClaudeToolIntent::RunCommand { command } => {
+            (AgentRunPermissionVerb::RunCommand, command.clone())
+        }
+        ClaudeToolIntent::ReadFile { path } => (AgentRunPermissionVerb::Other, path.clone()),
+        ClaudeToolIntent::Search { query } => (AgentRunPermissionVerb::Other, query.clone()),
+        // Nothing more specific is known, so the arguments are the answer to
+        // "what is it asking to do" — or the agent's own sentence, or at the
+        // very least the tool's name.
+        ClaudeToolIntent::Other => (
+            AgentRunPermissionVerb::Other,
+            ask.input
+                .clone()
+                .or_else(|| ask.detail.clone())
+                .unwrap_or_else(|| ask.tool.clone()),
+        ),
+    };
+    PermissionAskDraft {
+        tool: ask.tool.clone(),
+        verb,
+        target,
+        detail: ask.detail.clone(),
     }
 }
 
@@ -398,6 +605,7 @@ fn events_for(observation: &ClaudeObservation) -> Vec<AgentRunEvent> {
         }
         ClaudeObservation::Thought
         | ClaudeObservation::Said { .. }
+        | ClaudeObservation::RequestUnsupported { .. }
         | ClaudeObservation::Unknown { .. } => Vec::new(),
         ClaudeObservation::ToolStarted(call) => tool_started_events(call),
         ClaudeObservation::ToolFinished(done) => tool_finished_events(done),
@@ -507,7 +715,9 @@ fn activity_for(observation: &ClaudeObservation) -> Option<AgentRunActivity> {
         ClaudeObservation::TurnFinished(_) => AgentRunActivity::new(ActivityKind::Waiting, at),
         // An ending has no activity, and a line nobody modelled says nothing
         // about what the run is doing.
-        ClaudeObservation::Exited(_) | ClaudeObservation::Unknown { .. } => return None,
+        ClaudeObservation::Exited(_)
+        | ClaudeObservation::RequestUnsupported { .. }
+        | ClaudeObservation::Unknown { .. } => return None,
     };
     Some(activity)
 }
@@ -531,6 +741,7 @@ fn state_for(observation: &ClaudeObservation) -> Option<AgentRunState> {
         | ClaudeObservation::Said { .. }
         | ClaudeObservation::ToolStarted(_)
         | ClaudeObservation::ToolFinished(_)
+        | ClaudeObservation::RequestUnsupported { .. }
         | ClaudeObservation::Unknown { .. } => None,
     }
 }

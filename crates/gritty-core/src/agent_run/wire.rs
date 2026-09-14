@@ -50,6 +50,10 @@ pub const MAX_TOOL: usize = 64;
 pub const MAX_DETAIL: usize = 300;
 /// Longest explanation of why a run is blocked or how it ended.
 pub const MAX_REASON: usize = 300;
+/// Longest subject of a permission ask: the command, the path, or a tool's
+/// arguments on one line. The same bound as a command, because for the
+/// commonest ask that is exactly what it is.
+pub const MAX_ASK_TARGET: usize = MAX_COMMAND;
 
 /// How many events one run's ring keeps before it evicts from the oldest end.
 ///
@@ -361,6 +365,102 @@ pub struct AgentRun {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub error: Option<CoreError>,
+    /// The permission ask this run is stopped at, waiting for the user
+    /// (T310-ANSWER).
+    ///
+    /// On the run rather than only in its ring, for the reason
+    /// `AgentSession.pending` gives on the observed side: an ask has to be
+    /// answerable from the queue for a run nobody has open, and the ring is
+    /// only read for the console that is. At most one — the child asks
+    /// serially, and a second ask while this one is outstanding is refused —
+    /// and only ever beside `BLOCKED`. It is cleared the moment an answer is
+    /// accepted, before the run's own echo moves it back to `RUNNING`, so a
+    /// prompt stops being drawn when it stops being answerable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub pending: Option<AgentRunPermissionAsk>,
+}
+
+/// What kind of thing a run is asking permission to do.
+///
+/// A **new** enum rather than `agent_session::AgentPermissionVerb` reused, for
+/// the reason [`AgentRunProvider`] gives: the two lanes never import each
+/// other. The spellings match that enum's on purpose, so a renderer drawing
+/// both kinds of ask in one queue maps one to the other by name; there is no
+/// `INSTALL_DEPENDENCY`, because nothing classifies a run's command that
+/// finely and a label with nothing behind it would be a guess.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AgentRunPermissionVerb {
+    WriteFile,
+    RunCommand,
+    /// Reading, searching, or a tool nothing more specific can be said about.
+    Other,
+}
+
+/// One permission ask a run is stopped at (T310-ANSWER).
+///
+/// Everything a person needs to answer without going to look somewhere else,
+/// and nothing that could act: the target is display text, never a path the
+/// renderer opens or a command anything runs. Every string came out of the
+/// agent and is bounded by [`Self::bounded`] before it reaches [`AgentRun`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunPermissionAsk {
+    /// Names the ask for `runs.answerPermission`. Minted by the core, never
+    /// taken from the child, so an answer cannot be addressed to an ask the
+    /// user was not shown.
+    pub ask_id: String,
+    /// The tool, as the agent named it: `Bash`, `Write`, `mcp__db__query`.
+    pub tool: String,
+    pub verb: AgentRunPermissionVerb,
+    /// The command, the path, or the arguments on one line.
+    pub target: String,
+    /// The agent's own one-line account of the call, when it says something
+    /// the target does not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub detail: Option<String>,
+    pub asked_at: Timestamp,
+}
+
+impl AgentRunPermissionAsk {
+    /// Every string bounded and whitespace-collapsed. Idempotent.
+    #[must_use]
+    pub fn bounded(self) -> Self {
+        let target = clip(&self.target, MAX_ASK_TARGET);
+        // Said once: a detail that only repeats the target is noise on a card
+        // with little room.
+        let detail = clip_optional(self.detail.as_deref(), MAX_DETAIL).filter(|d| *d != target);
+        Self {
+            ask_id: self.ask_id,
+            tool: clip(&self.tool, MAX_TOOL),
+            verb: self.verb,
+            target,
+            detail,
+            asked_at: self.asked_at,
+        }
+    }
+}
+
+/// The user's answer to a run's permission ask.
+///
+/// The observed side's vocabulary, minus the answer that remembers:
+/// `ALLOW_FOR_RUN` is a standing grant, and grants for a run Gritty owns have
+/// their own persistence and revocation story to settle first
+/// (`T310-GRANTS`). The spellings match `AgentPermissionVerdict` so one prompt
+/// and one set of chords answer both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AgentRunPermissionVerdict {
+    AllowOnce,
+    Deny,
+}
+
+impl AgentRunPermissionVerdict {
+    pub const fn allowed(self) -> bool {
+        matches!(self, Self::AllowOnce)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -653,6 +753,7 @@ mod tests {
             cancellation_requested: false,
             correlation_id: CorrelationId::from_raw("corr-1"),
             error: None,
+            pending: None,
         }
     }
 
@@ -1013,6 +1114,93 @@ mod tests {
         );
         let back: AgentRunEventRecord = serde_json::from_value(json).unwrap();
         assert_eq!(back, record);
+    }
+
+    fn ask(target: &str, detail: Option<&str>) -> AgentRunPermissionAsk {
+        AgentRunPermissionAsk {
+            ask_id: "ask-1".to_owned(),
+            tool: "Bash".to_owned(),
+            verb: AgentRunPermissionVerb::RunCommand,
+            target: target.to_owned(),
+            detail: detail.map(str::to_owned),
+            asked_at: Timestamp::from_millis(4),
+        }
+    }
+
+    #[test]
+    fn a_blocked_run_carries_its_ask_in_camel_case() {
+        let mut blocked = run();
+        blocked.state = AgentRunState::Blocked;
+        blocked.pending = Some(ask("cargo test", Some("runs the suite")));
+        let json = serde_json::to_value(&blocked).unwrap();
+        assert_eq!(
+            json["pending"],
+            serde_json::json!({
+                "askId": "ask-1",
+                "tool": "Bash",
+                "verb": "RUN_COMMAND",
+                "target": "cargo test",
+                "detail": "runs the suite",
+                "askedAt": 4,
+            })
+        );
+        let back: AgentRun = serde_json::from_value(json).unwrap();
+        assert_eq!(back, blocked);
+    }
+
+    /// Rule 13 for the ask: the tool, the target and the detail are the
+    /// agent's text, and each is bounded by its own limit.
+    #[test]
+    fn an_ask_is_bounded_field_by_field() {
+        let long = "z \n".repeat(9_000);
+        let bounded = AgentRunPermissionAsk {
+            tool: long.clone(),
+            ..ask(&long, Some(&format!("{long} and more")))
+        }
+        .bounded();
+        assert_eq!(bounded.tool.chars().count(), MAX_TOOL);
+        assert_eq!(bounded.target.chars().count(), MAX_ASK_TARGET);
+        assert_eq!(bounded.detail.as_ref().unwrap().chars().count(), MAX_DETAIL);
+        for text in [
+            &bounded.tool,
+            &bounded.target,
+            bounded.detail.as_ref().unwrap(),
+        ] {
+            assert!(!text.contains('\n'), "{text:?}");
+        }
+        assert_eq!(bounded.clone().bounded(), bounded, "idempotent");
+    }
+
+    #[test]
+    fn a_detail_that_repeats_the_target_is_dropped() {
+        let bounded = ask("touch  x", Some("touch x")).bounded();
+        assert_eq!(bounded.target, "touch x");
+        assert_eq!(bounded.detail, None);
+    }
+
+    #[test]
+    fn verdicts_and_verbs_use_the_observed_sides_spellings() {
+        assert_eq!(
+            serde_json::to_value(AgentRunPermissionVerdict::AllowOnce).unwrap(),
+            "ALLOW_ONCE"
+        );
+        assert_eq!(
+            serde_json::to_value(AgentRunPermissionVerdict::Deny).unwrap(),
+            "DENY"
+        );
+        assert!(AgentRunPermissionVerdict::AllowOnce.allowed());
+        assert!(!AgentRunPermissionVerdict::Deny.allowed());
+        // No remembered grant for a run (T310-GRANTS): it must not parse.
+        assert!(
+            serde_json::from_value::<AgentRunPermissionVerdict>("ALLOW_FOR_RUN".into()).is_err()
+        );
+        for (verb, name) in [
+            (AgentRunPermissionVerb::WriteFile, "WRITE_FILE"),
+            (AgentRunPermissionVerb::RunCommand, "RUN_COMMAND"),
+            (AgentRunPermissionVerb::Other, "OTHER"),
+        ] {
+            assert_eq!(serde_json::to_value(verb).unwrap(), name);
+        }
     }
 
     #[test]

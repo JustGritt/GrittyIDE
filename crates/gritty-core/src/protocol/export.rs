@@ -11,8 +11,8 @@ use ts_rs::{Config, TS};
 
 use super::{CORE_EVENT_CHANNEL, PROTOCOL_VERSION};
 use crate::agent_run::request::{
-    CancelRunRequest, ListRunsRequest, PromptRunRequest, RunEventsRequest, StartFakeRunRequest,
-    StartRunRequest,
+    AnswerRunPermissionRequest, CancelRunRequest, ListRunsRequest, PromptRunRequest,
+    RunEventsRequest, StartFakeRunRequest, StartRunRequest,
 };
 use crate::agent_run::wire::{
     AgentRun, AgentRunActivity, AgentRunChangedPayload, AgentRunEvent,
@@ -165,6 +165,9 @@ fn export_bindings() {
     StartFakeRunRequest::export_all(&cfg).expect("export StartFakeRunRequest");
     StartRunRequest::export_all(&cfg).expect("export StartRunRequest");
     PromptRunRequest::export_all(&cfg).expect("export PromptRunRequest");
+    // `AgentRunPermissionAsk` and `AgentRunPermissionVerb` come along with
+    // `AgentRun`; the verdict comes along with this request.
+    AnswerRunPermissionRequest::export_all(&cfg).expect("export AnswerRunPermissionRequest");
     CancelRunRequest::export_all(&cfg).expect("export CancelRunRequest");
     ListRunsRequest::export_all(&cfg).expect("export ListRunsRequest");
     RunEventsRequest::export_all(&cfg).expect("export RunEventsRequest");

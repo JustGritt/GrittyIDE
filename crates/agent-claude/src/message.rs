@@ -168,6 +168,14 @@ pub(crate) struct ControlRequest {
     pub subtype: String,
     #[serde(default)]
     pub tool_name: Option<String>,
+    /// The call's arguments, exactly as the model issued them.
+    ///
+    /// Read for what the call is *about* — a path, a command — and never
+    /// echoed back: an allowance is sent without `updatedInput`, which the CLI
+    /// honours as "run it as issued" (T310-ANSWER, verified against 2.1.270),
+    /// so nothing Gritty holds can alter what runs.
+    #[serde(default)]
+    pub input: serde_json::Value,
     /// The CLI's own one-line rendering of the call. For `Bash` this is the
     /// command; it is shown and never run.
     #[serde(default)]

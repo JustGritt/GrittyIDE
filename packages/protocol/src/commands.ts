@@ -70,6 +70,7 @@ export const COMMANDS = {
   'runs.startFake': 'runs_start_fake',
   'runs.start': 'runs_start',
   'runs.prompt': 'runs_prompt',
+  'runs.answerPermission': 'runs_answer_permission',
   'runs.cancel': 'runs_cancel',
   'runs.list': 'runs_list',
   'runs.events': 'runs_events',

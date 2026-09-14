@@ -247,6 +247,7 @@ pub fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             commands::runs_start_fake,
             commands::runs_start,
             commands::runs_prompt,
+            commands::runs_answer_permission,
             commands::runs_cancel,
             commands::runs_list,
             commands::runs_events,

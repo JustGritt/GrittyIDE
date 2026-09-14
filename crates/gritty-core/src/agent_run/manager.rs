@@ -61,7 +61,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use tokio::runtime::Handle;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tokio_util::sync::{CancellationToken, WaitForCancellationFuture};
@@ -70,7 +70,8 @@ use super::ring::EventRing;
 use super::state::AgentRunState;
 use super::wire::{
     AgentRun, AgentRunActivity, AgentRunChangedPayload, AgentRunEvent, AgentRunEventLog,
-    AgentRunProvider, MAX_REASON, MAX_RUN_EVENTS, clip,
+    AgentRunPermissionAsk, AgentRunPermissionVerb, AgentRunPermissionVerdict, AgentRunProvider,
+    MAX_REASON, MAX_RUN_EVENTS, clip,
 };
 use crate::event::{CoreEvent, EventBus, EventOrigin};
 use crate::protocol::actor::Actor;
@@ -118,9 +119,16 @@ pub const MAX_QUEUED_PROMPTS: usize = 4;
 /// of up to [`MAX_RUN_EVENTS`] beside it.
 pub const FINISHED_RETENTION: usize = 50;
 
-/// How long a stop waits for one aborted driver before reporting the ending
-/// anyway. A driver without await points cannot be stopped; it can only be
-/// abandoned, and abandoning it silently is what would leave an orphan.
+/// How long a stop waits at each of its two steps: first for a driver to stop
+/// on its own, then for an aborted one to be joined.
+///
+/// The first step exists for T310-ANSWER. A driver holding a child at a
+/// permission ask has one thing left to do when a stop lands — tell the child
+/// no, then kill it — and an immediate abort cut that write off at its first
+/// await, leaving the child killed without ever being answered. The second
+/// exists because a driver without await points cannot be stopped; it can
+/// only be abandoned, and abandoning it silently is what would leave an
+/// orphan.
 const CANCEL_JOIN_GRACE: Duration = Duration::from_millis(250);
 
 /// Distinct unknown run ids whose events have been warned about. Bounded, since
@@ -190,6 +198,48 @@ struct Entry {
     /// exists to forbid. It is internal supervision state, and
     /// [`AgentRunManager::owned_provider_sessions`] is the only way out.
     provider_session: Option<OwnedProviderSession>,
+    /// Where the user's answer to [`AgentRun::pending`] goes (T310-ANSWER).
+    ///
+    /// Present exactly when `pending` is, and taken together with it, so an
+    /// ask is answered at most once by construction rather than by a check. A
+    /// oneshot and not the inbox: an ask arrives *mid-turn*, which is exactly
+    /// when the driver does not read the inbox (`claude_driver`, "One turn at
+    /// a time"), so a verdict queued behind a prompt would never be reached.
+    answer: Option<oneshot::Sender<AgentRunPermissionVerdict>>,
+}
+
+/// What a driver reports when its agent asks permission (T310-ANSWER).
+///
+/// The id and the time are the manager's to mint: an id taken from the child
+/// would let the child decide which ask an answer lands on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PermissionAskDraft {
+    pub tool: String,
+    pub verb: AgentRunPermissionVerb,
+    pub target: String,
+    pub detail: Option<String>,
+}
+
+/// The driver's end of one ask: where the user's verdict arrives.
+///
+/// Returned by [`AgentRunContext::ask_permission`] rather than held on the
+/// context, which stays cloneable and purely outbound.
+#[derive(Debug)]
+pub struct PendingVerdict {
+    receiver: oneshot::Receiver<AgentRunPermissionVerdict>,
+}
+
+impl PendingVerdict {
+    /// The user's verdict, or `None` once none can ever arrive — the ask was
+    /// withdrawn because the run is stopping or ending.
+    ///
+    /// **`None` is a denial to whoever reads it**, never an allowance: an
+    /// unanswered ask is refused. Cancellation-safe, so a driver may select on
+    /// it: a verdict that arrives while another branch wins stays in the
+    /// channel for the next poll.
+    pub async fn wait(&mut self) -> Option<AgentRunPermissionVerdict> {
+        (&mut self.receiver).await.ok()
+    }
 }
 
 /// One provider session a run owns: what Gritty told the provider to call
@@ -288,6 +338,13 @@ impl Entry {
     /// The run itself is the actor for everything it reports.
     fn agent(&self) -> Actor {
         Actor::agent(self.snapshot.id.clone())
+    }
+
+    /// Take the outstanding ask off the run, dropping the sender so a driver
+    /// waiting on it learns no answer is coming. Returns whether there was one.
+    fn withdraw_ask(&mut self) -> bool {
+        self.answer = None;
+        self.snapshot.pending.take().is_some()
     }
 
     fn changed(&self, actor: Actor) -> Emission {
@@ -457,6 +514,7 @@ impl AgentRunManager {
                     cancellation_requested: false,
                     correlation_id: spec.correlation_id.clone(),
                     error: None,
+                    pending: None,
                 },
                 ring: EventRing::new(),
                 token: token.clone(),
@@ -464,6 +522,7 @@ impl AgentRunManager {
                 ending: None,
                 inbox: inbox.map(|inbox| inbox.sender),
                 provider_session: session,
+                answer: None,
             };
             entry.ring.record(&id, now, AgentRunEvent::RunStarted);
             // The run has to exist for a consumer before its events mean
@@ -517,12 +576,16 @@ impl AgentRunManager {
         let outcome = tokio::select! {
             biased;
             () = token.cancelled() => {
-                // Cooperative *and* enforced: a driver watching the token stops
-                // itself, and one that is not is aborted at its next await
-                // point. Either way the run ends.
-                driver.abort();
+                // Cooperative, *then* enforced: a driver watching the token
+                // gets one grace period to stop itself — the Claude driver
+                // denies an outstanding ask in it — and one that has not is
+                // aborted at its next await point. Either way the run ends,
+                // and how it ends is the manager's choice, not the driver's.
                 if tokio::time::timeout(CANCEL_JOIN_GRACE, &mut driver).await.is_err() {
-                    tracing::warn!(run = %id, "agent run driver did not stop within the cancel grace period");
+                    driver.abort();
+                    if tokio::time::timeout(CANCEL_JOIN_GRACE, &mut driver).await.is_err() {
+                        tracing::warn!(run = %id, "agent run driver did not stop within the cancel grace period");
+                    }
                 }
                 Outcome::Stopped
             }
@@ -691,6 +754,12 @@ impl AgentRunManager {
             }
             if let Some(next) = state {
                 entry.snapshot.state = next;
+                // An ask belongs to the stop it caused. A run that moved on
+                // from `BLOCKED` has no question outstanding, whether or not
+                // the answer went through this manager.
+                if next != AgentRunState::Blocked {
+                    entry.withdraw_ask();
+                }
             }
             if let Some(value) = bounded {
                 entry.snapshot.activity = value;
@@ -712,6 +781,87 @@ impl AgentRunManager {
         };
         self.emit_all(emissions);
         Ok(snapshot)
+    }
+
+    /// Stop the run on a permission ask, and hand the driver the end the
+    /// user's answer will arrive at (T310-ANSWER).
+    ///
+    /// One critical section and one `AgentRunChanged` for the whole of it —
+    /// the events that explain the stop, the move to `BLOCKED`, the activity
+    /// and the ask — so no consumer ever sees a run blocked on nothing, or an
+    /// ask on a run that is not blocked. The events are recorded only if the
+    /// ask is accepted: a refused ask did not stop the run and must not say it
+    /// did.
+    ///
+    /// Refused with `Conflict` when the run is stopping or ended, when it is
+    /// already waiting on an ask — the child asks serially, so a second one is
+    /// a protocol violation the driver denies — and when `BLOCKED` is not a
+    /// transition the run's state allows.
+    pub(super) fn raise_permission(
+        &self,
+        id: &AgentRunId,
+        draft: PermissionAskDraft,
+        events: Vec<AgentRunEvent>,
+        activity: Option<AgentRunActivity>,
+    ) -> Result<PendingVerdict, CoreError> {
+        let mut emissions = Vec::new();
+        let receiver = {
+            let mut inner = self.lock();
+            let Some(entry) = inner.entries.get_mut(id) else {
+                return Err(CoreError::not_found(format!(
+                    "agent run {id} does not exist"
+                )));
+            };
+            if entry.snapshot.cancellation_requested || entry.snapshot.state.is_terminal() {
+                return Err(CoreError::conflict(format!(
+                    "run {id} is {}; it cannot ask for permission",
+                    if entry.snapshot.state.is_terminal() {
+                        entry.snapshot.state.as_str()
+                    } else {
+                        "stopping"
+                    }
+                )));
+            }
+            if entry.snapshot.pending.is_some() {
+                tracing::warn!(run = %id, "refused a second permission ask while one is outstanding");
+                return Err(CoreError::conflict(format!(
+                    "run {id} is already waiting for an answer to another permission ask"
+                )));
+            }
+            entry
+                .snapshot
+                .state
+                .check_transition(AgentRunState::Blocked)?;
+
+            let now = Timestamp::now();
+            for event in events {
+                entry.ring.record(id, now, event);
+            }
+            let ask = AgentRunPermissionAsk {
+                ask_id: uuid::Uuid::now_v7().hyphenated().to_string(),
+                tool: draft.tool,
+                verb: draft.verb,
+                target: draft.target,
+                detail: draft.detail,
+                asked_at: now,
+            }
+            .bounded();
+            let (sender, receiver) = oneshot::channel();
+            tracing::info!(run = %id, ask = %ask.ask_id, "a run is waiting for a permission answer");
+            entry.answer = Some(sender);
+            entry.snapshot.pending = Some(ask);
+            entry.snapshot.state = AgentRunState::Blocked;
+            entry.snapshot.activity = activity.map(AgentRunActivity::bounded);
+            entry.snapshot.updated_at = now;
+            if let Some(batch) = entry.batch() {
+                emissions.push(batch);
+            }
+            let actor = entry.agent();
+            emissions.push(entry.changed(actor));
+            receiver
+        };
+        self.emit_all(emissions);
+        Ok(PendingVerdict { receiver })
     }
 
     /// End the run `FINISHED`, recording `RUN_FINISHED` with the adapter's
@@ -815,8 +965,11 @@ impl AgentRunManager {
         entry.snapshot.finished_at = Some(now);
         entry.snapshot.updated_at = now;
         // Nothing is happening any more, and an activity left behind reads as
-        // if something still were.
+        // if something still were. Nor is anything being asked: an ask on an
+        // ended run is a question about a process that is gone, and it is
+        // withdrawn from every surface by this same `AgentRunChanged`.
         entry.snapshot.activity = None;
+        entry.withdraw_ask();
         let correlation = entry.snapshot.correlation_id.clone();
         entry.snapshot.error = error.map(|error| {
             // A failure message is routinely built *from* what an adapter said,
@@ -927,6 +1080,10 @@ impl AgentRunManager {
                 entry.snapshot.cancellation_requested = true;
                 entry.snapshot.updated_at = Timestamp::now();
                 entry.token.cancel();
+                // The stop *is* the answer (T310-ANSWER §5): the driver denies
+                // before it kills, and a prompt left on screen would offer a
+                // choice that is no longer the user's to make.
+                entry.withdraw_ask();
                 tracing::info!(run = %id, ending = ending.as_str(), "agent run stop requested");
                 emissions.push(entry.changed(actor.clone()));
             }
@@ -1018,6 +1175,79 @@ impl AgentRunManager {
                 )))
             }
         }
+    }
+
+    /// `runs.answerPermission`: the user's verdict on the ask a run is stopped
+    /// at (T310-ANSWER).
+    ///
+    /// The one path by which a person's decision reaches a run's child, and it
+    /// carries only that decision: the ask is taken off the run, the verdict is
+    /// handed to the driver, and the driver writes it on the child's stdin. The
+    /// run leaves `BLOCKED` when the child acknowledges — `RUN_RESUMED`, from
+    /// the driver — not here, because here nothing has happened to the child
+    /// yet.
+    ///
+    /// - an unknown run is `NotFound`;
+    /// - an ask that is no longer outstanding — answered already, withdrawn by
+    ///   a stop, or ended with its run — is **not an error**, and changes
+    ///   nothing: the snapshot comes back and says the ask is gone, which is
+    ///   what a second click or a stale card needs to learn. The same rule
+    ///   `agents.answerPermission` holds on the observed side;
+    /// - an ask whose driver is gone is taken off the run and refused with
+    ///   `Conflict`, because the answer could not be delivered and the caller
+    ///   must not believe it was.
+    pub fn answer_permission(
+        &self,
+        id: &AgentRunId,
+        ask_id: &str,
+        verdict: AgentRunPermissionVerdict,
+        actor: Actor,
+    ) -> Result<AgentRun, CoreError> {
+        let mut emissions = Vec::new();
+        let answered = {
+            let mut inner = self.lock();
+            let Some(entry) = inner.entries.get_mut(id) else {
+                return Err(CoreError::not_found(format!(
+                    "agent run {id} does not exist"
+                )));
+            };
+            let outstanding = entry
+                .snapshot
+                .pending
+                .as_ref()
+                .is_some_and(|ask| ask.ask_id == ask_id);
+            if !outstanding {
+                tracing::debug!(run = %id, ask = %ask_id, "a permission ask was answered after it had gone");
+                return Ok(entry.snapshot.clone());
+            }
+            let sender = entry.answer.take();
+            entry.snapshot.pending = None;
+            entry.snapshot.updated_at = Timestamp::now();
+            // `send` runs no user code and at most wakes the driver, so it is
+            // safe under the lock — the same argument `prompt` makes for
+            // `try_send`.
+            let delivered = sender.is_some_and(|sender| sender.send(verdict).is_ok());
+            // The id, the verdict and who gave it; never the target (see the
+            // module's tracing rule).
+            tracing::info!(
+                run = %id,
+                ask = %ask_id,
+                allowed = verdict.allowed(),
+                delivered,
+                ?actor,
+                "a run's permission ask was answered"
+            );
+            emissions.push(entry.changed(actor));
+            if delivered {
+                Ok(entry.snapshot.clone())
+            } else {
+                Err(CoreError::conflict(format!(
+                    "run {id} is no longer answering: its driver has stopped, so the answer was not delivered"
+                )))
+            }
+        };
+        self.emit_all(emissions);
+        answered
     }
 
     /// Every provider session this manager minted and is still answerable for.
@@ -1149,6 +1379,7 @@ impl AgentRunManager {
                 {
                     entry.ending = Some(AgentRunState::Interrupted);
                     entry.snapshot.cancellation_requested = true;
+                    entry.withdraw_ask();
                 }
             }
             ids.into_iter()
@@ -1325,6 +1556,29 @@ impl AgentRunContext {
     /// particular. Reporting the same activity twice emits nothing.
     pub fn set_activity(&self, activity: Option<AgentRunActivity>) -> Result<AgentRun, CoreError> {
         self.manager.advance(&self.run_id, None, Some(activity))
+    }
+
+    /// Stop the run on a permission ask and wait for the user's answer
+    /// (T310-ANSWER).
+    ///
+    /// Records `events` (the ask and the block, as the driver translated them),
+    /// moves the run to `BLOCKED` with `activity`, and puts the ask on the run
+    /// — all in one `AgentRunChanged`, and only if the ask is accepted. The
+    /// returned [`PendingVerdict`] resolves with the user's verdict, or with
+    /// `None` if the ask is withdrawn; either way the driver writes a verdict.
+    ///
+    /// `Conflict` when the run cannot ask right now — stopping, ended, already
+    /// waiting on another ask, or in a state `BLOCKED` is not reachable from.
+    /// A driver denies such an ask on the spot rather than leaving the child
+    /// holding.
+    pub fn ask_permission(
+        &self,
+        draft: PermissionAskDraft,
+        events: Vec<AgentRunEvent>,
+        activity: Option<AgentRunActivity>,
+    ) -> Result<PendingVerdict, CoreError> {
+        self.manager
+            .raise_permission(&self.run_id, draft, events, activity)
     }
 
     /// State and activity together, in one `AgentRunChanged` — the common case

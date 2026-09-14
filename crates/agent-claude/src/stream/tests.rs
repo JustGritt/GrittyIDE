@@ -492,13 +492,17 @@ fn hostile_text_survives_the_adapter_untouched() {
 #[test]
 fn a_can_use_tool_request_is_the_permission_ask() {
     let observation = only(
-        r#"{"type":"control_request","request_id":"req-1","request":{"subtype":"can_use_tool","tool_name":"Bash","description":"touch x","blocked_path":"/w/x","tool_use_id":"toolu_1"}}"#,
+        r#"{"type":"control_request","request_id":"req-1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"touch x"},"description":"touch x","blocked_path":"/w/x","tool_use_id":"toolu_1"}}"#,
     );
     assert_eq!(
         observation,
         ClaudeObservation::PermissionRequested(ClaudePermissionAsk {
             request_id: "req-1".to_owned(),
             tool: "Bash".to_owned(),
+            intent: ClaudeToolIntent::RunCommand {
+                command: "touch x".to_owned(),
+            },
+            input: None,
             detail: Some("touch x".to_owned()),
             blocked_path: Some("/w/x".to_owned()),
             tool_use_id: Some("toolu_1".to_owned()),
@@ -508,17 +512,90 @@ fn a_can_use_tool_request_is_the_permission_ask() {
 }
 
 /// A control request of a subtype this crate does not answer must not be read
-/// as a permission ask — a run blocked on something nobody can answer.
+/// as a permission ask — a run blocked on something nobody can answer — and
+/// must not be skipped either, because the CLI may be holding on it. It is
+/// reported as a request to refuse (T310-ANSWER).
 #[test]
-fn a_control_request_of_another_subtype_is_unknown() {
+fn a_control_request_of_another_subtype_is_one_to_refuse() {
     let observation =
         only(r#"{"type":"control_request","request_id":"r","request":{"subtype":"initialize"}}"#);
     assert_eq!(
         observation,
-        ClaudeObservation::Unknown {
-            kind: "control_request/initialize".to_owned()
+        ClaudeObservation::RequestUnsupported {
+            request_id: "r".to_owned(),
+            subtype: "initialize".to_owned(),
         }
     );
+}
+
+/// The child picks the subtype's length, and it is carried into an
+/// observation, so it is bounded like an unmodelled `type`.
+#[test]
+fn an_unsupported_subtype_is_bounded() {
+    let long = "x".repeat(MAX_KIND_BYTES * 4);
+    let observation = only(&format!(
+        r#"{{"type":"control_request","request_id":"r","request":{{"subtype":"{long}"}}}}"#
+    ));
+    let ClaudeObservation::RequestUnsupported { subtype, .. } = observation else {
+        panic!("expected a request to refuse, got {observation:?}");
+    };
+    assert_eq!(subtype.len(), MAX_KIND_BYTES);
+}
+
+/// A request with no id cannot be answered whatever it asks, so it is never
+/// raised as an ask or a refusal — there is nothing to quote back.
+#[test]
+fn a_control_request_without_an_id_is_unknown() {
+    for body in [
+        r#"{"type":"control_request","request":{"subtype":"can_use_tool","tool_name":"Bash"}}"#,
+        r#"{"type":"control_request","request_id":"","request":{"subtype":"initialize"}}"#,
+    ] {
+        assert!(
+            matches!(only(body), ClaudeObservation::Unknown { .. }),
+            "{body}"
+        );
+    }
+}
+
+/// The ask says what the call is about from its input, the same way a
+/// `tool_use` does, and carries a rendering of the input only when nothing
+/// more specific can be said.
+#[test]
+fn an_ask_classifies_its_input_and_keeps_a_writes_content_out() {
+    let write = only(
+        r#"{"type":"control_request","request_id":"w","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"/w/.env","content":"SECRET=hunter2"}}}"#,
+    );
+    let ClaudeObservation::PermissionRequested(ask) = write else {
+        panic!("expected an ask, got {write:?}");
+    };
+    assert_eq!(
+        ask.intent,
+        ClaudeToolIntent::WriteFile {
+            path: "/w/.env".to_owned()
+        }
+    );
+    assert_eq!(ask.input, None);
+    assert!(
+        !format!("{ask:?}").contains("hunter2"),
+        "a write's content must not leave the adapter: {ask:?}"
+    );
+
+    let mcp = only(
+        r#"{"type":"control_request","request_id":"m","request":{"subtype":"can_use_tool","tool_name":"mcp__db__query","input":{"sql":"drop table users"}}}"#,
+    );
+    let ClaudeObservation::PermissionRequested(ask) = mcp else {
+        panic!("expected an ask, got {mcp:?}");
+    };
+    assert_eq!(ask.intent, ClaudeToolIntent::Other);
+    assert_eq!(ask.input.as_deref(), Some(r#"{"sql":"drop table users"}"#));
+
+    let bare = only(
+        r#"{"type":"control_request","request_id":"b","request":{"subtype":"can_use_tool","tool_name":"mcp__x__y"}}"#,
+    );
+    let ClaudeObservation::PermissionRequested(ask) = bare else {
+        panic!("expected an ask, got {bare:?}");
+    };
+    assert_eq!(ask.input, None, "no input is absent, not the string null");
 }
 
 /// The echo of an answer is what resumes the run, and it is only trusted for

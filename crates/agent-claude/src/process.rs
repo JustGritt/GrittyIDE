@@ -46,7 +46,7 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use crate::error::ClaudeError;
 use crate::launch::ClaudeLaunch;
 use crate::observation::{ClaudeExit, ClaudeExitStatus, ClaudeObservation};
-use crate::request::{ClaudeVerdict, permission_response, user_turn};
+use crate::request::{ClaudeVerdict, permission_response, unsupported_response, user_turn};
 use crate::stream::{ClaudeStream, ClaudeStreamStats};
 
 /// How long a child gets to announce `system`/`init` before the run gives up.
@@ -289,6 +289,19 @@ impl ClaudeProcess {
         self.write(
             &permission_response(request_id, verdict),
             "the run ended before the request was answered",
+        )
+        .await
+    }
+
+    /// Refuse a `control_request` this adapter does not answer.
+    ///
+    /// Written rather than skipped, because the CLI may be holding on it the
+    /// way it holds on an unanswered ask (see [`crate::request`]).
+    pub async fn refuse(&mut self, request_id: &str, subtype: &str) -> Result<(), ClaudeError> {
+        tracing::debug!(program = %self.program, "refusing an unsupported control request");
+        self.write(
+            &unsupported_response(request_id, subtype),
+            "the run ended before the request was refused",
         )
         .await
     }

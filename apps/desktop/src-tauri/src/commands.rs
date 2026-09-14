@@ -12,10 +12,10 @@ use std::sync::Once;
 use std::time::Instant;
 
 use gritty_core::agent_run::{
-    AgentRun, AgentRunEventLog, AgentRunProvider, AgentRunSpec, CancelRunRequest,
-    ClaudeDriverOptions, ClaudeLaunch, FakeDriverOptions, ListRunsRequest, OwnedProviderSession,
-    PromptRunRequest, RunEventsRequest, RunInbox, StartFakeRunRequest, StartRunRequest,
-    claude_driver, fake_driver,
+    AgentRun, AgentRunEventLog, AgentRunProvider, AgentRunSpec, AnswerRunPermissionRequest,
+    CancelRunRequest, ClaudeDriverOptions, ClaudeLaunch, FakeDriverOptions, ListRunsRequest,
+    OwnedProviderSession, PromptRunRequest, RunEventsRequest, RunInbox, StartFakeRunRequest,
+    StartRunRequest, claude_driver, fake_driver,
 };
 use gritty_core::agent_session::{
     AgentIntegration, AgentIntegrationChange, AgentIntegrationChangeRequest,
@@ -1629,6 +1629,31 @@ pub async fn runs_prompt(
         let request: PromptRunRequest = parse_request(request)?;
         request.validate()?;
         runs.prompt(&request.run_id, request.text, Actor::User)
+    })
+    .await
+}
+
+/// `runs.answerPermission`
+///
+/// The user's verdict on the permission ask a run is stopped at (T310-ANSWER).
+/// The run leaves `BLOCKED` when its child acknowledges, not on this call's
+/// return; an ask that has already gone comes back as the run, unchanged, and
+/// is not an error.
+#[tauri::command]
+pub async fn runs_answer_permission(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<AgentRun, CoreError> {
+    let runs = core.runs.clone();
+    guard("runs.answerPermission", move |_| async move {
+        let request: AnswerRunPermissionRequest = parse_request(request)?;
+        request.validate()?;
+        runs.answer_permission(
+            &request.run_id,
+            &request.ask_id,
+            request.verdict,
+            Actor::User,
+        )
     })
     .await
 }

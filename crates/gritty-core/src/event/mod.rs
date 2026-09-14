@@ -662,6 +662,7 @@ mod tests {
             cancellation_requested: false,
             correlation_id: CorrelationId::from_raw("corr-1"),
             error: None,
+            pending: None,
         };
         let events = [
             CoreEvent::AgentRunChanged(AgentRunChangedPayload { run }),

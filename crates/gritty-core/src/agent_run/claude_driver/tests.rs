@@ -21,6 +21,18 @@ fn tool(intent: ClaudeToolIntent) -> ClaudeToolUse {
     }
 }
 
+fn ask(tool: &str, intent: ClaudeToolIntent) -> ClaudePermissionAsk {
+    ClaudePermissionAsk {
+        request_id: "req_1".to_owned(),
+        tool: tool.to_owned(),
+        intent,
+        input: None,
+        detail: None,
+        blocked_path: None,
+        tool_use_id: None,
+    }
+}
+
 fn exit(status: ClaudeExitStatus, unfinished: bool) -> ClaudeExit {
     ClaudeExit {
         status,
@@ -65,16 +77,19 @@ fn every_observation() -> Vec<ClaudeObservation> {
         ClaudeObservation::Said {
             text: "hi".to_owned(),
         },
-        ClaudeObservation::PermissionRequested(ClaudePermissionAsk {
-            request_id: "req_1".to_owned(),
-            tool: "Bash".to_owned(),
-            detail: Some("rm -rf /".to_owned()),
-            blocked_path: None,
-            tool_use_id: None,
-        }),
+        ClaudeObservation::PermissionRequested(ask(
+            "Bash",
+            ClaudeToolIntent::RunCommand {
+                command: "rm -rf /".to_owned(),
+            },
+        )),
         ClaudeObservation::PermissionAnswered {
             request_id: "req_1".to_owned(),
             allowed: false,
+        },
+        ClaudeObservation::RequestUnsupported {
+            request_id: "req_2".to_owned(),
+            subtype: "mcp_message".to_owned(),
         },
         ClaudeObservation::TurnFinished(ClaudeTurnEnd {
             subtype: "success".to_owned(),
@@ -136,6 +151,7 @@ fn the_observation_list_covers_every_variant() {
             "permissionRequested",
             "promptEchoed",
             "ready",
+            "requestUnsupported",
             "said",
             "thought",
             "toolFinished",
@@ -336,23 +352,93 @@ fn an_unknown_message_kind_is_inert() {
     assert!(state_for(&observation).is_none());
 }
 
-/// The seam ships denying, and says why.
-#[tokio::test]
-async fn the_default_policy_denies_with_a_reason() {
-    let ask = ClaudePermissionAsk {
-        request_id: "req_1".to_owned(),
-        tool: "Bash".to_owned(),
-        detail: Some("rm -rf /".to_owned()),
-        blocked_path: None,
-        tool_use_id: None,
-    };
-    let verdict = PermissionPolicy::DenyAll.decide(&ask).await;
-    match verdict {
-        gritty_agent_claude::ClaudeVerdict::Deny { message } => {
-            assert!(!message.is_empty(), "a denial has to tell the agent why");
-        }
-        other => panic!("the shipped policy must never allow: {other:?}"),
+/// The one mapping that decides whether a tool runs. Only the user's own
+/// `ALLOW_ONCE` becomes an allowance; a withdrawn ask is a denial, and every
+/// denial tells the model why.
+#[test]
+fn only_the_users_allowance_lets_a_tool_run() {
+    assert_eq!(
+        claude_verdict(Some(AgentRunPermissionVerdict::AllowOnce)),
+        gritty_agent_claude::ClaudeVerdict::Allow {
+            updated_input: None
+        },
+        "an allowance runs the call as issued and carries no input"
+    );
+    for (verdict, reason) in [
+        (Some(AgentRunPermissionVerdict::Deny), USER_DENIED_REASON),
+        (None, DENY_BY_DEFAULT_REASON),
+    ] {
+        assert_eq!(
+            claude_verdict(verdict),
+            gritty_agent_claude::ClaudeVerdict::Deny {
+                message: reason.to_owned()
+            },
+            "{verdict:?}"
+        );
     }
+}
+
+/// The ask the user sees says what the call is about, from the adapter's own
+/// classification of its input.
+#[test]
+fn an_ask_is_drafted_from_what_the_call_is_about() {
+    let draft = |ask: ClaudePermissionAsk| {
+        let draft = ask_draft(&ask);
+        (draft.verb, draft.target)
+    };
+    assert_eq!(
+        draft(ask(
+            "Write",
+            ClaudeToolIntent::WriteFile {
+                path: "/w/src/a.rs".to_owned()
+            }
+        )),
+        (AgentRunPermissionVerb::WriteFile, "/w/src/a.rs".to_owned())
+    );
+    assert_eq!(
+        draft(ask(
+            "Bash",
+            ClaudeToolIntent::RunCommand {
+                command: "cargo test".to_owned()
+            }
+        )),
+        (AgentRunPermissionVerb::RunCommand, "cargo test".to_owned())
+    );
+    assert_eq!(
+        draft(ask(
+            "Read",
+            ClaudeToolIntent::ReadFile {
+                path: "/etc/hosts".to_owned()
+            }
+        )),
+        (AgentRunPermissionVerb::Other, "/etc/hosts".to_owned())
+    );
+    // An unclassified tool falls back from its arguments, to its sentence, to
+    // its name — never to an empty card.
+    let mut mcp = ask("mcp__db__query", ClaudeToolIntent::Other);
+    assert_eq!(draft(mcp.clone()).1, "mcp__db__query");
+    mcp.detail = Some("Query the database".to_owned());
+    assert_eq!(draft(mcp.clone()).1, "Query the database");
+    mcp.input = Some(r#"{"sql":"select 1"}"#.to_owned());
+    assert_eq!(draft(mcp).1, r#"{"sql":"select 1"}"#);
+}
+
+/// The echoes of asks the run never stopped for are swallowed exactly once,
+/// and the memory of them is bounded.
+#[test]
+fn quiet_answers_are_remembered_once_and_bounded() {
+    let mut asks = Asks::default();
+    asks.remember_quiet("a".to_owned());
+    assert!(asks.take_quiet("a"));
+    assert!(
+        !asks.take_quiet("a"),
+        "an echo is swallowed once, not forever"
+    );
+    for index in 0..MAX_QUIET_ANSWERS + 5 {
+        asks.remember_quiet(format!("r{index}"));
+    }
+    assert_eq!(asks.quiet.len(), MAX_QUIET_ANSWERS);
+    assert!(!asks.take_quiet("r0"), "the oldest is evicted first");
 }
 
 /// `RUN_BLOCKED` says what was asked for, so the console can draw it without
@@ -360,11 +446,13 @@ async fn the_default_policy_denies_with_a_reason() {
 #[test]
 fn a_block_names_the_tool_that_asked() {
     let ask = ClaudePermissionAsk {
-        request_id: "req_1".to_owned(),
-        tool: "Bash".to_owned(),
         detail: Some("cargo test".to_owned()),
-        blocked_path: None,
-        tool_use_id: None,
+        ..ask(
+            "Bash",
+            ClaudeToolIntent::RunCommand {
+                command: "cargo test".to_owned(),
+            },
+        )
     };
     assert_eq!(blocked_reason(&ask), "Bash needs permission: cargo test");
     let bare = ClaudePermissionAsk {
