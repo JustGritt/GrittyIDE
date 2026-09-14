@@ -6,7 +6,7 @@ name: Runner disk GC (scheduled)
 # the growth this ticket measured (target/debug/incremental at 35G one day,
 # 1.4G a week later, target/debug/deps growing by tens of GB across a week of
 # branch churn) is plausibly ordinary local `cargo`/`pnpm check` work on this
-# same machine, not CI at all — see docs/tasks/CI-RUNNER-GC-disk-retention.md,
+# same machine, not CI at all — see docs/tasks/completed/CI-RUNNER-GC-disk-retention.md,
 # "What was measured", point 4. This is the backstop that catches growth the
 # job-triggered path never sees.
 #

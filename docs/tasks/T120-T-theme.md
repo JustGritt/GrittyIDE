@@ -1,7 +1,7 @@
 # Task T120-T — A theme the user picks: system, light or dark
 
 - **Phase:** 2
-- **Status:** todo
+- **Status:** review
 - **Depends on:** T120-C (the contract). Independent of T120-U.
 
 ## Objective
@@ -44,7 +44,7 @@ this ticket makes the value do something, and the two do not share a file.
   the non-hex filter that exists because Monaco throws on what it cannot parse
 - `apps/desktop/src/features/terminal/terminal-view.tsx` — `readTheme()` and
   the in-place re-apply
-- `docs/tasks/T048-ui-revamp.md` — the non-goal being overridden
+- `docs/tasks/completed/T048-ui-revamp.md` — the non-goal being overridden
 
 ## Allowed scope
 

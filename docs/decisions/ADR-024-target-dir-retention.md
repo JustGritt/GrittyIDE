@@ -6,7 +6,7 @@
   CI-RUNNER-GC; `docs/plans/execution-board.md` reserves every ADR verdict for
   lane H, so this stays `Proposed` until Alexis records one, exactly as
   ADR-017, ADR-022 and ADR-023 do.
-- **Motivated by:** CI-RUNNER-GC (`docs/tasks/CI-RUNNER-GC-disk-retention.md`),
+- **Motivated by:** CI-RUNNER-GC (`docs/tasks/completed/CI-RUNNER-GC-disk-retention.md`),
   itself downstream of CI-COST (self-hosted `macos` runner is the dev Mac) and
   CI-LINUX-DARK (no fallback while it's blocked)
 

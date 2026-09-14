@@ -1,7 +1,7 @@
 # Task T120-U — The settings page, and retiring the three popovers
 
 - **Phase:** 2
-- **Status:** todo
+- **Status:** review
 - **Depends on:** T120-C (the contract). Independent of T120-T.
 
 ## Objective
@@ -43,7 +43,7 @@ whatever the schema describes, so it does not depend on which settings exist.
 - The three surfaces being retired: `features/editor/preferences-popover.tsx`,
   `features/terminal/terminal-settings.tsx`,
   `features/agents/agent-integration-settings.tsx` (+ `agent-notification-setting.tsx`)
-- `docs/tasks/JSDOM-VITEST-component-tests.md` — when a `.dom.test.tsx` is warranted
+- `docs/tasks/completed/JSDOM-VITEST-component-tests.md` — when a `.dom.test.tsx` is warranted
 
 ## Allowed scope
 

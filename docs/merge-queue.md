@@ -69,7 +69,7 @@ everything else, instead of each small one resolving against it.
 
 | PR | What | Order | Why / what the loser fixes |
 |---|---|---|---|
-| [#37](https://github.com/JustGritt/GrittyIDE/pull/37) | `JSDOM-VITEST` | 1 | Adds `docs/tasks/JSDOM-VITEST-component-tests.md`, so the index row gains a link. |
+| [#37](https://github.com/JustGritt/GrittyIDE/pull/37) | `JSDOM-VITEST` | 1 | Adds `docs/tasks/completed/JSDOM-VITEST-component-tests.md`, so the index row gains a link. |
 | `PLAN-FANOUT` | Waves, lanes and the ticket splits | 2 | **Regenerates `docs/tasks/README.md` with 23 new rows**, and drops #37's link because the task file is not in this tree yet. Whichever lands second re-runs `scripts/agent-board.py render --index` and commits what it writes — never hand-merge that table. No code, no version, no migration. |
 
 **#27 landed on 2026-09-06**, spending `PROTOCOL_VERSION` 2.11.0,

@@ -26,7 +26,7 @@ frontend" (`ADR-001-desktop-runtime.md:16-19`) inside a document whose Context
 weighs Electron against Tauri and whose kill criteria are scoped to Monaco,
 WebView and PTY behaviour — none of them to React. The Project Plan states it
 just as flatly (`Gritty IDE Project Plan.md:24-26`), as does T000
-(`docs/tasks/T000-bootstrap-workspace.md:9-10`). No alternative UI framework —
+(`docs/tasks/completed/T000-bootstrap-workspace.md:9-10`). No alternative UI framework —
 Solid, Svelte, Preact, Lit, vanilla TypeScript, web components — is named
 anywhere in the documentation tree, in comparison, in a rejected-alternatives
 list, or in passing. React entered as an unexamined assumption on 2026-09-02 and
@@ -99,7 +99,7 @@ Typing responsiveness — frames over 16 ms during sustained editing — is reco
 as "pending the human pass" (`docs/plans/phase-0-spike.md:68`), has a method but
 no number (`docs/testing/phase-0-manual-pass.md:241`), and is already flagged
 stale because it would be measured against a UI that has since been rebuilt
-(`docs/tasks/T048-ui-revamp.md:169`). This ADR is decided without it, and names
+(`docs/tasks/completed/T048-ui-revamp.md:169`). This ADR is decided without it, and names
 it as the trigger that would reopen the question.
 
 Two further facts belong on the record rather than in a footnote. There is no

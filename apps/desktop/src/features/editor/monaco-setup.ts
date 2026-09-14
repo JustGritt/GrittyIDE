@@ -10,7 +10,7 @@ import { workerStatus } from './worker-status';
 
 // This module pulls Monaco, so nothing may import it statically: it is reached
 // only through `import('./monaco-setup')` in `use-editor-binding`. See
-// `docs/tasks/MONACO-DEFER-startup-import.md`. `workerStatus` is exported from
+// `docs/tasks/completed/MONACO-DEFER-startup-import.md`. `workerStatus` is exported from
 // `./worker-status` for the same reason.
 
 export type MonacoModelFactory = ReturnType<typeof createMonacoModelFactory>;

@@ -8,7 +8,7 @@
 `docs/Gritty IDE Project Plan.md:797` leaves the Git backend open: shell out to
 `git`, or use an in-process library (`git2`/libgit2, or `gix`). T100 needs
 `git.status` and `git.diff` and recommends `gix`, deferring the choice to an
-ADR "before implementation" (`docs/tasks/T100-git-baseline.md:100-116`).
+ADR "before implementation" (`docs/tasks/completed/T100-git-baseline.md:100-116`).
 ADR-007 already decided that Git is how Gritty isolates work, so this is the
 floor everything from T400 up stands on, and replacing it later is expensive.
 

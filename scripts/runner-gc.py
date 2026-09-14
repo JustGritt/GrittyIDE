@@ -28,7 +28,7 @@ directory a live build appears to be using.
         task file's "What was measured").
 
     runner-gc.py selftest
-        Runs the required tests (see docs/tasks/CI-RUNNER-GC-disk-retention.md,
+        Runs the required tests (see docs/tasks/completed/CI-RUNNER-GC-disk-retention.md,
         "Tests required") against scratch directories only — never the real
         machine's real `target/`.
 

@@ -40,9 +40,9 @@ Two things are **not** established and are this task's first job:
 
 ## Required reading
 
-- `docs/tasks/T310-claude-code-adapter.md` §7 — the seam this replaces
+- `docs/tasks/completed/T310-claude-code-adapter.md` §7 — the seam this replaces
 - ADR-020 — the verdict vocabulary, and why it is what it is
-- `docs/tasks/T335-agent-permissions.md` — the queue, and "asked in place,
+- `docs/tasks/completed/T335-agent-permissions.md` — the queue, and "asked in place,
   answered in a queue"
 - `apps/desktop/src/features/agents/permission-model.ts`, `permission-prompt.tsx`,
   `permission-chords.ts` — what T335 built, and what this reuses rather than rebuilds

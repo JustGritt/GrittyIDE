@@ -184,7 +184,7 @@ spending **2.11.0** and migration **0004**, because `docs/merge-queue.md` is
 the record and a version gap costs nothing.
 
 **"Read side only" does not survive contact with T326.** The task file
-(`docs/tasks/T326-ownership-violations.md`) records that an observed violation
+(`docs/tasks/completed/T326-ownership-violations.md`) records that an observed violation
 is persisted as an ordinary `OwnershipConflict` row with a fourth
 `ConflictState`, and inserting a row is a write. What the annotation was
 protecting is intact — no new file, column or migration in
@@ -328,7 +328,7 @@ verify one against, not before.
 ### What is *not* on this plan
 
 **T233 — the Agents section in the left sidebar** (design artboards 12a/12b).
-`docs/tasks/T335-agent-permissions.md:99` recorded it as "unbuilt and
+`docs/tasks/completed/T335-agent-permissions.md:99` recorded it as "unbuilt and
 unticketed"; it now has a row, at `unspec`, because an unticketed divergence
 from the design is invisible. It is a decision before it is work, and the
 recommendation is **do not build it**: `agents-panel.tsx:14` is explicit that

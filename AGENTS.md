@@ -31,7 +31,7 @@ what needs my attention.
 | `apps/desktop/src` | React shell | calls the typed core protocol only |
 | `packages/protocol` | typed client, generated types (`src/generated`, written by `cargo test -p gritty-core`), error/event envelopes | `src/transport/tauri.ts` is the only file that may import `@tauri-apps/api` (Biome-enforced); never edit `src/generated` by hand |
 | `packages/*` | editor, markdown, ui, workstreams | consumed as source through workspace links |
-| `docs/tasks/` | one Markdown file per task, following `docs/agent/task-template.md` | update status and completion report |
+| `docs/tasks/` | one Markdown file per open task, following `docs/agent/task-template.md`; done and superseded tasks live in `docs/tasks/completed/` | update status and completion report; never move a task file by hand — `render --index` does it |
 | `fixtures/` (T020+) | deterministic test repositories | never rely on a developer's real project |
 
 ## Commands
@@ -130,8 +130,11 @@ which is blocked on which. So:
 
 State is an append-only log in the shared git directory, so worktrees see one
 board. It is machine-local and never committed. The committed projection is the
-status column of `docs/tasks/README.md`, which
-`scripts/agent-board.py render --index` writes — run it before you open a PR and
+status column of `docs/tasks/README.md` (open tickets) and
+`docs/tasks/completed/README.md` (done and superseded), which
+`scripts/agent-board.py render --index` writes. The same command moves a task
+file into `completed/` when its ticket closes (and back if it reopens) and
+repoints every `docs/tasks/…` path that names it — run it before you open a PR and
 commit what it writes, the way `cargo test -p gritty-core` regenerates protocol
 types. **It is not part of `pnpm check`**: CI has no board, so a freshness gate
 there would fail on every clone.

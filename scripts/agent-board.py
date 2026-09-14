@@ -15,10 +15,12 @@ O_APPEND write is atomic, so two sessions cannot lose each other's events. The
 board state is a fold over the log, and the fold — not the writer — decides who
 won a contended `take`. See `resolve()`.
 
-The log is machine-local and never committed. `docs/tasks/README.md` holds the
-durable projection of one field, status, and is written by `render --index`.
-Losing the log costs only the live holders; `sync --from-index` rebuilds the
-rest from the last commit.
+The log is machine-local and never committed. `docs/tasks/README.md` (open
+tickets) and `docs/tasks/completed/README.md` (done and superseded) hold the
+durable projection of one field, status, and are written by `render --index`,
+which also moves each task file to the directory its status says. Losing the
+log costs only the live holders; `sync --from-index` rebuilds the rest from the
+last commit.
 
     agent-board.py list                       # what is taken, by whom
     agent-board.py take T070 --agent W-t070 --session <uuid>
@@ -44,6 +46,16 @@ BOARD_FILENAME = "gritty-board.jsonl"
 VIEW_FILENAME = "AGENT-BOARD.md"
 INDEX_RELPATH = "docs/tasks/README.md"
 TASKS_RELDIR = "docs/tasks"
+# Done and superseded tickets: their rows and their task files. A file follows
+# its ticket's status on every `render --index`, and so does every
+# `docs/tasks/…` path that names it (see `rewrite_task_paths`).
+COMPLETED_RELDIR = "docs/tasks/completed"
+ARCHIVE_RELPATH = COMPLETED_RELDIR + "/README.md"
+INDEXES = "%s + %s" % (INDEX_RELPATH, ARCHIVE_RELPATH)
+# Where a `docs/tasks/…` path can appear. Fixtures are test repositories and
+# are never rewritten.
+REFERENCE_SUFFIXES = (".md", ".ts", ".tsx", ".rs", ".py", ".json", ".toml", ".yml", ".yaml",
+                      ".css", ".sh", ".html")
 TABLE_START = "<!-- board:table start -->"
 TABLE_END = "<!-- board:table end -->"
 TTL_HOURS = 8
@@ -400,11 +412,44 @@ def index_path() -> Path:
     return repo_root() / INDEX_RELPATH
 
 
+def archive_path() -> Path:
+    return repo_root() / ARCHIVE_RELPATH
+
+
+ARCHIVE_TEMPLATE = """# Completed tasks
+
+Tickets that are **done** or **superseded**, and their task files. The open
+ones are in [the task index](../README.md), which also carries the dependency
+graph and the workflow.
+
+**Generated** by `scripts/agent-board.py render --index`, from the same board
+as the index. When the reviewer flips a ticket to done, its row and its task
+file move here, and every `docs/tasks/…` path that names the file is repointed;
+a reopened ticket moves back the same way. Do not move files in or out by hand.
+
+%s
+%s
+%s
+"""
+
+
 def parse_index() -> list[dict]:
-    """Read the committed table. Bootstrap only — the board owns status after."""
-    text = index_path().read_text(encoding="utf-8")
+    """Read the committed tables, open and archived.
+
+    Bootstrap only — the board owns status after. Archive rows are numbered
+    after every index row, so an import keeps the open work first.
+    """
+    rows = parse_table(index_path(), 0)
+    if archive_path().exists():
+        rows += parse_table(archive_path(), 100_000)
+    return rows
+
+
+def parse_table(path: Path, offset: int) -> list[dict]:
+    text = path.read_text(encoding="utf-8")
     rows = []
-    for position, line in enumerate(text.splitlines()):
+    for line_number, line in enumerate(text.splitlines()):
+        position = offset + line_number
         cells = split_row(line)
         if not cells:
             continue
@@ -445,9 +490,12 @@ def status_cell(ticket: dict) -> str:
     return state
 
 
-def render_index_table(tickets: dict[str, dict]) -> str:
+def render_index_table(tickets: dict[str, dict], archived: bool = False) -> str:
+    """The open tickets, or with `archived` the done and superseded ones."""
     lines = ["| ID | Task | Phase | Depends on | Status |", "|---|---|---|---|---|"]
     for ticket in ordered(tickets):
+        if (ticket.get("status") in TERMINAL) != archived:
+            continue
         id_cell = (
             "[%s](%s)" % (ticket["label"], ticket["link"])
             if ticket.get("link")
@@ -489,6 +537,116 @@ def splice_index(text: str, table: str) -> str:
     )
 
 
+def relpath(path: Path) -> str:
+    return path.relative_to(repo_root()).as_posix()
+
+
+def task_file_candidates(ticket: dict) -> list[Path]:
+    """Where a ticket's task file belongs, then where else it may still be.
+
+    A link is a bare file name, resolved against the directory the ticket's
+    status picks. A link with a directory in it is not a task-file name and
+    places nothing.
+    """
+    link = ticket.get("link")
+    if not link or "/" in link:
+        return []
+    root = repo_root()
+    closed = ticket.get("status") in TERMINAL
+    wanted, other = (COMPLETED_RELDIR, TASKS_RELDIR) if closed else (TASKS_RELDIR, COMPLETED_RELDIR)
+    return [root / wanted / link, root / other / link]
+
+
+def locate_task_file(ticket: dict):
+    for path in task_file_candidates(ticket):
+        if path.exists():
+            return path
+    return None
+
+
+def place_task_files(tickets: dict[str, dict], write: bool) -> list[str]:
+    """Move each task file to the directory its ticket's status says.
+
+    Open tickets keep their files in `docs/tasks/`; done and superseded ones in
+    `docs/tasks/completed/`. A reopened ticket's file comes back. A plain
+    rename, not `git mv`: rendering never stages anything.
+    """
+    moves = []
+    for ticket in ordered(tickets):
+        candidates = task_file_candidates(ticket)
+        if not candidates:
+            continue
+        wanted, other = candidates
+        if wanted.exists() or not other.exists():
+            continue
+        moves.append("%s → %s" % (relpath(other), relpath(wanted)))
+        if write:
+            wanted.parent.mkdir(parents=True, exist_ok=True)
+            other.rename(wanted)
+    return moves
+
+
+def rewrite_task_paths(write: bool) -> list[str]:
+    """Point every `docs/tasks/<file>.md` path at the directory the file is in.
+
+    Task files are named by repository-relative path from documents, ADRs, a
+    workflow and source comments, so moving one would otherwise break each of
+    them. Keyed on where the files *are*, not on what moved this run, so a path
+    written against the wrong directory is corrected too. Bare file names in
+    prose are names, not paths, and are left alone.
+    """
+    root = repo_root()
+    where: dict[str, str] = {}
+    for reldir in (TASKS_RELDIR, COMPLETED_RELDIR):
+        directory = root / reldir
+        if not directory.is_dir():
+            continue
+        for path in directory.glob("*.md"):
+            if path.name != "README.md":
+                where.setdefault(path.name, reldir)
+    if not where:
+        return []
+    names = sorted(where, key=len, reverse=True)
+    pattern = re.compile(
+        r"docs/tasks/(?:completed/)?(%s)" % "|".join(re.escape(name) for name in names)
+    )
+    try:
+        listed = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+            cwd=root, capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.splitlines()
+    except (subprocess.SubprocessError, OSError):
+        return []
+
+    changed = []
+    for name in listed:
+        if not name.endswith(REFERENCE_SUFFIXES) or name.startswith("fixtures/"):
+            continue
+        path = root / name
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if "docs/tasks/" not in text:
+            continue
+        edits = []
+
+        def repoint(match):
+            path_now = "%s/%s" % (where[match.group(1)], match.group(1))
+            if match.group(0) != path_now:
+                edits.append(match.group(1))
+            return path_now
+
+        wanted = pattern.sub(repoint, text)
+        if edits:
+            changed.append("%s: %d path(s)" % (name, len(edits)))
+            if write:
+                path.write_text(wanted, encoding="utf-8")
+    return changed
+
+
 TASK_STATUS = re.compile(r"^- \*\*Status:\*\*.*$")
 
 
@@ -502,12 +660,10 @@ def rewrite_task_files(tickets: dict[str, dict], write: bool) -> list[str]:
     """
     changed = []
     for ticket in tickets.values():
-        link = ticket.get("link")
-        if not link:
+        path = locate_task_file(ticket)
+        if path is None:
             continue
-        path = repo_root() / TASKS_RELDIR / link
-        if not path.exists():
-            continue
+        link = relpath(path)
         lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
         wanted = "- **Status:** %s\n" % status_cell(ticket)
         for index, line in enumerate(lines):
@@ -884,9 +1040,9 @@ def cmd_sync(args) -> int:
     if args.from_index and added:
         for row in added:
             append_event({"op": "add", **row})
-        print("imported %d ticket(s) from %s" % (len(added), INDEX_RELPATH))
+        print("imported %d ticket(s) from %s" % (len(added), INDEXES))
     elif added:
-        print("%d ticket(s) in %s are not on the board:" % (len(added), INDEX_RELPATH))
+        print("%d ticket(s) in %s are not on the board:" % (len(added), INDEXES))
         for row in added:
             print("  %s  %s" % (row["id"].ljust(8), row["title"][:60]))
         print("  run `agent-board.py sync --from-index` to import them")
@@ -903,12 +1059,12 @@ def cmd_sync(args) -> int:
             print("  %s  index=%s  board=%s" % (ticket_id.ljust(8), index_state, board_state))
         print("  the board wins; `render --index` writes it back")
     if extra:
-        print("%d ticket(s) on the board are not in %s:" % (len(extra), INDEX_RELPATH))
+        print("%d ticket(s) on the board are not in %s:" % (len(extra), INDEXES))
         for ticket in extra:
             print("  %s  %s" % (ticket["label"].ljust(8), (ticket.get("title") or "")[:60]))
         print("  `render --index` adds them")
     if not (added or drift or extra):
-        print("board and %s agree (%d tickets)" % (INDEX_RELPATH, len(rows)))
+        print("board and %s agree (%d tickets)" % (INDEXES, len(rows)))
     return 1 if (args.check and (added or drift or extra)) else 0
 
 
@@ -920,22 +1076,44 @@ def cmd_render(args) -> int:
         return 1
 
     if args.index:
-        path = index_path()
-        current = path.read_text(encoding="utf-8")
-        wanted = splice_index(current, render_index_table(tickets))
+        archived = sum(1 for ticket in tickets.values() if ticket.get("status") in TERMINAL)
+        # Files first, then the paths that name them, then the tables: the
+        # tables are read after the path rewrite so they splice into current text.
+        moves = place_task_files(tickets, write=not args.check)
+        repointed = rewrite_task_paths(write=not args.check)
+        tables = []
+        for name, path, table in (
+            (INDEX_RELPATH, index_path(), render_index_table(tickets)),
+            (ARCHIVE_RELPATH, archive_path(), render_index_table(tickets, archived=True)),
+        ):
+            current = path.read_text(encoding="utf-8") if path.exists() else None
+            wanted = (
+                splice_index(current, table)
+                if current is not None
+                else ARCHIVE_TEMPLATE % (TABLE_START, table, TABLE_END)
+            )
+            tables.append((name, path, current, wanted))
         task_changes = rewrite_task_files(tickets, write=not args.check)
         if args.check:
-            if current != wanted or task_changes:
-                print("%s is stale; run `agent-board.py render --index`" % INDEX_RELPATH)
-                for change in task_changes:
+            stale = [name for name, _, current, wanted in tables if current != wanted]
+            if stale or task_changes or moves or repointed:
+                for name in stale:
+                    print("%s is stale; run `agent-board.py render --index`" % name)
+                for change in moves + repointed + task_changes:
                     print("  %s" % change)
                 return 1
-            print("%s and the task files match the board" % INDEX_RELPATH)
+            print("%s, %s and the task files match the board" % (INDEX_RELPATH, ARCHIVE_RELPATH))
             return 0
-        if current != wanted:
-            path.write_text(wanted, encoding="utf-8")
-        print("wrote %s (%d rows), %d task file(s) updated"
-              % (INDEX_RELPATH, len(tickets), len(task_changes)))
+        for _, path, current, wanted in tables:
+            if current != wanted:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(wanted, encoding="utf-8")
+        print("wrote %s (%d open rows) and %s (%d archived); moved %d task file(s), "
+              "repointed paths in %d file(s), %d status line(s) updated"
+              % (INDEX_RELPATH, len(tickets) - archived, ARCHIVE_RELPATH, archived,
+                 len(moves), len(repointed), len(task_changes)))
+        for change in moves + repointed:
+            print("  %s" % change)
         for change in task_changes:
             print("  %s" % change)
         return 0

@@ -9,7 +9,7 @@
 "ripgrep process, Rust library, or hybrid". Nothing searches today. T080
 specifies the command (`search.query`, streamed, cancellable, no index) and
 recommends the in-process option, then says the choice "needs its own ADR
-before any crate code is written" (`docs/tasks/T080-search.md:126`).
+before any crate code is written" (`docs/tasks/completed/T080-search.md:126`).
 
 The three candidates are not equally weighted by this repository's priority
 order (`correctness → recoverability → inspectability → responsiveness`), and
@@ -49,8 +49,8 @@ What the explorer calls "ignored" today is a hardcoded list of eleven directory
 names — `.git`, `node_modules`, `target`, `dist`, … —
 (`crates/workspace/src/listing.rs:27-39`), surfaced as `ignoredHint`. T070 keeps
 that shape, proposing `is_ignored(path)` beside the same constant
-(`docs/tasks/T070-file-watcher.md:146-148`), and T080 plans to call it
-(`docs/tasks/T080-search.md:152`). None of the three reads a `.gitignore` file.
+(`docs/tasks/completed/T070-file-watcher.md:146-148`), and T080 plans to call it
+(`docs/tasks/completed/T080-search.md:152`). None of the three reads a `.gitignore` file.
 
 So adopting `ignore` for its walker quietly offers a second, different and much
 larger definition of the word — nested ignore files, negation, `.git/info/exclude`,

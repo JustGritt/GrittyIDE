@@ -111,7 +111,7 @@ nothing draws it yet"); nothing else does, and no ticket carries it.
 `activitySource` on the rail row; `activitySourceLabel` is exported and tested
 but **only the settings surface is wired today**."
 
-**What the spec required.** §24 of `docs/tasks/T221-agent-hook-bridge.md` is a
+**What the spec required.** §24 of `docs/tasks/completed/T221-agent-hook-bridge.md` is a
 *Required behavior* item, not an option: "A row can say where its verdict came
 from, so a `BLOCKED` row is attributable rather than magic."
 
@@ -162,7 +162,7 @@ table).
 unticketed feature
 
 > **Partly resolved 2026-09-06** — the unticketed feature is now **T041**
-> (`docs/tasks/T041-preview-tabs.md`), on the board at `review`, with
+> (`docs/tasks/completed/T041-preview-tabs.md`), on the board at `review`, with
 > manual-pass steps 2.18a–2.18h. The rest of this finding stands: `cb9e08a` is
 > still an unreviewed commit carrying three tasks, and nothing separates their
 > diffs.
@@ -211,8 +211,8 @@ the task index.
 
 **What the reports contain.** Both completion reports run Summary → Files
 changed → Architectural decisions → Known limitations → Follow-up tasks
-(`docs/tasks/T096-terminal-chrome.md:129`,
-`docs/tasks/T098-terminal-colours-and-rooting.md:123`). Neither has a "Tests
+(`docs/tasks/completed/T096-terminal-chrome.md:129`,
+`docs/tasks/completed/T098-terminal-colours-and-rooting.md:123`). Neither has a "Tests
 actually executed" section, which step 5 of `AGENTS.md`'s task workflow
 requires: "tests actually executed with results".
 
