@@ -66,8 +66,24 @@ export function useRuns(workspace: Workspace | null): RunsController {
   workspaceRef.current = workspaceId;
 
   useEffect(() => {
-    const unsubscribe = core.subscribeAll((event) => dispatch({ type: 'event', event }));
-    return unsubscribe;
+    // Two typed subscriptions rather than `subscribeAll`: `runsReducer` reads
+    // exactly these two names and returns its input state for every other one
+    // (`runs-reducer.ts:162-172`). Subscribing to everything therefore turned
+    // each unrelated domain event in the application — terminal output,
+    // watcher batches, agent timelines — into a dispatch and a render pass
+    // this feature had already decided to ignore. Narrowing here keeps that
+    // traffic out of React entirely, which is where ADR-032 decision 2 wants
+    // it, and it costs one extra unsubscribe.
+    const unsubscribeRun = core.subscribe('AgentRunChanged', (event) =>
+      dispatch({ type: 'event', event }),
+    );
+    const unsubscribeEvents = core.subscribe('AgentRunEventAppended', (event) =>
+      dispatch({ type: 'event', event }),
+    );
+    return () => {
+      unsubscribeRun();
+      unsubscribeEvents();
+    };
   }, []);
 
   useEffect(() => {
