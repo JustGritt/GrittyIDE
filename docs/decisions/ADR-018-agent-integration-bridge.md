@@ -279,3 +279,282 @@ cut after every record and scored against an oracle that ignores end markers
 progress but shown Done** fell from **56.4 h to 1.3 h**; ended-but-Working is
 0.2 h; Alive covers 4.7 h, mostly sessions that have not received a first
 prompt. Failed and rate-limited turns all wrote `turn_duration` (41 of 41).
+
+## Amendment (ADR-018A, 2026-09-14): the hook may refuse a write on ground another workstream holds
+
+- **Status:** Proposed
+- **Date:** 2026-09-14
+- **Decided by:** nobody yet. Drafted by an agent session;
+  `docs/plans/execution-board.md` reserves every ADR verdict for lane H, so this
+  stays `Proposed` until Alexis records one — as ADR-022, ADR-023, ADR-024,
+  ADR-025 and ADR-028 also do.
+- **Amends:** §5, §6 and §7 of this ADR; ADR-020's "The core never synthesises
+  one" and "Enforcement is still not this"; ADR-019 §7, whose own *Revisit when*
+  names this amendment.
+- **Unblocks:** T330 (write interception): `T330-R` the interception,
+  `T330-U` the denial surface (`execution-board.md:320`).
+
+**Why now.** ADR-019 §7 made ownership observed, not enforced, and said changing
+that is "an amendment to ADR-018 first and code second"
+(`ADR-019-workspace-ownership.md:120-127`; again at
+`T325-workspace-ownership.md:282-286`). T326 then built the after-the-fact half:
+a write inside another workstream's lease becomes an `OBSERVED` conflict
+(`T326-ownership-violations.md:229-234`). Its own report closes on the case for
+this one: "every `OBSERVED` row is a write enforcement would have stopped"
+(`:460-462`).
+
+Detection also has a gap enforcement does not. T326 reads `FileTouched`, which
+the transcript scanner derives from Claude Code's `file-history-delta` records
+(`crates/agents/src/transcript.rs:853-857`) — checkpointing. Checkpointing
+"does not track files modified by bash commands", and for subagents "Claude
+Code usually doesn't capture those edits in your session's checkpoints"
+(code.claude.com/docs/en/checkpointing, *Limitations*, read 2026-09-14). A
+`PreToolUse` hook, by contrast, fires for a subagent's tool calls too (below).
+
+The mechanism is already in daily use in this repository. `scripts/agent-lease.py
+guard` is a `PreToolUse` hook that denies a file-tool write inside a live
+foreign lease (`agent-lease.py:567-599`, wired at `.claude/settings.json:44-53`)
+and fails open. This amendment is that idea held to ADR-018's constraints.
+
+**What was checked** (Claude Code 2.1.270; documentation read 2026-09-14, not
+executed — the rows marked *unverified* are T330-R's to measure before any
+claim, rule 12):
+
+| Question | Answer | Source |
+|---|---|---|
+| When does `PreToolUse` run? | "before the permission prompt, for every tool except `EndConversation`" | docs/en/permissions, *Extend permissions with hooks* |
+| Can it refuse? | `permissionDecision: "deny"` blocks the call; Claude sees `permissionDecisionReason` | docs/en/hooks, *PreToolUse decision control* |
+| Does a hook `allow` widen permissions? | It can skip the prompt; deny and ask **rules** still apply | docs/en/permissions, same section |
+| Exit code | JSON is read on every exit code; exit 2 blocks regardless of JSON; exit 0 with invalid JSON is a non-blocking error and the call proceeds | docs/en/hooks, *Exit code* |
+| Timeout, or a hook that cannot start | "doesn't block the tool call … don't count on a stalled hook to act as a gate"; default `timeout` 600 s | docs/en/hooks |
+| Subagents | `PreToolUse` fires for a subagent's tool calls, with `agent_id` / `agent_type` | docs/en/hooks, *common input fields* |
+| MCP tools | seen, named `mcp__<server>__<tool>`; input shape is the server's | docs/en/hooks, *Match MCP tools* |
+| Several matching hooks | "run in parallel"; how their decisions combine is **not documented** | docs/en/hooks |
+| `bypassPermissions` | whether a `PreToolUse` deny still holds is **not documented** — *unverified* | — |
+| `-p` (owned runs) | whether `PreToolUse` fires is **unverified**; `PermissionRequest` does not — print mode shows no prompt to run before, observed while probing hooks for ADR-020 and not recorded in the repository until now | — |
+
+### Decision
+
+**The installed hook may refuse a file-tool write, and only that, when Gritty
+is running, enforcement was separately consented to, and a lease the core has
+already published says the target belongs to another workstream. It refuses on
+evidence the core wrote; it never refuses on its own inference, its own
+failure, or Gritty's absence. It never allows.**
+
+**1. One event, one verb, four tools.** Only `PreToolUse`, only for `Write`,
+`Edit`, `MultiEdit` and `NotebookEdit` — the tools whose target is a named path
+— and only `deny`. The hook never returns `allow` (the docs above: that can
+skip the agent's own prompt, which would *widen* what the agent may do) and
+never `ask`. Silence remains the answer to everything else, exactly as today.
+
+**2. What refuses a write.** A target is refused when it lies inside a lease
+that is held (not released, not `EXPIRED`), **not stale** (its workstream is
+not `DONE` or `ABANDONED`, ADR-019 §6), and held by a workstream that is not
+among the workstreams the session is linked to through T223's
+`(provider, session_id)` link. Three consequences are deliberate:
+
+- **An unlinked session is never refused.** A write nobody can attribute is not
+  a violation (`T325-workspace-ownership.md:278-281`, T326 §3), and refusing
+  every unlinked session would refuse the holder's own unattached terminal.
+- **A stale lease still refuses a claim and no longer refuses a write.** A
+  finished workstream holding ground is the "session died holding a lease"
+  failure this repository has hit repeatedly; its lease guard stops enforcing
+  after 8 h for the same reason (`AGENTS.md`, *Concurrent agent sessions*).
+- **Your own ground is never refused**, as `acquire` already allows
+  (`T325-workspace-ownership.md:73`).
+
+**3. The core decides; the hook applies what it published.** The core writes one
+file, the **fence**, to Gritty's app-data directory beside the verdicts
+(`crates/agents/src/verdict.rs:179-186`): the canonical workspace root, and per
+linked `(provider, session_id)` the targets that session may not write, each
+with the holding workstream's name and lease id and a bounded refusal sentence
+already composed. It is rewritten atomically whenever `OwnershipChanged` fires
+(the whole map, per transaction — `T325-workspace-ownership.md:84-85`) or a link
+changes, bounded in bytes and entries like every other file here, and removed
+when enforcement is turned off or no workspace is open.
+
+The hook reads the fence, relativises the tool's absolute target against its
+root with `WorkspacePath`'s rules (ADR-010: a `..`, a backslash or a path
+outside the root is *not* matched, never guessed), and tests it with the
+**same** segment matcher ownership uses (`OwnershipTarget::covers`,
+`crates/gritty-core/src/ownership/target.rs:91`). That matcher moves into a
+leaf crate both link, rather than being copied: one matcher is ADR-019 §4's
+point, and a second one would drift toward "not covered".
+
+**4. §5, restated rather than dropped.** Every link fails open, and the exit
+code is `0` on every path, as `crates/agent-hook/src/main.rs:22-36` already
+guarantees:
+
+1. Enforcement not consented (item 5 below) ⇒ today's behaviour, byte for byte.
+2. Liveness marker missing or stale (`verdict.rs:240-257`, 4 s) ⇒ silence.
+   **When Gritty is not running, nothing is enforced**: nobody could see why a
+   write was refused or override it, and a wall with no door is worse than the
+   observed ownership it replaces. Coordination plan §4.4 asks enforcement for
+   "explicit behavior"; this is it.
+3. Fence missing, unreadable, over its bound, malformed, of an unknown version,
+   or naming a different root than the target lies in ⇒ silence.
+4. Target unresolvable, outside the root, or not matched ⇒ silence.
+5. A match ⇒ `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":…}}`
+   on stdout, exit `0`. **Not exit 2**, which blocks regardless of what was
+   printed: a bug in the refusal path must fail toward the write, not away
+   from it.
+
+The hook does not wait. There is no round trip to Gritty per write; the fence
+is already on disk. The installed `PreToolUse` entry, which today carries no
+`timeout` and so inherits 600 s (`crates/agents/src/integration.rs:688-695`),
+gains a short explicit one, so a pathological stall costs seconds rather than
+ten minutes — and per the docs a timeout lets the call through.
+
+**5. Refusal is its own consent.** §1 covers observation. Enforcement is a
+second, explicit action per provider, never implied by installing the hook,
+never on by default. It is visible where §3 wants it: a flag on the installed
+entry's command line, shown in the diff before it is applied, removed by
+uninstall, and turning it off leaves observation installed and working.
+
+**6. The refusal reaches the agent, the user, and a door.**
+
+- **The agent** reads the reason, composed by the core, bounded, and made only
+  of the target, the holding workstream's name and what to do: *work outside
+  it, and do not write it by another route; ask the user to release or
+  override the lease in Gritty.* A workstream name is user-authored text
+  entering a model's context, so it is clipped and stripped of control
+  characters like every other string here (hard rule 13); a lease's note never
+  goes in.
+- **The user** sees it because the hook records the refusal — target, lease,
+  time — in the state file it already writes first
+  (`crates/agent-hook/src/lib.rs:233-244`), and the core records it as an
+  ownership conflict in a state of its own, distinct from `OBSERVED`: a write
+  that did **not** happen is a different fact from one that did, and the
+  queue must not word them alike (T326 §12). The state's name, and the minor
+  protocol bump it costs, are T330-R's.
+- **The door** is ADR-019 §8, unchanged: release, or an attributed
+  `OVERRIDE`. The fence is rewritten, and the agent's next attempt succeeds.
+  There is no "allow this once" and no answer in the terminal — an override
+  that happens outside Gritty is one nobody attributed.
+
+**7. One authority, not two.** The ownership refusal and the permission verdict
+answer different questions and run in a fixed order. `PreToolUse` fires before
+the permission prompt, so a refused write never reaches ADR-020's
+`PermissionRequest` or T310-ANSWER's `can_use_tool` — **the user is never asked
+to approve a write ownership will refuse.** Verdicts answer only what survives.
+Ownership never answers either of those, and they never override a refusal.
+
+Owned runs get the same fence and the same rule. `can_use_tool` cannot be the
+enforcement point: it is asked only for calls the CLI gates, and "an `echo` in
+the working directory ran with no ask at all" (`T310-ANSWER-host-permissions.md:30-32`).
+How the hook is attached to a run — the user's installed entry if `PreToolUse`
+fires under `-p`, or a `--settings` Gritty passes at launch
+(`crates/agent-claude/src/launch.rs:122-136` fixes the line today) — is
+T330-R's, after measuring. Until then an owned run's ground is observed.
+
+**8. ENFORCED and OBSERVED survive as a per-session fact, not a mode.** A lease
+is *enforced against a session* only when all of these hold: enforcement is
+consented for its provider, Gritty's entry is installed and recognised, Gritty
+is running, the session is linked, and the write goes through one of §1's four
+tools. Anything else is observed. The UI says which, per session and next to
+the lease; it never says a file is "protected" or "locked", and
+`docs/architecture/ownership.md:17-26`'s line moves only when T330 ships, not
+when this is accepted.
+
+**§6, amended.** The hook still links nothing of `gritty-core`, knows no
+`AgentSession`, no workstream and no protocol, and decides no meaning. It gains
+a second Gritty-written file to read and a path matcher to run over it. What a
+refusal *means* — who holds the ground, why, what the user may do — is written
+by the core into the fence, the same split §6 draws for phases.
+
+**§7, amended.** Hook-sourced *state* is still evidence, never authority. A
+refusal travels the other way and is authority, and ADR-020's line holds for it
+in a narrower form: the core does not synthesise a decision a person did not
+take. A refusal is the mechanical application of two decisions a person did
+take — claiming the ground, and turning enforcement on — to a path the agent
+named. It is only ever a refusal.
+
+### What is enforced, and what is not
+
+| Write | Seen by `PreToolUse` | Refused | Detected afterwards (T326) |
+|---|---|---|---|
+| `Write` / `Edit` / `MultiEdit` / `NotebookEdit`, main conversation | yes | **yes**, under §8's conditions | yes |
+| The same, inside a subagent | yes (docs) | **yes** | usually not (checkpointing) |
+| A shell command that writes (`>`, `sed -i`, `mv`, a script, a formatter, `git checkout`) | as command text only | **no** | **no** |
+| An MCP tool that writes | yes, in the server's own shape | **no** | no |
+| A process the agent started earlier, git hooks, another editor | no | no | no |
+| An unlinked session; Codex before T222; any agent without the hook | — | no | linked sessions only |
+| Gritty not running | — | no | when it next reads the transcript |
+| A second spelling on a case-insensitive volume, a symlink into owned ground | yes | no (ADR-019 §5, inherited) | no |
+| `bypassPermissions` mode | — | *unverified* | — |
+
+**The shell is the hole, and it is the likeliest route around a refusal**: a
+model told it may not `Edit` a file can `cat >` it. The reason sentence says not
+to; nothing makes it true. That is why §8 names the tools a lease is enforced
+through rather than calling the lease enforced.
+
+### Consequences
+
+- **§5 narrows a second time.** After ADR-020: "the hook never blocks unless
+  Gritty is alive and the agent was about to block on a human anyway". After
+  this: it also refuses, without waiting, a write to ground the core published
+  as another workstream's, while Gritty is alive. Every failure is still
+  silence.
+- **Every tool call pays a file read and a match.** The entry already runs on
+  every `PreToolUse` with matcher `*` (`integration.rs:58-69`, `:699`), so the
+  process launch is not new; the fence read is. T330-R measures the added cost
+  before claiming "no slower".
+- **A fence can lag the registry by one write.** A release not yet published
+  refuses a write that is now allowed, and the agent retries; a claim not yet
+  published lets one through, and T326 records it. The first is the cheaper
+  error, which is ADR-019 §4's bias.
+- **New files, one new wire value.** The fence (app-data, private, atomic,
+  bounded); a refusal field in the hook state file (`HOOK_STATE_VERSION` moves);
+  a conflict state. Integration status gains "enforcing" beside "installed".
+- **The installer writes one more flag and one more `timeout`,** under §§2–4
+  unchanged: appended, identified, shown, reversible.
+- **`crates/agents/src/hook.rs` and `crates/agent-hook` stop being
+  opinion-free by construction.** The opinion is still the core's and still on
+  disk where a test can read it; the binary's new code is a relativise, a
+  match and a print.
+
+### Alternatives rejected
+
+**Ask Gritty per write and wait for the answer.** A round trip on every file
+tool call, which is exactly what ADR-020 declined when it chose
+`PermissionRequest` over `PreToolUse`. The fence answers from disk in the
+hook's own time.
+
+**Return `ask` instead of `deny`.** It puts the override in the terminal, where
+nobody attributes it (ADR-019 §8), and in `dontAsk` mode an ask becomes a
+denial anyway (docs/en/permissions).
+
+**Exit 2.** It blocks regardless of stdout, so a crash in the wrong place
+becomes a refusal. Silence must stay the failure.
+
+**Refuse shell writes by pattern.** `agent-lease.py` does
+(`command_writes`, `:498-503`, and a literal-prefix match, `:573-590`), and
+that is right for a developer convention whose refusal says "use a read-only
+form". A product refusing `grep src/auth` because a regex saw a `>` trains
+users to switch enforcement off, and still misses every script.
+
+**Enforce when Gritty is not running.** Leases persist, so it is possible. It
+refuses with no explanation anyone can open and no override anyone can take.
+
+**Refuse writes from unlinked sessions.** It turns an unattached terminal,
+including the holder's own, into a refused one.
+
+**An OS-level lock or sandbox.** ADR-019 §1's reasons stand, and Claude Code's
+own sandbox is the user's configuration to set, not Gritty's to write.
+
+### Not decided here
+
+Shell and MCP writes; Codex (T222 brings its event names, and its reply shape
+belongs in the adapter); a one-shot exemption; per-lease enforcement as an
+`OwnershipMode`; read leases; how a run attaches the hook (§7, T330-R); what
+happens across worktrees, where T400 makes two workstreams unable to collide on
+disk at all.
+
+### Revisit when
+
+A provider offers a pre-write hook that covers shell writes, or a sandbox API
+Gritty may configure per run; T330-R's measurements show `PreToolUse` deny does
+not hold under `bypassPermissions`, or does not fire under `-p`; the added cost
+per tool call is measurable; false refusals turn out to be common, at which
+point the fix is a better matcher, not a looser rule (T325's own remaining risk);
+or T400 lands and the interesting conflict moves to merge time.
