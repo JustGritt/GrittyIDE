@@ -138,12 +138,16 @@ fn repository_state(repo: &gix::Repository) -> RepositoryState {
         return RepositoryState::Bare;
     }
     match repo.state() {
-        None => RepositoryState::Clean,
+        None => pending_sequence(repo.path()).unwrap_or(RepositoryState::Clean),
         Some(state) => match state {
             gix::state::InProgress::Merge => RepositoryState::Merging,
-            gix::state::InProgress::Rebase | gix::state::InProgress::RebaseInteractive => {
-                RepositoryState::Rebasing
-            }
+            // `ApplyMailboxRebase` is a `.git/rebase-apply` with neither an
+            // `applying` nor a `rebasing` marker. Git's own reader
+            // (`wt_status_check_rebase`) calls that a rebase, since only
+            // `applying` makes it `git am`; so does this.
+            gix::state::InProgress::Rebase
+            | gix::state::InProgress::RebaseInteractive
+            | gix::state::InProgress::ApplyMailboxRebase => RepositoryState::Rebasing,
             gix::state::InProgress::CherryPick | gix::state::InProgress::CherryPickSequence => {
                 RepositoryState::CherryPicking
             }
@@ -151,10 +155,36 @@ fn repository_state(repo: &gix::Repository) -> RepositoryState {
                 RepositoryState::Reverting
             }
             gix::state::InProgress::Bisect => RepositoryState::Bisecting,
-            gix::state::InProgress::ApplyMailbox | gix::state::InProgress::ApplyMailboxRebase => {
-                RepositoryState::ApplyingMailbox
-            }
+            gix::state::InProgress::ApplyMailbox => RepositoryState::ApplyingMailbox,
         },
+    }
+}
+
+/// Bytes of `.git/sequencer/todo` read to find its first command.
+const TODO_HEAD_BYTES: u64 = 4096;
+
+/// A cherry-pick or revert sequence that still has commits to apply after the
+/// one it stopped on was concluded with a plain `git commit`.
+///
+/// That commit removes `CHERRY_PICK_HEAD`/`REVERT_HEAD`, which is all `gix`'s
+/// `state()` looks for, and leaves `.git/sequencer/todo` behind — so `gix`
+/// reports nothing in progress while `git status` says "Cherry-pick currently
+/// in progress" and the user still has to `--continue` or `--quit`. Git decides
+/// from the todo list's first command (`sequencer_get_last_command`), and so
+/// does this. Only the head of the file is read: it is repository content
+/// (`AGENTS.md` rule 13), and the first command is all the answer needs.
+fn pending_sequence(git_dir: &std::path::Path) -> Option<RepositoryState> {
+    use std::io::Read;
+
+    let file = std::fs::File::open(git_dir.join("sequencer").join("todo")).ok()?;
+    let mut head = Vec::new();
+    file.take(TODO_HEAD_BYTES).read_to_end(&mut head).ok()?;
+    let text = head.trim_ascii_start();
+    let command_end = text.iter().position(|b| *b == b' ' || *b == b'\t')?;
+    match &text[..command_end] {
+        b"pick" | b"p" => Some(RepositoryState::CherryPicking),
+        b"revert" => Some(RepositoryState::Reverting),
+        _ => None,
     }
 }
 
@@ -578,6 +608,149 @@ mod tests {
         );
         // Every other fact about the repository still reports.
         assert_eq!(status.branch.as_deref(), Some("main"));
+    }
+
+    /// Covers `gix`'s `RebaseInteractive`: the default merge backend marks even
+    /// a plain `git rebase` interactive.
+    #[test]
+    fn a_rebase_stopped_on_a_conflict_is_rebasing() {
+        let repo = fixtures::rebase_conflict();
+        let status = read(&repo);
+        assert_eq!(status.state, RepositoryState::Rebasing);
+        assert!(entry(&status, "conflict.txt").conflicted);
+        // A rebase runs on a detached HEAD.
+        assert!(status.detached);
+    }
+
+    /// Covers `gix`'s `Rebase`, which current Git only produces through the
+    /// apply backend's `rebase-apply/rebasing`.
+    #[test]
+    fn a_rebase_on_the_apply_backend_is_rebasing_and_not_a_mailbox() {
+        let repo = fixtures::rebase_apply_conflict();
+        let status = read(&repo);
+        assert_eq!(status.state, RepositoryState::Rebasing);
+        assert!(entry(&status, "conflict.txt").conflicted);
+    }
+
+    /// Covers `gix`'s `ApplyMailboxRebase`: a `rebase-apply` with neither
+    /// marker. No current Git leaves one behind, so the marker is removed from
+    /// a real apply-backend rebase; Git's own status reads what remains as a
+    /// rebase, and this used to report it as `git am`.
+    #[test]
+    fn a_rebase_apply_directory_without_markers_is_rebasing() {
+        let repo = fixtures::rebase_apply_conflict();
+        std::fs::remove_file(repo.path().join(".git/rebase-apply/rebasing"))
+            .expect("remove marker");
+        assert_eq!(read(&repo).state, RepositoryState::Rebasing);
+    }
+
+    #[test]
+    fn an_interactive_rebase_stopped_on_edit_is_rebasing_with_a_clean_worktree() {
+        let repo = fixtures::interactive_rebase_edit();
+        let status = read(&repo);
+        assert_eq!(status.state, RepositoryState::Rebasing);
+        assert!(status.entries.is_empty(), "{:?}", status.entries);
+    }
+
+    /// Covers `gix`'s `CherryPick`: one commit, no sequencer.
+    #[test]
+    fn a_cherry_pick_stopped_on_a_conflict_is_cherry_picking() {
+        let repo = fixtures::cherry_pick_conflict();
+        let status = read(&repo);
+        assert_eq!(status.state, RepositoryState::CherryPicking);
+        assert!(entry(&status, "conflict.txt").conflicted);
+        assert_eq!(status.branch.as_deref(), Some("main"));
+    }
+
+    /// Covers `gix`'s `CherryPickSequence`.
+    #[test]
+    fn a_cherry_pick_sequence_stopped_on_a_conflict_is_cherry_picking() {
+        let repo = fixtures::cherry_pick_sequence_conflict();
+        let status = read(&repo);
+        assert_eq!(status.state, RepositoryState::CherryPicking);
+        assert!(entry(&status, "conflict.txt").conflicted);
+    }
+
+    /// `gix` reports nothing in progress here; `git status` says "Cherry-pick
+    /// currently in progress", and the second pick is still waiting.
+    #[test]
+    fn a_cherry_pick_sequence_committed_mid_way_is_still_cherry_picking() {
+        let repo = fixtures::sequence_committed_mid_way(fixtures::cherry_pick_sequence_conflict());
+        let status = read(&repo);
+        assert_eq!(status.state, RepositoryState::CherryPicking);
+        assert!(status.entries.is_empty(), "{:?}", status.entries);
+    }
+
+    /// Covers `gix`'s `Revert`: one commit, no sequencer.
+    #[test]
+    fn a_revert_stopped_on_a_conflict_is_reverting() {
+        let repo = fixtures::revert_conflict();
+        let status = read(&repo);
+        assert_eq!(status.state, RepositoryState::Reverting);
+        assert!(entry(&status, "conflict.txt").conflicted);
+    }
+
+    /// Covers `gix`'s `RevertSequence`.
+    #[test]
+    fn a_revert_sequence_stopped_on_a_conflict_is_reverting() {
+        let repo = fixtures::revert_sequence_conflict();
+        let status = read(&repo);
+        assert_eq!(status.state, RepositoryState::Reverting);
+        assert!(entry(&status, "conflict.txt").conflicted);
+    }
+
+    /// The revert twin of the committed cherry-pick sequence: `git status`
+    /// says "Revert currently in progress".
+    #[test]
+    fn a_revert_sequence_committed_mid_way_is_still_reverting() {
+        let repo = fixtures::sequence_committed_mid_way(fixtures::revert_sequence_conflict());
+        assert_eq!(read(&repo).state, RepositoryState::Reverting);
+    }
+
+    #[test]
+    fn a_bisect_in_progress_is_bisecting_on_a_detached_midpoint() {
+        let repo = fixtures::bisecting();
+        let status = read(&repo);
+        assert_eq!(status.state, RepositoryState::Bisecting);
+        assert!(status.detached);
+        assert_eq!(status.branch, None);
+    }
+
+    /// Covers `gix`'s `ApplyMailbox`: `rebase-apply/applying`.
+    #[test]
+    fn a_mailbox_stopped_on_a_conflict_is_applying_a_mailbox() {
+        let repo = fixtures::am_conflict();
+        let status = read(&repo);
+        assert_eq!(status.state, RepositoryState::ApplyingMailbox);
+        assert!(entry(&status, "conflict.txt").conflicted);
+    }
+
+    #[test]
+    fn a_sequencer_todo_names_the_operation_by_its_first_command_only() {
+        let dir = TestRepo::plain_directory();
+        let todo = |contents: &str| {
+            dir.write("sequencer/todo", contents);
+            pending_sequence(dir.path())
+        };
+        assert_eq!(
+            todo("pick 983c0d7 side\n"),
+            Some(RepositoryState::CherryPicking)
+        );
+        assert_eq!(
+            todo("p 983c0d7 side\n"),
+            Some(RepositoryState::CherryPicking)
+        );
+        assert_eq!(
+            todo("\n  revert 4e18036 main\npick 1 x\n"),
+            Some(RepositoryState::Reverting)
+        );
+        // Anything else is not a sequence `git status` reports.
+        assert_eq!(todo("exec make\npick 1 x\n"), None);
+        assert_eq!(todo("pickaxe 1 x\n"), None);
+        assert_eq!(todo("pick"), None);
+        assert_eq!(todo(""), None);
+        std::fs::remove_file(dir.path().join("sequencer/todo")).expect("remove todo");
+        assert_eq!(pending_sequence(dir.path()), None);
     }
 
     #[test]

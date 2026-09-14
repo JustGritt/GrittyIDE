@@ -241,6 +241,174 @@ pub fn merge_conflict() -> TestRepo {
     repo
 }
 
+/// Two branches that change `conflict.txt` differently from a common base,
+/// checked out on `main`. `side` carries two commits: the first conflicts with
+/// `main`, the second adds `other.txt` and conflicts with nothing, so a
+/// sequence that stops on the first still has the second to apply.
+fn diverged() -> TestRepo {
+    let repo = TestRepo::init();
+    repo.write("conflict.txt", "base\n");
+    repo.commit_all("base");
+    repo.git(&["checkout", "--quiet", "-b", "side"]);
+    repo.write("conflict.txt", "side\n");
+    repo.commit_all("side: conflicts");
+    repo.write("other.txt", "other\n");
+    repo.commit_all("side: clean");
+    repo.git(&["checkout", "--quiet", "main"]);
+    repo.write("conflict.txt", "main\n");
+    repo.commit_all("main");
+    repo
+}
+
+/// Three commits on `main` that each rewrite `conflict.txt`, then one that
+/// adds `other.txt`. Reverting the first rewrite conflicts with the later
+/// ones; reverting the last commit conflicts with nothing.
+fn rewritten() -> TestRepo {
+    let repo = TestRepo::init();
+    repo.write("conflict.txt", "base\n");
+    repo.commit_all("base");
+    repo.write("conflict.txt", "one\n");
+    repo.commit_all("one");
+    repo.write("conflict.txt", "two\n");
+    repo.commit_all("two");
+    repo.write("other.txt", "other\n");
+    repo.commit_all("three");
+    repo
+}
+
+/// Assert that a command left the marker Git keeps for an operation in
+/// progress, so a fixture that failed to reach its state fails here rather than
+/// as a misleading status assertion.
+fn assert_git_dir_has(repo: &TestRepo, marker: &str) {
+    assert!(
+        repo.path().join(".git").join(marker).exists(),
+        "fixture did not reach its state: .git/{marker} is missing"
+    );
+}
+
+/// `git rebase main` from `side`, stopped on a conflict in `conflict.txt`.
+///
+/// Git's default merge backend writes `.git/rebase-merge/interactive` even for
+/// a rebase nobody asked to be interactive, so `gix` reports this as
+/// `RebaseInteractive`.
+pub fn rebase_conflict() -> TestRepo {
+    let repo = diverged();
+    repo.git(&["checkout", "--quiet", "side"]);
+    repo.git_allow_failure(&["rebase", "main"])
+        .expect_err("the rebase is supposed to stop on a conflict");
+    assert_git_dir_has(&repo, "rebase-merge");
+    repo
+}
+
+/// `git rebase --apply main` from `side`, stopped on a conflict: the older
+/// apply backend, which keeps its state in `.git/rebase-apply` with a
+/// `rebasing` marker, where `git am` would write `applying`.
+pub fn rebase_apply_conflict() -> TestRepo {
+    let repo = diverged();
+    repo.git(&["checkout", "--quiet", "side"]);
+    repo.git_allow_failure(&["rebase", "--apply", "main"])
+        .expect_err("the rebase is supposed to stop on a conflict");
+    assert_git_dir_has(&repo, "rebase-apply/rebasing");
+    repo
+}
+
+/// An interactive rebase stopped on `edit` with no conflict: the state where
+/// the worktree is clean and the operation is still in progress.
+pub fn interactive_rebase_edit() -> TestRepo {
+    let repo = diverged();
+    // The sequence editor rewrites the todo list's `pick` into `edit`. It runs
+    // through the shell, like the filter script `hostile_filters` installs.
+    repo.git(&[
+        "-c",
+        "sequence.editor=sed -i.bak -e s/^pick/edit/",
+        "rebase",
+        "--interactive",
+        "HEAD~1",
+    ]);
+    assert_git_dir_has(&repo, "rebase-merge/interactive");
+    repo
+}
+
+/// `git cherry-pick` of one commit, stopped on a conflict. A single pick keeps
+/// no sequencer state, so `gix` reports `CherryPick`.
+pub fn cherry_pick_conflict() -> TestRepo {
+    let repo = diverged();
+    repo.git_allow_failure(&["cherry-pick", "side~1"])
+        .expect_err("the cherry-pick is supposed to conflict");
+    assert_git_dir_has(&repo, "CHERRY_PICK_HEAD");
+    repo
+}
+
+/// `git cherry-pick` of two commits, stopped on a conflict in the first, so
+/// `.git/sequencer/todo` still names the second: `CherryPickSequence`.
+pub fn cherry_pick_sequence_conflict() -> TestRepo {
+    let repo = diverged();
+    repo.git_allow_failure(&["cherry-pick", "side~1", "side"])
+        .expect_err("the cherry-pick is supposed to conflict");
+    assert_git_dir_has(&repo, "CHERRY_PICK_HEAD");
+    assert_git_dir_has(&repo, "sequencer/todo");
+    repo
+}
+
+/// `git revert` of one commit, stopped on a conflict.
+pub fn revert_conflict() -> TestRepo {
+    let repo = rewritten();
+    repo.git_allow_failure(&["revert", "--no-edit", "HEAD~2"])
+        .expect_err("the revert is supposed to conflict");
+    assert_git_dir_has(&repo, "REVERT_HEAD");
+    repo
+}
+
+/// `git revert` of two commits, stopped on a conflict in the first:
+/// `RevertSequence`.
+pub fn revert_sequence_conflict() -> TestRepo {
+    let repo = rewritten();
+    repo.git_allow_failure(&["revert", "--no-edit", "HEAD~2", "HEAD"])
+        .expect_err("the revert is supposed to conflict");
+    assert_git_dir_has(&repo, "REVERT_HEAD");
+    assert_git_dir_has(&repo, "sequencer/todo");
+    repo
+}
+
+/// A stopped sequence whose conflicted commit the user concluded with a plain
+/// `git commit` instead of `--continue`. The commit removes
+/// `CHERRY_PICK_HEAD`/`REVERT_HEAD` and leaves `.git/sequencer/todo`, and
+/// `git status` still says the operation is in progress.
+pub fn sequence_committed_mid_way(sequence: TestRepo) -> TestRepo {
+    sequence.write("conflict.txt", "resolved\n");
+    sequence.git(&["add", "conflict.txt"]);
+    sequence.commit("resolved by hand");
+    assert!(
+        !sequence.path().join(".git/CHERRY_PICK_HEAD").exists()
+            && !sequence.path().join(".git/REVERT_HEAD").exists(),
+        "the commit was supposed to conclude the stopped commit"
+    );
+    assert_git_dir_has(&sequence, "sequencer/todo");
+    sequence
+}
+
+/// `git bisect start HEAD HEAD~2`, which checks out the midpoint detached.
+pub fn bisecting() -> TestRepo {
+    let repo = rewritten();
+    repo.git(&["bisect", "start", "HEAD", "HEAD~2"]);
+    assert_git_dir_has(&repo, "BISECT_LOG");
+    repo
+}
+
+/// `git am --3way` of a patch that conflicts with `main`, stopped with the
+/// conflict in the index.
+pub fn am_conflict() -> TestRepo {
+    let repo = diverged();
+    let patch = repo.git(&["format-patch", "-1", "side~1", "--stdout"]);
+    // Inside `.git`, so the patch file is not itself an untracked entry.
+    let patch_path = repo.path().join(".git").join("side.patch");
+    std::fs::write(&patch_path, patch).expect("write patch");
+    repo.git_allow_failure(&["am", "--3way", patch_path.to_str().expect("utf-8 path")])
+        .expect_err("the mailbox is supposed to conflict");
+    assert_git_dir_has(&repo, "rebase-apply/applying");
+    repo
+}
+
 /// A repository with `n` tracked files, all modified in the worktree.
 ///
 /// Used to show that cancellation does not depend on repository size.
