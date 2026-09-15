@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { ChangesIcon, FilesIcon } from './sidebar-icons';
+import { ChangesIcon, FilesIcon, SearchIcon } from './sidebar-icons';
 
 /**
  * The sidebar's section tabs (T100-U), which artboard 9a drew and T233-S could
@@ -14,14 +14,15 @@ import { ChangesIcon, FilesIcon } from './sidebar-icons';
  * and Arrow/Home/End moving between them.
  *
  * It lives beside the Changes tab rather than in a shared `components/` module
- * because there are exactly two tabs and one caller. A third section is what
- * would justify hoisting it, and moving it then is a rename.
+ * because it has one caller. T080-U added the third section, **Search**, and
+ * that did not change: three tabs in one tablist is still one caller, and
+ * hoisting waits for a second tablist.
  *
  * Since SIDEBAR-ICONS each tab draws an icon rather than its label, to give the
  * header back its width. The label is still the tab's accessible name and its
  * tooltip, so a screen reader and a hover both say what the glyph means.
  */
-export type SidebarTab = 'files' | 'changes';
+export type SidebarTab = 'files' | 'changes' | 'search';
 
 export const SIDEBAR_TABS: readonly {
   readonly id: SidebarTab;
@@ -30,6 +31,7 @@ export const SIDEBAR_TABS: readonly {
 }[] = [
   { id: 'files', label: 'Files', Icon: FilesIcon },
   { id: 'changes', label: 'Changes', Icon: ChangesIcon },
+  { id: 'search', label: 'Search', Icon: SearchIcon },
 ];
 
 export function sidebarTabId(tab: SidebarTab): string {

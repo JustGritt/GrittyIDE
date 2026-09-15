@@ -31,6 +31,16 @@ export function ChangesIcon() {
   );
 }
 
+/** A magnifier — find in files (T080-U). */
+export function SearchIcon() {
+  return (
+    <Glyph>
+      <circle cx="6.5" cy="6.5" r="4" />
+      <path d="M9.5 9.5 14 14" />
+    </Glyph>
+  );
+}
+
 /** A folder, for opening one. */
 export function FolderIcon() {
   return (

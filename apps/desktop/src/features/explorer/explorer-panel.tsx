@@ -19,11 +19,11 @@ const CLOSED_REASONS: Record<WorkspaceClosedReason, string> = {
  * listings that became operations shown with a cancel button. Clicking a file
  * hands it to `onOpenFile` (T030 documents).
  *
- * Since T100-U it is also the frame the sidebar's two sections share: the
- * header is a tablist, and the tree is one of the two panels it switches
- * between. The other one is passed in as `changes` rather than imported here,
- * so the git feature keeps its own directory and this file keeps owning only
- * the frame and the tree.
+ * Since T100-U it is also the frame the sidebar's sections share: the header
+ * is a tablist, and the tree is one of the panels it switches between. The
+ * others are passed in — `changes`, and since T080-U `search` — rather than
+ * imported here, so each feature keeps its own directory and this file keeps
+ * owning only the frame and the tree.
  */
 export function ExplorerPanel({
   explorer,
@@ -31,6 +31,7 @@ export function ExplorerPanel({
   tab,
   onTabChange,
   changes,
+  search,
 }: {
   /**
    * Owned by the shell (T049), not created here: the launcher opens folders
@@ -48,6 +49,11 @@ export function ExplorerPanel({
    * reads the repository while the tree is showing.
    */
   changes?: ReactNode;
+  /**
+   * The Search panel (T080-U), mounted the same way. Its controller lives in
+   * the shell, so unmounting it with its tab keeps the query and the results.
+   */
+  search?: ReactNode;
 }) {
   const { state } = explorer;
   const [pathInput, setPathInput] = useState('');
@@ -67,7 +73,7 @@ export function ExplorerPanel({
       : undefined;
 
   return (
-    <section className="explorer" aria-label="Files and changes">
+    <section className="explorer" aria-label="Files, changes and search">
       {/* A 32px header (T048): the section tabs, the one action you reach for,
           and the rest behind the same disclosure the editor and terminal
           settings use.
@@ -191,10 +197,10 @@ export function ExplorerPanel({
         <div
           className="explorer__panel"
           role="tabpanel"
-          id={sidebarPanelId('changes')}
-          aria-labelledby={sidebarTabId('changes')}
+          id={sidebarPanelId(tab)}
+          aria-labelledby={sidebarTabId(tab)}
         >
-          {changes}
+          {tab === 'changes' ? changes : search}
         </div>
       )}
     </section>

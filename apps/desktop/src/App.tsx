@@ -33,6 +33,8 @@ import { viewModesReducer } from './features/markdown/view-modes';
 import { OperationsPanel } from './features/operations/operations-panel';
 import { RunsPanel } from './features/runs/runs-panel';
 import { useRuns } from './features/runs/use-runs';
+import { SearchPanel } from './features/search/search-panel';
+import { useSearch } from './features/search/use-search';
 import { DEFAULT_LAYOUT, type Layout, PANE_LIMITS } from './features/session/persisted-layout';
 import { SessionNotices } from './features/session/session-notices';
 import { useSession } from './features/session/use-session';
@@ -104,6 +106,9 @@ export function App() {
       setLayout((current) => ({ ...current, explorer: { showHidden } })),
   });
   const workspace = explorer.state.workspace;
+  // Up here rather than in the panel: the sidebar mounts only the selected
+  // section, and a search must outlive a look at the tree (T080-U).
+  const search = useSearch(workspace?.id ?? null);
   // Files and folders dropped onto the window (classified by the core, opened
   // through the ordinary commands). Declared after the explorer because that
   // is where an opened workspace has to land: the drop reports what it opened
@@ -492,6 +497,24 @@ export function App() {
               // while its tab is selected, which is what keeps `git.status`
               // from being polled behind the tree.
               changes={<ChangesPanel workspaceId={explorer.state.workspace?.id ?? null} />}
+              search={
+                <SearchPanel
+                  search={search}
+                  // A result opens like a file in the tree — a single click is
+                  // a preview — and the cursor lands on the match once the tab
+                  // is showing; `revealPosition` waits for that itself.
+                  onOpen={(path, target, preview) => {
+                    void documents.openFile(workspace.id, path, { preview }).then((opened) => {
+                      if (opened.ok && target !== null) {
+                        editor.revealPosition(opened.documentId, {
+                          lineNumber: target.line,
+                          column: target.column,
+                        });
+                      }
+                    });
+                  }}
+                />
+              }
             />
             {import.meta.env.DEV && <OperationsPanel />}
             {import.meta.env.DEV && (

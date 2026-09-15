@@ -5947,3 +5947,278 @@ textarea:focus-visible {
   color: var(--fg-dim);
   font-size: var(--text-meta);
 }
+
+/* ---------------------------------------------------------------------------
+   Search (T080-U): the sidebar's third section. One field with its toggles
+   inside it, the way an editor's find widget draws them, then the run's words,
+   then the results grouped by file. The rows borrow the Changes list's metrics
+   (`--row-h`, mono at `--text-code`) so the three sections read as one sidebar.
+   --------------------------------------------------------------------------- */
+
+.search {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.search__form {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  padding: var(--gap-sm) var(--gap-md);
+  border-bottom: 1px solid var(--border);
+}
+
+/* The filled surface is the row, not the input, so the toggles sit inside the
+   field and the focus border goes round all of it. */
+.search__field {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 2px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--surface-control);
+}
+
+.search__field:focus-within {
+  border-color: var(--accent);
+}
+
+.search__field:has(.search__input[aria-invalid="true"]) {
+  border-color: var(--error);
+}
+
+.search__input,
+.search__input:focus-visible {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  font-family: var(--font-mono);
+}
+
+.search__toggles {
+  flex: none;
+  display: flex;
+  gap: 1px;
+}
+
+.search__toggle {
+  min-width: 22px;
+  padding: 1px 4px;
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  line-height: 1.4;
+}
+
+/* Pressed is a colour and a wash, not a colour alone: `aria-pressed` carries
+   it for a screen reader, and the wash carries it for a glance. */
+.search__toggle--on,
+.search__toggle--on:hover:not(:disabled) {
+  background: var(--accent-wash);
+  color: var(--accent-text);
+}
+
+.search__scope {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  font-size: var(--text-meta);
+  color: var(--fg-muted);
+}
+
+.search__scope select {
+  padding: 1px 4px;
+  font-size: var(--text-meta);
+}
+
+.search__invalid {
+  margin: 0;
+  color: var(--error-text);
+  font-size: var(--text-meta);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.search__status {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  min-height: var(--row-h);
+  padding: 2px var(--gap-md);
+  color: var(--fg-muted);
+  font-size: var(--text-meta);
+}
+
+.search__headline {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.search__status button {
+  padding: 2px 8px;
+  font-size: var(--text-meta);
+}
+
+.search__note {
+  flex: none;
+  margin: 0;
+  padding: 2px var(--gap-md) var(--gap-xs);
+  color: var(--fg-muted);
+  font-size: var(--text-meta);
+}
+
+.search__note--warn {
+  color: var(--warn-text);
+}
+
+.search__empty {
+  margin: 0;
+  padding: var(--gap-sm) var(--gap-md);
+  color: var(--fg-muted);
+  font-size: var(--text-control);
+}
+
+.search__results {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: var(--gap);
+}
+
+.search__files,
+.search__matches {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.search__file-row,
+.search__match {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  width: 100%;
+  min-width: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  line-height: var(--row-h);
+  padding: 0 var(--gap-md);
+  white-space: nowrap;
+}
+
+.search__file-row {
+  font-size: var(--text-control);
+}
+
+.search__chevron {
+  flex: none;
+  display: flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-faint);
+}
+
+.search__chevron .glyph {
+  transition: transform 120ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.search__file-row--open .search__chevron .glyph {
+  transform: rotate(90deg);
+}
+
+.search__name {
+  flex: none;
+  color: var(--fg);
+}
+
+/* Context, not identity: it recedes and is what gets cut, from the left, as
+   `.git__dir` does. */
+.search__dir {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+  color: var(--fg-faint);
+  font-size: var(--text-meta);
+}
+
+.search__count {
+  margin-left: auto;
+  flex: none;
+}
+
+/* Indented past the chevron, so a match reads as belonging to its file. */
+.search__match {
+  padding-left: calc(var(--gap-md) + 16px + var(--gap-sm));
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  color: var(--fg-dim);
+}
+
+.search__match:focus-visible,
+.search__file-row:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Wide enough for `name` and a four-digit line, so the snippets start in one
+   column down the whole list. */
+.search__line {
+  flex: none;
+  min-width: 4ch;
+  text-align: right;
+  color: var(--fg-faint);
+  font-size: var(--text-meta);
+}
+
+.search__snippet {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+.search__hit {
+  border-radius: 2px;
+  background: var(--accent-wash-strong);
+  color: var(--fg);
+}
+
+.search__cut {
+  padding: 0 var(--gap-md) 0 calc(var(--gap-md) + 16px + var(--gap-sm));
+  line-height: var(--row-h);
+  color: var(--fg-faint);
+  font-size: var(--text-meta);
+}
+
+.search__more {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  margin: var(--gap-sm) 0 0;
+  padding: 0 var(--gap-md);
+  color: var(--fg-muted);
+  font-size: var(--text-meta);
+}
+
+.search__more button {
+  padding: 2px 8px;
+  font-size: var(--text-meta);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .search__chevron .glyph {
+    transition: none;
+  }
+}

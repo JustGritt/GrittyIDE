@@ -19,7 +19,7 @@ function Harness({ initial = 'files' as SidebarTab }: { initial?: SidebarTab }) 
     <>
       <SidebarTabs tab={tab} onTabChange={setTab} />
       <div role="tabpanel" id={sidebarPanelId(tab)} aria-labelledby={sidebarTabId(tab)}>
-        {tab === 'files' ? 'the tree' : 'the changes'}
+        {tab === 'files' ? 'the tree' : tab === 'changes' ? 'the changes' : 'the search'}
       </div>
     </>
   );
@@ -30,12 +30,13 @@ afterEach(() => {
 });
 
 describe('the sidebar tablist', () => {
-  it('is a tablist with the two sections artboard 9a drew', () => {
+  it('is a tablist with the two sections artboard 9a drew, and Search after them', () => {
     render(<Harness />);
     expect(screen.getByRole('tablist')).toBeTruthy();
     expect(screen.getAllByRole('tab').map((tab) => tab.getAttribute('aria-label'))).toEqual([
       'Files',
       'Changes',
+      'Search',
     ]);
   });
 
@@ -50,9 +51,10 @@ describe('the sidebar tablist', () => {
 
   it('marks exactly one tab selected and points it at the panel that exists', () => {
     render(<Harness />);
-    const [files, changes] = screen.getAllByRole('tab');
+    const [files, changes, search] = screen.getAllByRole('tab');
     expect(files?.getAttribute('aria-selected')).toBe('true');
     expect(changes?.getAttribute('aria-selected')).toBe('false');
+    expect(search?.getAttribute('aria-selected')).toBe('false');
     expect(files?.getAttribute('aria-controls')).toBe(sidebarPanelId('files'));
     // The unselected panel is not in the document, so its tab points at nothing
     // rather than at a broken reference.
@@ -61,9 +63,10 @@ describe('the sidebar tablist', () => {
 
   it('keeps one stop in the tab sequence, the roving tabindex the APG asks for', () => {
     render(<Harness />);
-    const [files, changes] = screen.getAllByRole('tab');
+    const [files, changes, search] = screen.getAllByRole('tab');
     expect(files?.getAttribute('tabindex')).toBe('0');
     expect(changes?.getAttribute('tabindex')).toBe('-1');
+    expect(search?.getAttribute('tabindex')).toBe('-1');
   });
 
   it('moves selection and focus together on ArrowRight and ArrowLeft', () => {
@@ -85,7 +88,8 @@ describe('the sidebar tablist', () => {
     render(<Harness />);
     const tablist = screen.getByRole('tablist');
     fireEvent.keyDown(tablist, { key: 'ArrowLeft' });
-    expect(screen.getByRole('tab', { name: 'Changes' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab', { name: 'Search' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tabpanel').textContent).toBe('the search');
     fireEvent.keyDown(tablist, { key: 'ArrowRight' });
     expect(screen.getByRole('tab', { name: 'Files' }).getAttribute('aria-selected')).toBe('true');
   });
@@ -94,7 +98,7 @@ describe('the sidebar tablist', () => {
     render(<Harness />);
     const tablist = screen.getByRole('tablist');
     fireEvent.keyDown(tablist, { key: 'End' });
-    expect(screen.getByRole('tab', { name: 'Changes' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab', { name: 'Search' }).getAttribute('aria-selected')).toBe('true');
     fireEvent.keyDown(tablist, { key: 'Home' });
     expect(screen.getByRole('tab', { name: 'Files' }).getAttribute('aria-selected')).toBe('true');
   });
