@@ -189,7 +189,8 @@ describe('results', () => {
     expect(markup).toContain('3 results in 2 files');
     expect(markup).toContain('aria-live="polite"');
     expect(markup).toContain('<span class="search__name">a.ts</span>');
-    expect(markup).toContain('<span class="search__dir">src</span>');
+    // Isolated, so the right-to-left cut does not move a leading dot to the end.
+    expect(markup).toContain('<span class="search__dir"><bdi>src</bdi></span>');
     expect(markup).toContain('title="2 results">2</span>');
     expect(markup).toContain(
       '<span class="search__line">3</span><span class="search__snippet">const <mark class="search__hit">needle</mark> = 3;</span>',

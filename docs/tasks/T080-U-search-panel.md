@@ -251,3 +251,23 @@ whole answer. Nothing on the wire changed.
   narrowed off `app.css`, only this ticket's appended block was committed from
   a private index, and T099-S's uncommitted lines in the file were left as
   they were.
+
+### After the first manual run (2026-09-15)
+
+Alexis ran a search in `pnpm dev` ("agent" over the Gritty checkout): results
+listed, grouped and highlighted. Two findings from the screenshot:
+
+1. **Fixed: a directory starting with a dot rendered backwards.** `.claude`
+   showed as `claude.`: `direction: rtl`, which makes a long directory cut from
+   the left, also reorders the neutral leading dot. The directory is now
+   wrapped in `<bdi>`, and re-rendered headless with a `.claude/` path to
+   confirm. **The Changes panel's `.git__dir` has the same defect**
+   (`changes-view.tsx:585`), outside this ticket.
+2. **Recorded, not fixed: the core dropped more than it delivered.** The panel
+   said 3,244 results and "4,096 matches were found but not delivered". The
+   panel is reporting truthfully. The drop is `MatchBatcher`
+   (`crates/gritty-core/src/search/batch.rs`): at most 200 matches per 50 ms
+   leave, 2,000 wait, and a walk that finds faster has the rest dropped. On a
+   common word that loses most of the answer. The walk runs on the blocking
+   pool, so blocking it while the queue is full would lose nothing. That wants
+   its own ticket against the batcher.

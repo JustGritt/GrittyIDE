@@ -277,7 +277,14 @@ function FileGroup({
         </span>
         <FileIcon kind={fileIconKind(name)} />
         <span className="search__name">{name}</span>
-        {directory !== null && <span className="search__dir">{directory}</span>}
+        {/* `direction: rtl` is what cuts a long directory from the left; `<bdi>`
+            is what stops it reordering the path, which turned `.claude` into
+            `claude.` in the running app. */}
+        {directory !== null && (
+          <span className="search__dir">
+            <bdi>{directory}</bdi>
+          </span>
+        )}
         <span className="badge search__count" title={plural(count, 'result')}>
           {count}
         </span>
