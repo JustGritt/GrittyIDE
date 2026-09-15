@@ -141,8 +141,12 @@ rule below. `PROTOCOL_VERSION` **2.15.0** is on `main`; 2.13.0 and 2.14.0 were
 spent on the way and the resolved line took the highest. `SCHEMA_VERSION` is
 still **4** and migration **`0005` is free** — T326 needed neither.
 
-**The next free values are `PROTOCOL_VERSION` 2.28.0, `SCHEMA_VERSION` 5 and
-migration `0005`; the next free ADR number is 034.** (2.23.0–2.26.0 and
+**The next free values are `PROTOCOL_VERSION` 2.29.0, `SCHEMA_VERSION` 5 and
+migration `0005`; the next free ADR number is 035.** **2.28.0 is claimed by
+`WATCH-DEGRADED`** (say when part of the tree isn't being watched) on
+2026-09-15: one command, `workspace.watchStatus`, one `CoreEvent` variant,
+`WorkspaceWatchStatusChanged`, not persisted. Additive; no `SCHEMA_VERSION`, no
+migration. (2.23.0–2.26.0 and
 ADR-030/031/032/033 were taken on 2026-09-09 — see the blocks at the end of
 this section. **2.27.0 was claimed by `T310-ANSWER`** (arm the host permission
 verdict for an owned run) on 2026-09-14 and **spent the same day** (`084cafe`):
