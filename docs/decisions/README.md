@@ -38,6 +38,7 @@ requires updating the relevant ADR.
 | [ADR-032](ADR-032-ui-framework.md) | The UI framework is React 19, and it renders chrome rather than content | Accepted |
 | [ADR-033](ADR-033-dev-profile-debuginfo.md) | The dev profile is set deliberately, and debug info is the thing it sets | Accepted |
 | [ADR-034](ADR-034-meaning-of-ignored.md) | "Ignored" means what Git means when the root is a repository, and it is one predicate every surface is handed | Accepted |
+| [ADR-035](ADR-035-orca-parity-sequence.md) | Orca parity on the core loop comes after cleanup and before Phases 3–4 | Accepted |
 
 Template:
 

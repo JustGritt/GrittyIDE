@@ -142,7 +142,11 @@ spent on the way and the resolved line took the highest. `SCHEMA_VERSION` is
 still **4** and migration **`0005` is free** — T326 needed neither.
 
 **The next free values are `PROTOCOL_VERSION` 2.29.0, `SCHEMA_VERSION` 5 and
-migration `0005`; the next free ADR number is 035.** **2.28.0 is claimed by
+migration `0005`; the next free ADR number is 036.** **ADR-035 is claimed by
+`ADR-035`** (Orca parity: the core loop comes after cleanup and before Phases
+3–4) on 2026-09-15; it spends no version and no migration. The capabilities
+ADR that the plan of record calls "035" takes the next free number instead.
+**2.28.0 is claimed by
 `WATCH-DEGRADED`** (say when part of the tree isn't being watched) on
 2026-09-15: one command, `workspace.watchStatus`, one `CoreEvent` variant,
 `WorkspaceWatchStatusChanged`, not persisted. Additive; no `SCHEMA_VERSION`, no
