@@ -35,6 +35,7 @@ import { RunsPanel } from './features/runs/runs-panel';
 import { useRuns } from './features/runs/use-runs';
 import { SearchPanel } from './features/search/search-panel';
 import { useSearch } from './features/search/use-search';
+import { useSearchChord } from './features/search/use-search-chord';
 import { DEFAULT_LAYOUT, type Layout, PANE_LIMITS } from './features/session/persisted-layout';
 import { SessionNotices } from './features/session/session-notices';
 import { useSession } from './features/session/use-session';
@@ -302,6 +303,15 @@ export function App() {
     },
     [explorer.openFolder],
   );
+  // ⌘⇧F / Ctrl+Shift+F (SEARCH-CHORD): the Search tab, with the cursor in its
+  // field, from anywhere — the editor above all, which is why it does not
+  // yield to text areas. The attention queue replaces the sidebar, so it is
+  // closed first; there is nothing to focus behind it.
+  useSearchChord(accelerator, workspace !== null, () => {
+    setQueueOpen(false);
+    setSidebarTab('search');
+    search.requestFocus();
+  });
   useOpenShortcuts(accelerator, {
     onOpenFolder: () => openFolder(),
     // Only the launcher has a field to focus; with a workspace open the chord

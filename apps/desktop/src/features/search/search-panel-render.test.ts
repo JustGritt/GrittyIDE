@@ -97,6 +97,9 @@ function controller(overrides: Partial<SearchController> = {}): SearchController
     stop: noop,
     showMore: noop,
     toggleFile: noop,
+    focusRequest: 0,
+    requestFocus: noop,
+    takeFocusRequest: () => false,
     ...overrides,
   };
 }

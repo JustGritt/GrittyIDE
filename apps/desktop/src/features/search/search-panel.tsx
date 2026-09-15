@@ -59,11 +59,25 @@ export function SearchPanel({
   // tab was reached from the keyboard, where the tablist keeps focus so Arrow
   // can carry on past it (the APG's tabs pattern). A click in WebKit does not
   // focus the button, which is what tells the two apart.
+  //
+  // ⌘⇧F (SEARCH-CHORD) is an explicit ask, so it wins over that rule, reaches
+  // a panel that is already showing, and selects the query so typing replaces
+  // it. It arrives as a bumped `focusRequest`, taken once. After the mount the
+  // effect only runs again when `focusRequest` moves, which is always an ask.
+  const { focusRequest, takeFocusRequest } = search;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `focusRequest` is the trigger; the effect reads it through `takeFocusRequest`
   useEffect(() => {
+    const field = input.current;
+    if (field === null) return;
+    if (takeFocusRequest()) {
+      field.focus();
+      field.select();
+      return;
+    }
     const active = document.activeElement;
     if (active instanceof HTMLElement && active.closest('[role="tablist"]') !== null) return;
-    input.current?.focus();
-  }, []);
+    field.focus();
+  }, [focusRequest, takeFocusRequest]);
 
   const invalid = run !== null && isInvalidInput(run) ? run.error : null;
 

@@ -68,6 +68,18 @@ export interface SearchController {
   readonly stop: () => void;
   readonly showMore: () => void;
   readonly toggleFile: (path: string) => void;
+  /**
+   * Bumped by `requestFocus`. The panel watches it, so a request reaches a
+   * panel that is already showing as well as one that mounts because of it.
+   */
+  readonly focusRequest: number;
+  /** ⌘⇧F: put the cursor in the field and select the query (SEARCH-CHORD). */
+  readonly requestFocus: () => void;
+  /**
+   * Whether a focus request is waiting, and it is now handled. `true` once per
+   * request, so a panel that remounts later does not replay an old chord.
+   */
+  readonly takeFocusRequest: () => boolean;
 }
 
 export function useSearch(workspaceId: WorkspaceId | null): SearchController {
@@ -76,6 +88,8 @@ export function useSearch(workspaceId: WorkspaceId | null): SearchController {
   const [toggles, setToggles] = useState<SearchToggles>(DEFAULT_TOGGLES);
   const [limit, setLimit] = useState(SEARCH_PAGE);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+  const [focusRequest, setFocusRequest] = useState(0);
+  const handledFocus = useRef(0);
 
   // The token of the newest run. Anything answering to an older one was
   // superseded and is cancelled rather than shown.
@@ -223,6 +237,15 @@ export function useSearch(workspaceId: WorkspaceId | null): SearchController {
 
   const showMore = useCallback(() => setLimit((current) => current + SEARCH_PAGE), []);
 
+  const requestFocus = useCallback(() => setFocusRequest((current) => current + 1), []);
+  const focusRequestRef = useRef(focusRequest);
+  focusRequestRef.current = focusRequest;
+  const takeFocusRequest = useCallback(() => {
+    if (handledFocus.current === focusRequestRef.current) return false;
+    handledFocus.current = focusRequestRef.current;
+    return true;
+  }, []);
+
   const toggleFile = useCallback((path: string) => {
     setCollapsed((current) => {
       const next = new Set(current);
@@ -265,6 +288,9 @@ export function useSearch(workspaceId: WorkspaceId | null): SearchController {
       stop,
       showMore,
       toggleFile,
+      focusRequest,
+      requestFocus,
+      takeFocusRequest,
     }),
     [
       workspaceId,
@@ -279,6 +305,9 @@ export function useSearch(workspaceId: WorkspaceId | null): SearchController {
       stop,
       showMore,
       toggleFile,
+      focusRequest,
+      requestFocus,
+      takeFocusRequest,
     ],
   );
 }
