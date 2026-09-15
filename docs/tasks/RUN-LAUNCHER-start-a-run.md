@@ -119,10 +119,63 @@ All present on `main`:
 
 ## Completion report
 
-- summary
-- files changed
-- tests actually executed
-- results
-- architectural decisions
-- known limitations
-- follow-up tasks
+**Summary.** The Agents section's bar offers **New run**, which opens
+`RunLauncher` at the top of the section body. A prompt, a "belongs to" choice
+(new workstream from the prompt by default, then every workstream not `DONE` or
+`ABANDONED`), a line saying what starting spends and where it acts, Start and
+Cancel. `launchRun` runs `workstreams.create` then `runs.start`; on success the
+run's console opens as a kept tab and the form closes. Committed as `a581fdb`.
+
+**Files changed.**
+- New: `features/runs/run-launcher.tsx`, `run-launcher-model.ts`,
+  `run-launcher-model.test.ts`, `run-launcher.dom.test.tsx`.
+- `features/runs/use-runs.ts`: `startClaude` resolves with the run.
+- `features/workstreams/use-workstreams.ts`: `create` resolves with the
+  workstream.
+- `features/agents/agents-section.tsx`: `launcher` and `onLauncherToggle`
+  props, New run on the bar, the empty text points at it, ⌥G ignores keys typed
+  in the section's own textarea or select.
+- `features/agents/agents-section-render.test.ts`: five cases for the above.
+- `features/runs/run-console.dom.test.tsx`: its stub `startClaude` returns
+  `undefined` for the new signature (claimed separately; one line).
+- `App.tsx`: wiring, keyed by workspace.
+- `docs/architecture/agent-runs.md`: "Starting a run in a release build".
+
+**Tests actually executed.**
+- `vitest run` on `features/runs` and the section render test: 9 files, all
+  passed, before and after the formatting fixes.
+- `pnpm check`: **exit 0**. 138 test files, 1,578 TS tests passed. Every cargo
+  test binary reported ok. The generated types were fresh. It ran over a
+  working tree that also held T099-S's uncommitted terminal work.
+
+**Architectural decisions.**
+- No new command. The launch is two existing commands with no transaction. A
+  refused start after a created workstream leaves the workstream (it is real
+  and visible on the island) and the form's retry targets it.
+- The launcher takes a narrowed `LaunchDeps` rather than both controllers, as
+  `ConsoleRuns` does.
+- The section takes the form as an element, as the explorer takes Changes, so
+  it holds no controller.
+
+**Known limitations.**
+- **Not exercised in `pnpm dev`**: no session here has a screen. The feature
+  check is Alexis's: open a workspace with no workstreams, New run, type a
+  prompt, ⌘↵, and see the console open kept and the run's permission asks
+  arrive.
+- **No launcher CSS yet.** `app.css` is leased by T099-S (split terminals). The
+  form borrows `.agent-prompt`'s rules, so until then it draws a top border
+  where a bottom one belongs, a select at its natural width, and a note with
+  default paragraph margins.
+- ⌥A (island) still fires from the launcher's textarea, as it does from the
+  run console's; `isTypingInField` tests `INPUT` only, on purpose, for Monaco.
+- The workstream stays in whatever state it was in; nothing moves it to
+  `IN_PROGRESS` (T300-PANEL, deferred by ADR-035).
+- `maxLength` counts UTF-16 units and the core counts characters, so the field
+  is stricter than the core for text outside the BMP, never looser.
+
+**Follow-up tasks.**
+- The launcher's three CSS rules once `app.css` is free (this ticket).
+- A quick-open `>` command, "Start agent run".
+- AGENT-TERMINAL (launch an agent CLI into a terminal in a task's worktree)
+  replaces this form's target with a task once T400 (a workstream owns a
+  worktree and a branch) lands.
