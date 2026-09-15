@@ -30,7 +30,7 @@ requires updating the relevant ADR.
 | [ADR-022](ADR-022-search-engine.md) | Search runs in-process on ripgrep's own crates, and "ignored" keeps its current, narrower meaning | Accepted, amended by ADR-034 |
 | [ADR-023](ADR-023-git-library.md) | Git is read in-process through `gix`, with no `git` process and no configuration that can run one | Accepted, amended by ADR-029 |
 | [ADR-024](ADR-024-target-dir-retention.md) | One `target/` per checkout, swept by budget and age — not a shared `CARGO_TARGET_DIR` | Accepted |
-| [ADR-025](ADR-025-filesystem-watching.md) | Filesystem watching is one coalesced, bounded, directory-grained signal | Accepted |
+| [ADR-025](ADR-025-filesystem-watching.md) | Filesystem watching is one coalesced, bounded, directory-grained signal | Accepted, amended by WATCH-DEGRADED |
 | [ADR-026](ADR-026-agent-console-tab.md) | An agent console is a tab in the editor, and the agent rail is retired | Accepted |
 | [ADR-028](ADR-028-explorer-file-operations.md) | Editing the file tree is a `files.*` command domain, and the Trash is the recovery | Accepted |
 | [ADR-029](ADR-029-git-write-backend.md) | Git writes run through the `git` binary, while reads stay in-process on `gix` | Accepted |

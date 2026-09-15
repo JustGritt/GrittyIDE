@@ -79,6 +79,10 @@ impl Intent {
             // rediscovered by looking at it again. Persisting it would let a
             // restart claim a directory changed while Gritty was closed.
             | CoreEvent::WorkspaceEntriesChanged(_)
+            // How well this process's backend watches the tree, rediscovered at
+            // the next open. Persisting it would claim a degraded watch for a
+            // session whose registrations may all succeed (WATCH-DEGRADED).
+            | CoreEvent::WorkspaceWatchStatusChanged(_)
             | CoreEvent::DocumentExternalChangeDetected(_)
             | CoreEvent::PersistenceStatusChanged(_)
             // Terminal buffers are an explicit T090 non-goal: nothing a shell

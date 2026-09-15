@@ -1,7 +1,7 @@
 # Task WATCH-DEGRADED — Say when part of the tree isn't being watched
 
 - **Phase:** maintenance (ADR-025's *Revisit when*, amending ADR-025)
-- **Status:** todo
+- **Status:** review
 - **Depends on:** WATCH-FLAKE (the two load-sensitive watcher tests; it holds `crates/workspace/tests/watch.rs`), FILES-PARTIAL (`refreshAll`), EXPLORER-RELIST-QUEUE (the Refresh re-lists through the queue)
 
 ## Objective
@@ -161,4 +161,104 @@ pnpm check
 
 ## Completion report
 
-_Not started._
+### Summary
+
+A watch that cannot cover the whole workspace now says so, once per reason, and
+the explorer shows it with a **Refresh tree** action.
+
+- **The watcher crate reports reasons.** `gritty-workspace` reports
+  `Degraded(RegistrationRefused | DirectoryLimit | BackendError)` from the pump
+  thread, each at most once per watch. It covers the initial walk, directories
+  that appear later, and backend errors.
+- **A rescan is an overflow.** A backend rescan event now makes the batch
+  `overflowed`.
+- **The core keeps the set.** `gritty-core` keeps the reasons for the open
+  workspace, adds `BACKEND_UNAVAILABLE` when the backend will not start, and
+  emits `WorkspaceWatchStatusChanged` only when a reason is new.
+  `workspace.watchStatus` answers the same set.
+- **The explorer merges both.** It asks on open, merges the event by union,
+  and shows the notice.
+- **Paperwork.** ADR-025 carries the amendment, and protocol 2.28.0 is spent.
+
+### Files changed
+
+| File | What |
+|---|---|
+| `crates/workspace/src/watch.rs` | `Degradation`, `WatchEvent::Degraded`, `WatchConfig.max_watched_directories` (+ `with_max_watched_directories`), `Pump::degrade` (once per reason), `initial` flushed from the pump, `register_subtree` over an injected registrar returning `SubtreeOutcome`, `watchable_directories` returning whether it was cut short, `Coalescer::overflow` on `need_rescan()`; 4 unit tests |
+| `crates/workspace/src/lib.rs` | exports `Degradation` |
+| `crates/workspace/tests/watch.rs` | `drain` and the storm test handle `Degraded`; the root-removal test tolerates one; `start_with`; 1 integration test |
+| `crates/gritty-core/src/workspace/watch.rs` | `WatchDegradedReason`, `WorkspaceWatchStatus`, `WatchStatusRequest`, `WatchHealth::report` (record, then emit if new), `watch_status`, the `BACKEND_UNAVAILABLE` arm, the `WatchSetup` test seam |
+| `crates/gritty-core/src/workspace/mod.rs` | the `watch_health` slot, reset in `emit_closed`; 4 tests |
+| `crates/gritty-core/src/event/mod.rs`, `session/tap.rs` | the variant in `name()`/`operation_id()`; not persisted, with the reason |
+| `crates/gritty-core/src/protocol/{mod,export}.rs` | 2.28.0; three roots exported |
+| `apps/desktop/src-tauri/src/{commands,lib}.rs`, `tests/commands.rs` | `workspace_watch_status` adapter and registration; 1 adapter test |
+| `packages/protocol/src/{commands,client,types}.ts`, `workspace-client.test.ts`, generated | `workspace.watchStatus`; the types; 1 client test |
+| `apps/desktop/src/features/explorer/{explorer-reducer,use-explorer,explorer-panel}.ts(x)` | `watchDegraded`/`watchNoticeDismissed`, union merge, the query on open, `dismissWatchNotice`, the notice |
+| `…/explorer-reducer.test.ts`, `use-explorer-watch.dom.test.tsx`, `explorer-panel-notice.dom.test.tsx` | 4 reducer, 2 hook, 3 panel tests |
+| `docs/decisions/ADR-025-filesystem-watching.md`, `docs/decisions/README.md`, `docs/architecture/workspace.md`, `docs/merge-queue.md` | the amendment and its row; the watch section and five failure rows; the 2.28.0 claim (`d64f7e7`) |
+
+### Tests actually executed
+
+| Command | Result |
+|---|---|
+| `cargo test -p gritty-workspace watch` | exit 0 (4 new unit tests, the new integration test) |
+| `cargo test -p gritty-core --lib workspace::tests` | exit 0, 17 passed including the 4 new |
+| `cargo test -p gritty-desktop --test commands workspace_watch_status` | exit 0 |
+| `cargo test -p gritty-core --lib protocol::export` | exit 0; regenerated `CoreEvent.ts`, `version.ts` and three new files |
+| `pnpm vitest run packages/protocol` | exit 0, 18 files, 115 tests; `tsc` exit 0 |
+| `pnpm vitest run apps/desktop/src/features/explorer` | exit 0, 9 files, 127 tests; `apps/desktop` `tsc` exit 0 |
+| `pnpm check`, first run | exit 101 on this ticket: clippy `type_complexity` on a test helper's return type. Fixed with a type alias. `check:ts` had passed (130 files, 1473 tests) |
+| `pnpm check`, second run | exit 1, **not from this change**: biome formatting in the T080-U session's uncommitted search feature, a directory this ticket does not touch |
+| The gate's halves, run separately after that | biome on `features/explorer` and `packages/protocol/src` exit 0; `apps/desktop` `tsc` 0 errors; `pnpm check:rust` (fmt, clippy `-D warnings`, `cargo test --workspace`) exit 0, all 42 test binaries ok |
+| `pnpm check:generated` | Run after the commit below, because it requires the generated files to be committed |
+
+**Mutation checks**, each run and then restored:
+
+| Mutation | Fails |
+|---|---|
+| `degrade` delivers every time | `a_degradation_is_delivered_once_per_reason` |
+| Rescan events not treated as overflow | `a_rescan_event_overflows_the_batch` |
+| The walk never reports it was cut short | `the_walk_says_when_it_stopped_at_its_limit` |
+| No `BACKEND_UNAVAILABLE` when the backend refuses | `a_backend_that_refuses_reports_unavailable` |
+| Reducer replaces instead of merging | `merges the query and the event by union, in either order`, `stays dismissed until a reason it has not shown arrives` |
+| No query on open | `asks on open, so a reason reported before it subscribed still shows` |
+
+### Architectural decisions
+
+The four in the amendment (reasons, once, event and query, rescan as overflow),
+plus these:
+
+- **The health slot is keyed by workspace id**, and reset in `emit_closed`,
+  where every close already funnels. A report from a watch that is going away
+  cannot land on the next workspace.
+- **Record, then emit, with the lock released before emitting.** A query after
+  subscribing sees what the event said. The pump thread never holds the health
+  lock while calling into the event bus, and never takes `current`.
+- **A test seam, not a trait, for the refusing backend.** `WatchSetup` is
+  `#[cfg(test)]`, the same shape as `listing_delay`. A backend trait would be an
+  abstraction with one production implementation.
+- **The query failing is silent in the explorer.** The notice is advisory, and
+  a failure to ask says nothing about the workspace.
+
+### Known limitations
+
+- **Not observed on Linux.** A real inotify refusal and `ENOSPC` have never
+  happened on this machine, and Linux CI is dark (hard rule 12). The counting
+  is tested through an injected registrar, the limit through a real
+  `PerDirectory` watch on macOS.
+- **`BACKEND_ERROR` is reported but never triggered by a test.** No backend
+  error can be provoked on demand.
+- **Unreadable directories are not degradations**: the explorer cannot list
+  them either.
+- **The initial `PerDirectory` walk still runs inside `open`**, under the
+  `current` lock. That predates this ticket.
+- **Nothing was clicked.**
+
+### Follow-up tasks
+
+- **WATCH-PERDIR-NEWDIR** (filed by WATCH-FLAKE): a file created in a new
+  directory before its watch attaches is missed on Linux. The fix is to record a
+  newly registered directory as changed. It was left out here to keep this
+  ticket to the amendment.
+- **ADR-034's IGNORE-SEAM** will edit `crates/workspace/src/watch.rs` too, and
+  rebases on this.

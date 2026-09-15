@@ -45,6 +45,6 @@ pub use mutate::{CopyOutcome, EntryKind};
 pub use path::WorkspacePath;
 pub use root::{ResolvedPath, WorkspaceRoot, canonicalize};
 pub use watch::{
-    ChangeBatch, DEBOUNCE, MAX_DIRECTORIES, MAX_WAIT, Watch, WatchConfig, WatchEvent,
+    ChangeBatch, DEBOUNCE, Degradation, MAX_DIRECTORIES, MAX_WAIT, Watch, WatchConfig, WatchEvent,
     WatchStrategy, watch,
 };

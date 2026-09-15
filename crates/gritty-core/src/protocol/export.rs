@@ -66,6 +66,7 @@ use crate::workspace::files::{
     MoveEntriesRequest, RenameEntryRequest, UndoRequest,
 };
 use crate::workspace::find::{FindFilesRequest, FindFilesResponse, FoundFiles};
+use crate::workspace::watch::{WatchDegradedReason, WatchStatusRequest, WorkspaceWatchStatus};
 use crate::workspace::{
     CloseWorkspaceRequest, ForgetWorkspaceRequest, ListDirectoryRequest, ListDirectoryResponse,
     OpenWorkspaceRequest, RecentWorkspace, RecentWorkspacesRequest, Workspace,
@@ -200,6 +201,9 @@ fn export_bindings() {
     RecentWorkspace::export_all(&cfg).expect("export RecentWorkspace");
     RecentWorkspacesRequest::export_all(&cfg).expect("export RecentWorkspacesRequest");
     ForgetWorkspaceRequest::export_all(&cfg).expect("export ForgetWorkspaceRequest");
+    WatchStatusRequest::export_all(&cfg).expect("export WatchStatusRequest");
+    WorkspaceWatchStatus::export_all(&cfg).expect("export WorkspaceWatchStatus");
+    WatchDegradedReason::export_all(&cfg).expect("export WatchDegradedReason");
     DocumentContent::export_all(&cfg).expect("export DocumentContent");
     OpenDocumentRequest::export_all(&cfg).expect("export OpenDocumentRequest");
     CloseDocumentRequest::export_all(&cfg).expect("export CloseDocumentRequest");

@@ -251,6 +251,8 @@ export type { UpdateSessionRequest } from './generated/UpdateSessionRequest';
 export type { UpdateWorkstreamRequest } from './generated/UpdateWorkstreamRequest';
 export type { UpstreamStatus } from './generated/UpstreamStatus';
 export { CORE_EVENT_CHANNEL, PROTOCOL_VERSION } from './generated/version';
+export type { WatchDegradedReason } from './generated/WatchDegradedReason';
+export type { WatchStatusRequest } from './generated/WatchStatusRequest';
 export type { Workspace } from './generated/Workspace';
 export type { WorkspaceClosedPayload } from './generated/WorkspaceClosedPayload';
 export type { WorkspaceClosedReason } from './generated/WorkspaceClosedReason';
@@ -258,6 +260,7 @@ export type { WorkspaceEntriesChangedPayload } from './generated/WorkspaceEntrie
 export type { WorkspaceId } from './generated/WorkspaceId';
 export type { WorkspaceOpenedPayload } from './generated/WorkspaceOpenedPayload';
 export type { WorkspacePath } from './generated/WorkspacePath';
+export type { WorkspaceWatchStatus } from './generated/WorkspaceWatchStatus';
 export type { Workstream } from './generated/Workstream';
 export type { WorkstreamAgentLink } from './generated/WorkstreamAgentLink';
 export type { WorkstreamChangedPayload } from './generated/WorkstreamChangedPayload';

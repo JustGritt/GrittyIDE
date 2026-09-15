@@ -676,6 +676,39 @@ fn workspace_find_files_ranks_over_the_adapter_and_refuses_bad_requests() {
     }
 }
 
+/// WATCH-DEGRADED: the query reaches the manager through the real adapter. A
+/// scratch directory is fully watched, and a workspace that is not open is
+/// `NotFound` rather than an empty answer.
+#[test]
+fn workspace_watch_status_answers_for_the_open_workspace_only() {
+    let h = Harness::new();
+    let root = TempWorkspace::new("watch-status");
+    let workspace = h.open_workspace(&root.0);
+
+    let status = h
+        .invoke(
+            "workspace_watch_status",
+            json!({ "request": { "workspaceId": workspace["id"] } }),
+        )
+        .expect("watch status");
+    assert_eq!(
+        status,
+        json!({ "workspaceId": workspace["id"], "degraded": [] })
+    );
+
+    let error = h
+        .invoke(
+            "workspace_watch_status",
+            json!({ "request": { "workspaceId": "not-open" } }),
+        )
+        .unwrap_err();
+    assert_eq!(error["code"], "NotFound");
+    let error = h
+        .invoke("workspace_watch_status", json!({ "request": {} }))
+        .unwrap_err();
+    assert_eq!(error["code"], "InvalidInput");
+}
+
 #[test]
 fn root_removed_while_open_fails_with_not_found_and_closes_the_workspace() {
     let h = Harness::new();

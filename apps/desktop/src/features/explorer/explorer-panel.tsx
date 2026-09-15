@@ -132,6 +132,19 @@ export function ExplorerPanel({
           </button>
         </p>
       )}
+      {state.watchDegraded.length > 0 && !state.watchNoticeDismissed && (
+        <p className="explorer__notice" role="status">
+          {state.watchDegraded.includes('BACKEND_UNAVAILABLE')
+            ? 'Changes made outside Gritty aren’t being watched.'
+            : 'Some folders aren’t watched, so changes made outside Gritty may not show here.'}
+          <button type="button" onClick={explorer.refreshAll}>
+            Refresh tree
+          </button>
+          <button type="button" onClick={explorer.dismissWatchNotice}>
+            Dismiss
+          </button>
+        </p>
+      )}
       {explorer.error && (
         <>
           <ErrorEnvelope error={explorer.error} onDismiss={explorer.clearError} />

@@ -151,12 +151,24 @@ The watch never decides anything about a document. A batch makes the shell call
 external-modification state stays that check's answer (ADR-011). Two checkers
 that could disagree is the silent conflict resolution the hard rules forbid.
 
+A watch that cannot cover the whole tree says so (WATCH-DEGRADED, amending
+ADR-025). The core keeps a set of reasons for the open workspace
+(`BACKEND_UNAVAILABLE`, `REGISTRATION_REFUSED`, `DIRECTORY_LIMIT`,
+`BACKEND_ERROR`), emits `WorkspaceWatchStatusChanged` each time a new one
+appears, and answers `workspace.watchStatus` with the same set. It holds reasons
+and no count, each at most once, and it is not persisted. The explorer asks on
+open, merges the event by union, and shows one notice with **Refresh tree**. A
+backend rescan event is treated as `overflowed`.
+
 ## Failure
 
 | Situation | Behaviour |
 |---|---|
-| The backend refuses to start | The workspace still opens; logged once; every on-demand check is as correct as before, just not proactive |
-| A watch descriptor is refused mid-tree (Linux) | The registrations that succeeded keep reporting; the rest of the tree behaves as it did before T070. Not claimed as tested |
+| The backend refuses to start | The workspace still opens; every on-demand check is as correct as before, just not proactive; `BACKEND_UNAVAILABLE`, and the explorer says nothing is watched |
+| A watch descriptor is refused mid-tree (Linux) | The registrations that succeeded keep reporting; the rest of the tree behaves as it did before T070; `REGISTRATION_REFUSED`, once. The counting is tested, a real refusal is not |
+| The tree has more directories than a watch registers | `DIRECTORY_LIMIT`, once; the registered part keeps reporting |
+| The backend reports errors while running | `BACKEND_ERROR`, once, however many follow |
+| The backend flags a rescan (events lost) | That batch is `overflowed`; the explorer re-lists everything it has loaded |
 | An event resolves outside the root | Dropped before it can become a `WorkspacePath` |
 | The root is deleted | The existing `RootMissing` close runs at once instead of at the next command; confirmed with a stat before anything closes. A root recreated under the same name is a delete-then-close, never reconciled |
 | The workspace closes with a batch pending | Dropped with the watch. No event ever names a workspace that is gone |

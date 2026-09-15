@@ -352,6 +352,26 @@ export function useExplorer(options: ExplorerOptions = {}) {
   );
 
   const dismissNotice = useCallback(() => dispatch({ type: 'dismissNotice' }), []);
+  const dismissWatchNotice = useCallback(() => dispatch({ type: 'dismissWatchNotice' }), []);
+
+  // How well the workspace is watched (WATCH-DEGRADED). Asked on open, because
+  // the event that says so may have been emitted before this renderer
+  // subscribed (a startup restore, a reload). Advisory: a failure here says
+  // nothing about the workspace, so it is not an error to show.
+  const watchedId = state.workspace?.id;
+  useEffect(() => {
+    if (watchedId === undefined) return;
+    let active = true;
+    core.workspace.watchStatus(watchedId).then(
+      (status) => {
+        if (active) dispatch({ type: 'watchStatus', status });
+      },
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [watchedId]);
   const clearError = useCallback(() => setError(null), []);
 
   // ---- Changing the tree (T042) ----
@@ -588,6 +608,7 @@ export function useExplorer(options: ExplorerOptions = {}) {
     cancelListing,
     setShowHidden,
     dismissNotice,
+    dismissWatchNotice,
     clearError,
     refreshAll,
     // T042

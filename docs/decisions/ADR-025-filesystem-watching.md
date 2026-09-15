@@ -9,6 +9,9 @@
   historical: ADR-001 has since been accepted, and the reason for a domain crate
   stands anyway. Linux remains the documented risk in *Consequences*: no inotify
   descriptor has been consumed, and Linux CI is dark.
+- **Amended:** 2026-09-14 by Alexis (WATCH-DEGRADED), through the approved plan
+  that put its four decisions to them. Implemented 2026-09-15. See the amendment
+  at the end: a watch that cannot cover the whole tree now says so.
 
 ## Context
 
@@ -152,3 +155,50 @@ raw filesystem events rather than T230's timeline); the 64-directory cap
 overflows in ordinary use rather than during a storm; Windows is claimed; or a
 real inotify budget failure is observed and the `PerDirectory` walk needs to
 report its own degradation rather than logging it.
+
+## Amendment (WATCH-DEGRADED, 2026-09-14): a degraded watch says so
+
+This acts on the *Revisit when* trigger above: "the `PerDirectory` walk needs to
+report its own degradation rather than logging it". Until now, every way the
+watch could fall short went only to `tracing::warn!`:
+
+- a refused registration;
+- the registration limit;
+- a backend error;
+- a backend that never started.
+
+In each case the explorer went quietly stale in exactly the subtrees nobody was
+told about.
+
+- **A degradation is a reason, never a count.** The reasons are
+  `BACKEND_UNAVAILABLE`, `REGISTRATION_REFUSED`, `DIRECTORY_LIMIT` and
+  `BACKEND_ERROR`. The registration walk stops at its limit without knowing how
+  many directories it did not reach, so any number would be a lower bound
+  presented as a total, the same lie `overflowed` exists to avoid.
+- **Each reason is reported at most once per watch.** That is at most four
+  events per workspace, however long a backend keeps failing (hard rule 8).
+- **It is an event and a query.** `WorkspaceWatchStatusChanged { workspaceId,
+  degraded }` carries every reason so far, each time a new one appears.
+  `workspace.watchStatus` answers the same set on demand, because the first
+  report can land before a renderer subscribes (a startup restore, a reload).
+  The core records a reason before it emits it, so a query made after
+  subscribing never misses what the event said. The set only grows while the
+  workspace is open, is dropped with the watch, and is not persisted.
+- **A backend rescan is `overflowed`.** An event flagged for rescan (inotify's
+  queue overflow, which names no path; FSEvents' "must scan subdirectories",
+  which names only a parent) is not the whole change, so the batch overflows
+  rather than trusting the paths it names. This is the convergence rule above,
+  applied to a flag the first implementation did not read.
+- **`WatchConfig.max_watched_directories` replaces the fixed ceiling.** It still
+  defaults to 8,192. Being a value is what lets the `DIRECTORY_LIMIT` path be
+  exercised on macOS through `WatchStrategy::PerDirectory`, as the strategy
+  itself already is.
+
+The explorer turns the set into one dismissible notice with a **Refresh tree**
+action, and a reason it has not shown brings the notice back. The watcher
+still decides nothing about documents.
+
+**Not claimed (hard rule 12):** a real inotify refusal or `ENOSPC`, and a real
+backend error. The counting is tested through an injected registrar, the limit
+through a real `PerDirectory` watch with a small limit, and an unavailable
+backend through a test seam. Protocol 2.28.0, additive.

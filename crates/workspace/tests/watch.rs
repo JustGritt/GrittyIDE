@@ -13,7 +13,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::time::{Duration, Instant};
 
-use gritty_workspace::watch::{ChangeBatch, WatchConfig, WatchEvent, WatchStrategy, watch};
+use gritty_workspace::watch::{
+    ChangeBatch, Degradation, WatchConfig, WatchEvent, WatchStrategy, watch,
+};
 use gritty_workspace::{WorkspacePath, WorkspaceRoot};
 
 /// Long enough that a loaded machine is not the thing under test.
@@ -102,6 +104,10 @@ impl Observed {
             match self.events.recv_timeout(SILENCE) {
                 Ok(WatchEvent::Changed(batch)) => batches.push(batch),
                 Ok(WatchEvent::RootMissing) => panic!("unexpected RootMissing"),
+                // Each reason is delivered once, so a second one here is the
+                // storm WATCH-DEGRADED forbids, and a first one is a test that
+                // did not expect its tree to be too big.
+                Ok(WatchEvent::Degraded(reason)) => panic!("unexpected Degraded({reason:?})"),
                 Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => return batches,
             }
         }
@@ -149,8 +155,16 @@ impl Observed {
 }
 
 fn start(tree: &TempTree, strategy: WatchStrategy) -> (gritty_workspace::Watch, Observed) {
+    start_with(tree, strategy, config())
+}
+
+fn start_with(
+    tree: &TempTree,
+    strategy: WatchStrategy,
+    config: WatchConfig,
+) -> (gritty_workspace::Watch, Observed) {
     let (tx, rx) = channel();
-    let handle = watch(&tree.root(), config(), strategy, move |event| {
+    let handle = watch(&tree.root(), config, strategy, move |event| {
         let _ = tx.send(event);
     })
     .expect("start the watch");
@@ -320,8 +334,10 @@ fn deleting_the_root_reports_root_missing() {
         );
         match observed.events.recv_timeout(Duration::from_secs(1)) {
             Ok(WatchEvent::RootMissing) => break,
-            // The removal of the root's own contents may be reported first.
-            Ok(WatchEvent::Changed(_)) | Err(RecvTimeoutError::Timeout) => {}
+            // The removal of the root's own contents may be reported first,
+            // and a backend that loses its root may report an error doing so.
+            Ok(WatchEvent::Changed(_) | WatchEvent::Degraded(_))
+            | Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => panic!("the watch stopped without reporting"),
         }
     }
@@ -378,6 +394,39 @@ fn a_directory_created_after_the_watch_started_is_followed() {
         "a write inside late/inner, a directory created after the walk",
         |n| tree.write(&format!("late/inner/file-{n}.txt"), "x"),
         |batch| batch.directories.contains(&wire("late/inner")),
+    );
+}
+
+/// WATCH-DEGRADED: a per-directory watch that runs out of registrations says
+/// so, once, and keeps reporting what it did register. The limit is shrunk
+/// through `WatchConfig`, which is what makes the Linux budget's *shape*
+/// testable here; a real inotify refusal is not (hard rule 12).
+#[test]
+fn a_per_directory_watch_over_its_directory_limit_reports_degraded_once() {
+    let tree = TempTree::new("per-dir-limit");
+    for name in ["a", "b", "c"] {
+        tree.dir(name);
+    }
+    // The root takes one registration, leaving one for three directories.
+    let limited = config().with_max_watched_directories(2);
+    let (_watch, observed) = start_with(&tree, WatchStrategy::PerDirectory, limited);
+
+    match observed.next() {
+        WatchEvent::Degraded(Degradation::DirectoryLimit) => {}
+        other => panic!("expected the initial walk to report its limit, got {other:?}"),
+    }
+
+    // Still a live watch for what it did register: the root.
+    settle(&tree, &observed);
+    // Directories that appear past the limit hit it again, and say nothing:
+    // `drain` panics on a second Degraded.
+    tree.dir("d");
+    tree.dir("e");
+    tree.write("root-change.txt", "x");
+    let batches = observed.drain();
+    assert!(
+        all_directories(&batches).contains(&WorkspacePath::root()),
+        "the root is watched and its changes still arrive: {batches:?}"
     );
 }
 
@@ -480,6 +529,9 @@ fn the_large_repo_storm_stays_batched_and_bounded() {
         match event {
             WatchEvent::Changed(batch) => batches.push(batch),
             WatchEvent::RootMissing => panic!("the fixture root vanished"),
+            WatchEvent::Degraded(reason) => {
+                panic!("the fixture tree degraded the watch: {reason:?}")
+            }
         }
     }
 

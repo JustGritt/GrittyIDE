@@ -221,9 +221,16 @@ pub struct WorkspaceManager {
     /// most one, matching the single-open-workspace model; dropping it stops
     /// the watch, which is why every close path goes through `emit_closed`.
     watch: Mutex<Option<gritty_workspace::Watch>>,
+    /// Why that watch does not cover the whole tree, if it does not
+    /// (WATCH-DEGRADED). Shared with the watch's callback, which records into
+    /// it from the pump thread.
+    watch_health: Arc<Mutex<watch::WatchHealth>>,
     /// Handed to the watch's callback so it can reach the close path without
     /// keeping the manager alive.
     me: Weak<Self>,
+    /// How tests make the watch degrade, instead of the platform default.
+    #[cfg(test)]
+    watch_setup: Mutex<Option<watch::WatchSetup>>,
     /// Tests slow the blocking listing down so the budget hand-over and its
     /// cancellation can be exercised deterministically.
     #[cfg(test)]
@@ -248,7 +255,10 @@ impl WorkspaceManager {
             handle,
             close_guard: Mutex::new(None),
             watch: Mutex::new(None),
+            watch_health: Arc::new(Mutex::new(watch::WatchHealth::default())),
             me: me.clone(),
+            #[cfg(test)]
+            watch_setup: Mutex::new(None),
             #[cfg(test)]
             listing_delay: Mutex::new(Duration::ZERO),
             #[cfg(test)]
@@ -524,6 +534,12 @@ impl WorkspaceManager {
                 .unwrap_or_else(PoisonError::into_inner)
                 .take(),
         );
+        // And its health with it, so nothing reported by a watch that is gone
+        // can name this workspace.
+        *self
+            .watch_health
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = watch::WatchHealth::default();
         self.events.emit(
             &EventOrigin {
                 workspace_id: Some(open.workspace.id.clone()),
@@ -1222,6 +1238,165 @@ mod tests {
             "a closed workspace still reported changes: {:?}",
             h.sink.names()
         );
+    }
+
+    // ---- WATCH-DEGRADED ----
+
+    fn open_with_watch(h: &Harness, dir: &TempDir, setup: watch::WatchSetup) -> Workspace {
+        *h.manager.watch_setup.lock().unwrap() = Some(setup);
+        h.manager
+            .open(
+                &dir.0,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
+            .unwrap()
+    }
+
+    fn status_of(h: &Harness, workspace: &Workspace) -> Vec<watch::WatchDegradedReason> {
+        h.manager
+            .watch_status(
+                watch::WatchStatusRequest {
+                    workspace_id: workspace.id.clone(),
+                },
+                &CorrelationId::new(),
+            )
+            .expect("the open workspace has a status")
+            .degraded
+    }
+
+    /// A watch that runs out of registrations says so on the bus, once, and
+    /// the query answers the same — the query is what a renderer that mounted
+    /// after the event reads.
+    #[tokio::test]
+    async fn a_watch_over_its_limit_is_announced_and_queryable() {
+        use gritty_workspace::{WatchConfig, WatchStrategy};
+
+        let mut h = harness();
+        let dir = TempDir::new("watch-limit");
+        for name in ["a", "b", "c"] {
+            fs::create_dir_all(dir.0.join(name)).unwrap();
+        }
+        let limited =
+            WatchConfig::for_tests(Duration::from_millis(50), Duration::from_millis(200), 64)
+                .with_max_watched_directories(2);
+        let workspace = open_with_watch(
+            &h,
+            &dir,
+            watch::WatchSetup::With(limited, WatchStrategy::PerDirectory),
+        );
+
+        let envelope = h.next_named("WorkspaceWatchStatusChanged").await;
+        assert_eq!(envelope.meta.actor, Actor::System);
+        assert_eq!(envelope.meta.correlation_id, None);
+        let CoreEvent::WorkspaceWatchStatusChanged(status) = envelope.event else {
+            panic!("expected WorkspaceWatchStatusChanged");
+        };
+        assert_eq!(status.workspace_id, workspace.id);
+        assert_eq!(
+            status.degraded,
+            vec![watch::WatchDegradedReason::DirectoryLimit]
+        );
+        assert_eq!(
+            status_of(&h, &workspace),
+            vec![watch::WatchDegradedReason::DirectoryLimit]
+        );
+
+        // More directories past the limit hit it again and say nothing.
+        for name in ["d", "e", "f"] {
+            fs::create_dir_all(dir.0.join(name)).unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        assert_eq!(
+            h.sink
+                .names()
+                .iter()
+                .filter(|name| **name == "WorkspaceWatchStatusChanged")
+                .count(),
+            1,
+            "{:?}",
+            h.sink.names()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_fully_watched_workspace_reports_no_degradation() {
+        let h = harness();
+        let dir = TempDir::new("watch-healthy");
+        let workspace = h
+            .manager
+            .open(
+                &dir.0,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
+            .unwrap();
+        assert_eq!(status_of(&h, &workspace), Vec::new());
+        assert!(!h.sink.names().contains(&"WorkspaceWatchStatusChanged"));
+    }
+
+    /// The failure T070 only logged: the workspace opens, nothing is watched,
+    /// and now that is said rather than merely true.
+    #[tokio::test]
+    async fn a_backend_that_refuses_reports_unavailable() {
+        let h = harness();
+        let dir = TempDir::new("watch-refused");
+        let workspace = open_with_watch(&h, &dir, watch::WatchSetup::Refuse);
+
+        assert_eq!(
+            status_of(&h, &workspace),
+            vec![watch::WatchDegradedReason::BackendUnavailable]
+        );
+        let names = h.sink.names();
+        let opened = names.iter().position(|name| *name == "WorkspaceOpened");
+        let degraded = names
+            .iter()
+            .position(|name| *name == "WorkspaceWatchStatusChanged");
+        assert!(
+            opened.is_some() && degraded > opened,
+            "announced after the workspace it is about: {names:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn watch_status_of_a_closed_workspace_is_not_found() {
+        let h = harness();
+        let dir = TempDir::new("watch-closed");
+        let workspace = open_with_watch(&h, &dir, watch::WatchSetup::Refuse);
+        h.manager
+            .close(
+                &workspace.id,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
+            .unwrap();
+        let error = h
+            .manager
+            .watch_status(
+                watch::WatchStatusRequest {
+                    workspace_id: workspace.id.clone(),
+                },
+                &CorrelationId::new(),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, CoreErrorCode::NotFound);
+
+        // And the next workspace starts healthy: the old reason did not carry.
+        *h.manager.watch_setup.lock().unwrap() = None;
+        let next_dir = TempDir::new("watch-next");
+        let next = h
+            .manager
+            .open(
+                &next_dir.0,
+                UnsavedPolicy::Refuse,
+                Actor::User,
+                CorrelationId::new(),
+            )
+            .unwrap();
+        assert_eq!(status_of(&h, &next), Vec::new());
     }
 
     #[test]

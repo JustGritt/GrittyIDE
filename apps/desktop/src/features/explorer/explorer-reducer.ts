@@ -4,9 +4,11 @@ import type {
   DirectoryPage,
   EventEnvelope,
   OperationId,
+  WatchDegradedReason,
   Workspace,
   WorkspaceClosedReason,
   WorkspaceId,
+  WorkspaceWatchStatus,
 } from '@gritty/protocol';
 import { emptySelection, keepVisible, type Selection } from './explorer-selection';
 
@@ -74,6 +76,15 @@ export interface ExplorerState {
    * reducer only holds the result and prunes it when rows disappear.
    */
   readonly selection: Selection;
+  /**
+   * Why the open workspace's watch cannot cover the whole tree, if it cannot
+   * (WATCH-DEGRADED). Sorted, and only ever grows while the workspace is open:
+   * the query on open and the event are merged by union, so whichever arrives
+   * second cannot erase what the first said.
+   */
+  readonly watchDegraded: readonly WatchDegradedReason[];
+  /** The user dismissed the notice; a reason not seen before shows it again. */
+  readonly watchNoticeDismissed: boolean;
 }
 
 export const initialExplorerState: ExplorerState = {
@@ -84,6 +95,8 @@ export const initialExplorerState: ExplorerState = {
   unmatched: {},
   stale: [],
   selection: emptySelection,
+  watchDegraded: [],
+  watchNoticeDismissed: false,
 };
 
 /** Operation kind the core uses for a listing that outlived its budget. */
@@ -118,6 +131,9 @@ export type ExplorerAction =
    * part-way (FILES-PARTIAL). The same answer `overflowed` gets.
    */
   | { type: 'invalidate'; paths: readonly string[]; all?: boolean }
+  /** The answer to `workspace.watchStatus`, asked when a workspace opens. */
+  | { type: 'watchStatus'; status: WorkspaceWatchStatus }
+  | { type: 'dismissWatchNotice' }
   | { type: 'event'; event: EventEnvelope };
 
 export function childPath(parent: string, name: string): string {
@@ -172,6 +188,8 @@ function openWorkspace(state: ExplorerState, workspace: Workspace): ExplorerStat
     unmatched: {},
     stale: [],
     selection: emptySelection,
+    watchDegraded: [],
+    watchNoticeDismissed: false,
   };
 }
 
@@ -190,6 +208,25 @@ function closeWorkspace(
     unmatched: {},
     stale: [],
     selection: emptySelection,
+    watchDegraded: [],
+    watchNoticeDismissed: false,
+  };
+}
+
+/**
+ * Merge what the core says about the open workspace's watch (WATCH-DEGRADED).
+ * By union: the query and the event can arrive in either order, and an older,
+ * shorter answer must not erase a reason a newer one added.
+ */
+function mergeWatchStatus(state: ExplorerState, status: WorkspaceWatchStatus): ExplorerState {
+  if (state.workspace?.id !== status.workspaceId) return state;
+  const known = new Set(state.watchDegraded);
+  const added = status.degraded.filter((reason) => !known.has(reason));
+  if (added.length === 0) return state;
+  return {
+    ...state,
+    watchDegraded: [...state.watchDegraded, ...added].sort(),
+    watchNoticeDismissed: false,
   };
 }
 
@@ -324,6 +361,8 @@ function onEvent(state: ExplorerState, event: EventEnvelope): ExplorerState {
       const stale = staleNodes(state, event.payload.directories, event.payload.overflowed);
       return stale === state.stale ? state : { ...state, stale };
     }
+    case 'WorkspaceWatchStatusChanged':
+      return mergeWatchStatus(state, event.payload);
     case 'WorkspaceClosed':
       return closeWorkspace(state, event.payload.workspaceId, {
         root: event.payload.root,
@@ -416,6 +455,10 @@ export function explorerReducer(state: ExplorerState, action: ExplorerAction): E
         : { ...state, showHidden: action.showHidden };
     case 'dismissNotice':
       return state.notice === null ? state : { ...state, notice: null };
+    case 'watchStatus':
+      return mergeWatchStatus(state, action.status);
+    case 'dismissWatchNotice':
+      return state.watchNoticeDismissed ? state : { ...state, watchNoticeDismissed: true };
     case 'refreshing': {
       // Taken, not cleared: a batch that arrived while these were being
       // dispatched must survive.

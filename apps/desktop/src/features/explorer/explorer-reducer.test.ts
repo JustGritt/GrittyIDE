@@ -4,6 +4,7 @@ import type {
   EventEnvelope,
   Operation,
   OperationId,
+  WatchDegradedReason,
   Workspace,
   WorkspaceId,
 } from '@gritty/protocol';
@@ -501,6 +502,78 @@ describe('file operations that end without a result (FILES-PARTIAL)', () => {
   it('invalidates the whole loaded tree on request', () => {
     const state = explorerReducer(withLoadedTree(), { type: 'invalidate', paths: [], all: true });
     expect([...state.stale].sort()).toEqual(['', 'src']);
+  });
+});
+
+describe('the watch status (WATCH-DEGRADED)', () => {
+  function statusEvent(degraded: WatchDegradedReason[], workspaceId = WS.id): EventEnvelope {
+    return event({
+      name: 'WorkspaceWatchStatusChanged',
+      payload: { workspaceId, degraded },
+    });
+  }
+
+  it('merges the query and the event by union, in either order', () => {
+    // The event first, then an older, emptier query answer: nothing is erased.
+    let state = explorerReducer(opened(), {
+      type: 'event',
+      event: statusEvent(['DIRECTORY_LIMIT']),
+    });
+    state = explorerReducer(state, {
+      type: 'watchStatus',
+      status: { workspaceId: WS.id, degraded: [] },
+    });
+    expect(state.watchDegraded).toEqual(['DIRECTORY_LIMIT']);
+
+    // The query first, then an event adding a reason: sorted, no duplicates.
+    let other = explorerReducer(opened(), {
+      type: 'watchStatus',
+      status: { workspaceId: WS.id, degraded: ['REGISTRATION_REFUSED'] },
+    });
+    other = explorerReducer(other, {
+      type: 'event',
+      event: statusEvent(['DIRECTORY_LIMIT', 'REGISTRATION_REFUSED']),
+    });
+    expect(other.watchDegraded).toEqual(['DIRECTORY_LIMIT', 'REGISTRATION_REFUSED']);
+  });
+
+  it("ignores another workspace's status", () => {
+    const state = opened();
+    expect(
+      explorerReducer(state, {
+        type: 'event',
+        event: statusEvent(['BACKEND_UNAVAILABLE'], 'ws-other' as WorkspaceId),
+      }),
+    ).toBe(state);
+  });
+
+  it('stays dismissed until a reason it has not shown arrives', () => {
+    let state = explorerReducer(opened(), {
+      type: 'event',
+      event: statusEvent(['DIRECTORY_LIMIT']),
+    });
+    state = explorerReducer(state, { type: 'dismissWatchNotice' });
+    expect(state.watchNoticeDismissed).toBe(true);
+
+    const same = explorerReducer(state, { type: 'event', event: statusEvent(['DIRECTORY_LIMIT']) });
+    expect(same).toBe(state);
+
+    const worse = explorerReducer(state, {
+      type: 'event',
+      event: statusEvent(['BACKEND_ERROR', 'DIRECTORY_LIMIT']),
+    });
+    expect(worse.watchNoticeDismissed).toBe(false);
+    expect(worse.watchDegraded).toEqual(['BACKEND_ERROR', 'DIRECTORY_LIMIT']);
+  });
+
+  it('forgets it all when the workspace closes', () => {
+    let state = explorerReducer(opened(), {
+      type: 'event',
+      event: statusEvent(['DIRECTORY_LIMIT']),
+    });
+    state = explorerReducer(state, { type: 'workspace', workspace: null });
+    expect(state.watchDegraded).toEqual([]);
+    expect(state.watchNoticeDismissed).toBe(false);
   });
 });
 

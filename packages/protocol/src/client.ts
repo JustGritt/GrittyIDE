@@ -118,6 +118,7 @@ import {
   type UpdateWorkstreamRequest,
   type Workspace,
   type WorkspaceId,
+  type WorkspaceWatchStatus,
   type Workstream,
   type WorkstreamAgentLink,
   type WriteTerminalRequest,
@@ -207,6 +208,14 @@ export interface CoreClient {
      * unsaved-buffer snapshots stored under that root are left alone.
      */
     forget(root: string): Promise<void>;
+    /**
+     * How well the open workspace is watched (WATCH-DEGRADED): every reason the
+     * watch cannot cover the whole tree, empty when it can.
+     * `WorkspaceWatchStatusChanged` announces each new reason once; this is the
+     * same answer for a caller that mounted after it. `NotFound` when the
+     * workspace is not the open one.
+     */
+    watchStatus(workspaceId: WorkspaceId): Promise<WorkspaceWatchStatus>;
   };
   /**
    * Documents (T030, Gate B). The core owns every buffer: `open` returns the
@@ -889,6 +898,8 @@ export function createCoreClient(
         const request: ForgetWorkspaceRequest = { root };
         return command<void>('workspace.forget', { request });
       },
+      watchStatus: (workspaceId) =>
+        command<WorkspaceWatchStatus>('workspace.watchStatus', { request: { workspaceId } }),
     },
     documents: {
       open: (request) => command<DocumentContent>('documents.open', { request }),

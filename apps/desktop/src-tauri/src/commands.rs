@@ -62,6 +62,7 @@ use gritty_core::workspace::files::{
     UndoRequest,
 };
 use gritty_core::workspace::find::{DEFAULT_FIND_BUDGET, FindFilesRequest, FindFilesResponse};
+use gritty_core::workspace::watch::{WatchStatusRequest, WorkspaceWatchStatus};
 use gritty_core::workspace::{
     CloseWorkspaceRequest, DEFAULT_LIST_BUDGET, ForgetWorkspaceRequest, ListDirectoryRequest,
     ListDirectoryResponse, OpenWorkspaceRequest, RecentWorkspace, RecentWorkspacesRequest,
@@ -211,6 +212,22 @@ pub async fn workspace_current(core: State<'_, Core>) -> Result<Option<Workspace
     let workspaces = core.workspaces.clone();
     guard("workspace.current", move |correlation| async move {
         Ok(workspaces.current(&correlation))
+    })
+    .await
+}
+
+/// `workspace.watchStatus`: how well the open workspace is watched
+/// (WATCH-DEGRADED). The answer a renderer reads when it mounts after the
+/// `WorkspaceWatchStatusChanged` that first said so.
+#[tauri::command]
+pub async fn workspace_watch_status(
+    core: State<'_, Core>,
+    request: serde_json::Value,
+) -> Result<WorkspaceWatchStatus, CoreError> {
+    let workspaces = core.workspaces.clone();
+    guard("workspace.watchStatus", move |correlation| async move {
+        let request: WatchStatusRequest = parse_request(request)?;
+        workspaces.watch_status(request, &correlation)
     })
     .await
 }

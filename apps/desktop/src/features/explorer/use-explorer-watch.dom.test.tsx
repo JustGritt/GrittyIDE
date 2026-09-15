@@ -384,3 +384,63 @@ describe('useExplorer re-listing many stale directories', () => {
     expect(listed).toEqual(['d3', 'd3']);
   });
 });
+
+/**
+ * WATCH-DEGRADED, through the hook: the notice's state comes from the query on
+ * open (for a renderer that subscribed after the event) and from the event.
+ */
+describe('useExplorer and a degraded watch', () => {
+  afterEach(cleanup);
+
+  beforeEach(() => {
+    seam.handlers.clear();
+    listed.length = 0;
+    seam.handlers.set('workspace_current', (): Workspace => WORKSPACE);
+    seam.handlers.set('workspace_list', (args): ListDirectoryResponse => {
+      const path = (args?.request as { path?: string } | undefined)?.path ?? '';
+      return {
+        status: 'ready',
+        page: { path: path as WorkspacePath, entries: [], total: 0, truncated: false },
+      };
+    });
+  });
+
+  function emitWatchStatus(degraded: string[]): void {
+    seq += 1;
+    const envelope = {
+      seq,
+      actor: { type: 'SYSTEM' },
+      name: 'WorkspaceWatchStatusChanged',
+      workspaceId: WORKSPACE.id,
+      payload: { workspaceId: WORKSPACE.id, degraded },
+    } as unknown as EventEnvelope;
+    for (const listener of seam.listeners) listener(envelope);
+  }
+
+  it('asks on open, so a reason reported before it subscribed still shows', async () => {
+    const asked: unknown[] = [];
+    seam.handlers.set('workspace_watch_status', (args) => {
+      asked.push(args?.request);
+      return { workspaceId: WORKSPACE.id, degraded: ['BACKEND_UNAVAILABLE'] };
+    });
+    const rendered = renderHook(() => useExplorer());
+
+    await waitFor(() =>
+      expect(rendered.result.current.state.watchDegraded).toEqual(['BACKEND_UNAVAILABLE']),
+    );
+    expect(asked).toEqual([{ workspaceId: WORKSPACE.id }]);
+    expect(rendered.result.current.error).toBeNull();
+  });
+
+  it('adds what the event reports, and a failed query is not an error', async () => {
+    // Unstubbed: `workspace_watch_status` rejects.
+    const rendered = renderHook(() => useExplorer());
+    await waitFor(() => expect(rendered.result.current.state.workspace).not.toBeNull());
+
+    await act(async () => {
+      emitWatchStatus(['DIRECTORY_LIMIT']);
+    });
+    expect(rendered.result.current.state.watchDegraded).toEqual(['DIRECTORY_LIMIT']);
+    expect(rendered.result.current.error).toBeNull();
+  });
+});

@@ -55,6 +55,10 @@ function setup() {
   transport.handlers.set('workspace_current', () => null);
   transport.handlers.set('workspace_recents', () => recents);
   transport.handlers.set('workspace_forget', () => null);
+  transport.handlers.set('workspace_watch_status', () => ({
+    workspaceId: workspace.id,
+    degraded: ['DIRECTORY_LIMIT'],
+  }));
   transport.handlers.set('workspace_list', (args) => {
     const request = args?.request as { path: string };
     if (request.path === '..') {
@@ -114,6 +118,18 @@ describe('workspace commands', () => {
       ['workspace_recents', { request: { limit: 5 } }],
       ['workspace_forget', { request: { root: '/gone' } }],
     ]);
+  });
+
+  it('asks watchStatus for one workspace, as a request object (WATCH-DEGRADED)', async () => {
+    const { client, transport } = setup();
+    expect(COMMANDS['workspace.watchStatus']).toBe('workspace_watch_status');
+    await expect(client.workspace.watchStatus(workspace.id)).resolves.toEqual({
+      workspaceId: workspace.id,
+      degraded: ['DIRECTORY_LIMIT'],
+    });
+    expect(
+      transport.calls.filter((c) => c.command === 'workspace_watch_status').map((c) => c.args),
+    ).toEqual([{ request: { workspaceId: workspace.id } }]);
   });
 
   it('wraps close, current and list arguments as request objects', async () => {

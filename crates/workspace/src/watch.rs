@@ -21,6 +21,10 @@
 //!   says [`ChangeBatch::overflowed`] with an empty list, rather than
 //!   presenting a partial list as complete.
 //!
+//! When the watch cannot cover the whole tree it says so, once per reason, as
+//! [`WatchEvent::Degraded`] (WATCH-DEGRADED, amending ADR-025) — a reason, not
+//! a count, because a bounded walk cannot know how much it did not reach.
+//!
 //! The watch is a background observer, not an operation: it has no start, no
 //! completion and no result to cancel. Dropping its [`Watch`] handle stops it
 //! without joining the pump thread, so a workspace can close while a batch is
@@ -71,6 +75,9 @@ pub struct WatchConfig {
     pub max_directories: usize,
     /// How often the root's presence is confirmed.
     pub root_check_interval: Duration,
+    /// Most directories a [`WatchStrategy::PerDirectory`] watch registers;
+    /// beyond it the watch reports [`Degradation::DirectoryLimit`].
+    pub max_watched_directories: usize,
 }
 
 impl Default for WatchConfig {
@@ -80,6 +87,7 @@ impl Default for WatchConfig {
             max_wait: MAX_WAIT,
             max_directories: MAX_DIRECTORIES,
             root_check_interval: ROOT_CHECK_INTERVAL,
+            max_watched_directories: MAX_WATCHED_DIRECTORIES,
         }
     }
 }
@@ -93,6 +101,16 @@ impl WatchConfig {
             max_wait,
             max_directories,
             root_check_interval: Duration::from_millis(50),
+            max_watched_directories: MAX_WATCHED_DIRECTORIES,
+        }
+    }
+
+    /// The same, with a registration limit small enough for a test tree to
+    /// exceed.
+    pub fn with_max_watched_directories(self, max_watched_directories: usize) -> Self {
+        Self {
+            max_watched_directories,
+            ..self
         }
     }
 }
@@ -139,12 +157,32 @@ pub struct ChangeBatch {
     pub overflowed: bool,
 }
 
+/// Why part of the tree is not being watched (WATCH-DEGRADED).
+///
+/// A reason and never a count: the registration walk stops at its limit
+/// without knowing how many directories it did not reach, so any number would
+/// be a lower bound presented as a total.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Degradation {
+    /// The backend refused to register some directory (inotify's per-user
+    /// budget, most often). The directories that did register keep reporting.
+    RegistrationRefused,
+    /// [`WatchConfig::max_watched_directories`] was reached; the rest of the
+    /// tree is not registered.
+    DirectoryLimit,
+    /// The backend reported an error while running.
+    BackendError,
+}
+
 /// What a watch tells its owner.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WatchEvent {
     Changed(ChangeBatch),
     /// The root is gone. The watch has stopped; nothing follows this.
     RootMissing,
+    /// Part of the tree is not being watched, for this reason. Delivered at
+    /// most once per reason per watch, so a failing backend cannot storm.
+    Degraded(Degradation),
 }
 
 /// A live watch. Dropping it stops the watch.
@@ -202,6 +240,7 @@ where
     };
 
     let mut registered = HashSet::new();
+    let mut initial = BTreeSet::new();
     match strategy {
         WatchStrategy::Recursive => {
             backend
@@ -216,7 +255,20 @@ where
                 .watch(&root_path, RecursiveMode::NonRecursive)
                 .map_err(|error| watch_error(&root_path, error))?;
             registered.insert(root_path.clone());
-            register_subtree(&mut backend, &mut registered, &root_path);
+            let limit = config
+                .max_watched_directories
+                .saturating_sub(registered.len());
+            let outcome = register_subtree(
+                &mut |directory| {
+                    backend
+                        .watch(directory, RecursiveMode::NonRecursive)
+                        .is_ok()
+                },
+                &mut registered,
+                &root_path,
+                limit,
+            );
+            initial.extend(outcome.degradations());
         }
     }
 
@@ -228,6 +280,8 @@ where
         stopped: Arc::clone(&stopped),
         registered,
         sink,
+        reported: BTreeSet::new(),
+        initial,
     };
     std::thread::Builder::new()
         .name("gritty-watch".to_owned())
@@ -258,12 +312,20 @@ struct Pump<S> {
     /// Directories handed to the backend ([`WatchStrategy::PerDirectory`]).
     registered: HashSet<PathBuf>,
     sink: S,
+    /// Degradations already delivered: each reason goes out once.
+    reported: BTreeSet<Degradation>,
+    /// Found by the synchronous walk in [`watch`], delivered from the pump
+    /// thread so the sink only ever runs there.
+    initial: BTreeSet<Degradation>,
 }
 
 impl<S: Fn(WatchEvent)> Pump<S> {
     fn run(mut self, mut backend: notify::RecommendedWatcher, rx: mpsc::Receiver<Pulse>) {
         let mut last_root_check = Instant::now();
         let mut backend_errors = 0_u64;
+        for degradation in std::mem::take(&mut self.initial) {
+            self.degrade(degradation);
+        }
         loop {
             if self.stopped.load(Ordering::Acquire) {
                 break;
@@ -324,6 +386,19 @@ impl<S: Fn(WatchEvent)> Pump<S> {
         (self.sink)(event);
     }
 
+    /// Report a degradation the first time its reason occurs, and log it; every
+    /// later occurrence is only counted in the log.
+    fn degrade(&mut self, degradation: Degradation) {
+        if self.reported.insert(degradation) {
+            tracing::warn!(
+                root = %self.root.display(),
+                ?degradation,
+                "part of the workspace is not being watched"
+            );
+            self.deliver(WatchEvent::Degraded(degradation));
+        }
+    }
+
     fn absorb(
         &mut self,
         backend: &mut notify::RecommendedWatcher,
@@ -338,14 +413,23 @@ impl<S: Fn(WatchEvent)> Pump<S> {
                 // failing usually keeps failing.
                 if *errors == 1 {
                     tracing::warn!(root = %self.root.display(), %error, "watch backend error");
+                    self.degrade(Degradation::BackendError);
                 }
                 return;
             }
         };
+        let now = Instant::now();
+        // The backend says events were lost or cannot be trusted (inotify's
+        // queue overflowed, FSEvents wants its subdirectories rescanned). The
+        // paths it names, if any, are not the whole change, so the batch says
+        // `overflowed` rather than presenting them as complete (ADR-025).
+        if event.need_rescan() {
+            self.coalescer.overflow(now);
+            return;
+        }
         if !is_interesting(&event.kind) {
             return;
         }
-        let now = Instant::now();
         for path in &event.paths {
             if self.strategy == WatchStrategy::PerDirectory {
                 self.follow_tree(backend, &event.kind, path);
@@ -380,35 +464,72 @@ impl<S: Fn(WatchEvent)> Pump<S> {
         if !path.is_dir() || self.registered.contains(path) {
             return;
         }
-        if self.registered.len() >= MAX_WATCHED_DIRECTORIES {
+        let limit = self.coalescer.config.max_watched_directories;
+        if self.registered.len() >= limit {
+            self.degrade(Degradation::DirectoryLimit);
             return;
         }
-        if backend.watch(path, RecursiveMode::NonRecursive).is_ok() {
-            self.registered.insert(path.to_path_buf());
-            // A directory can arrive with a subtree already inside it (a move).
-            register_subtree(backend, &mut self.registered, path);
+        if backend.watch(path, RecursiveMode::NonRecursive).is_err() {
+            self.degrade(Degradation::RegistrationRefused);
+            return;
+        }
+        self.registered.insert(path.to_path_buf());
+        // A directory can arrive with a subtree already inside it (a move).
+        let room = limit.saturating_sub(self.registered.len());
+        let outcome = register_subtree(
+            &mut |directory| {
+                backend
+                    .watch(directory, RecursiveMode::NonRecursive)
+                    .is_ok()
+            },
+            &mut self.registered,
+            path,
+            room,
+        );
+        for degradation in outcome.degradations() {
+            self.degrade(degradation);
         }
     }
 }
 
-/// Register every non-ignored directory under `start`, bounded. Failures are
-/// per-directory: the ones that succeeded keep reporting (the inotify budget
-/// runs out mid-tree rather than all at once).
+/// What registering a subtree could not do.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct SubtreeOutcome {
+    /// Directories the backend refused.
+    refused: u64,
+    /// The walk stopped at its limit with directories left unregistered.
+    truncated: bool,
+}
+
+impl SubtreeOutcome {
+    fn degradations(&self) -> impl Iterator<Item = Degradation> + use<> {
+        let refused = (self.refused > 0).then_some(Degradation::RegistrationRefused);
+        let truncated = self.truncated.then_some(Degradation::DirectoryLimit);
+        refused.into_iter().chain(truncated)
+    }
+}
+
+/// Register every non-ignored directory under `start`, at most `limit` of them,
+/// through `register` (the backend's `watch`, or a test's stand-in). Failures
+/// are per-directory: the ones that succeeded keep reporting (the inotify
+/// budget runs out mid-tree rather than all at once). What could not be done
+/// is returned, for the caller to report.
 fn register_subtree(
-    backend: &mut notify::RecommendedWatcher,
+    register: &mut dyn FnMut(&Path) -> bool,
     registered: &mut HashSet<PathBuf>,
     start: &Path,
-) {
+    limit: usize,
+) -> SubtreeOutcome {
+    let (directories, truncated) = watchable_directories(start, limit);
     let mut refused = 0_u64;
-    for directory in watchable_directories(start, MAX_WATCHED_DIRECTORIES - registered.len()) {
+    for directory in directories {
         if registered.contains(&directory) {
             continue;
         }
-        match backend.watch(&directory, RecursiveMode::NonRecursive) {
-            Ok(()) => {
-                registered.insert(directory);
-            }
-            Err(_) => refused += 1,
+        if register(&directory) {
+            registered.insert(directory);
+        } else {
+            refused += 1;
         }
     }
     if refused > 0 {
@@ -418,17 +539,17 @@ fn register_subtree(
             "some directories could not be watched; those subtrees keep the pre-watch behaviour"
         );
     }
+    SubtreeOutcome { refused, truncated }
 }
 
 /// Directories under `start` (excluding `start`), skipping ignored names and
-/// never following a symlink, at most `limit` of them.
-fn watchable_directories(start: &Path, limit: usize) -> Vec<PathBuf> {
+/// never following a symlink, at most `limit` of them — and whether any were
+/// left out. `true` only when one more directory was actually seen, so a tree
+/// of exactly `limit` directories is not reported as cut short.
+fn watchable_directories(start: &Path, limit: usize) -> (Vec<PathBuf>, bool) {
     let mut found = Vec::new();
     let mut queue = vec![start.to_path_buf()];
     while let Some(directory) = queue.pop() {
-        if found.len() >= limit {
-            break;
-        }
         let Ok(entries) = std::fs::read_dir(&directory) else {
             continue;
         };
@@ -446,15 +567,15 @@ fn watchable_directories(start: &Path, limit: usize) -> Vec<PathBuf> {
             {
                 continue;
             }
+            if found.len() >= limit {
+                return (found, true);
+            }
             let child = entry.path();
             found.push(child.clone());
             queue.push(child);
-            if found.len() >= limit {
-                return found;
-            }
         }
     }
-    found
+    (found, false)
 }
 
 fn root_is_present(root: &Path) -> bool {
@@ -538,6 +659,15 @@ impl Coalescer {
             self.overflowed = true;
             self.directories.clear();
         }
+    }
+
+    /// The backend lost track: whatever this batch holds is not the whole
+    /// change, so it overflows, exactly as a batch above the cap does.
+    fn overflow(&mut self, now: Instant) {
+        self.opened.get_or_insert(now);
+        self.touched = Some(now);
+        self.overflowed = true;
+        self.directories.clear();
     }
 
     /// When the next batch is due, or `None` when nothing is pending.
@@ -752,6 +882,149 @@ mod tests {
             notify::event::DataChange::Content
         ))));
         assert!(is_interesting(&EventKind::Any));
+    }
+
+    /// A scratch tree for the registration walk; the pure tests above need
+    /// no disk.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn with_directories(label: &str, directories: &[&str]) -> Self {
+            use std::sync::atomic::AtomicUsize;
+            static COUNTER: AtomicUsize = AtomicUsize::new(0);
+            let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let path = std::env::temp_dir().join(format!(
+                "gritty-watch-unit-{label}-{}-{n}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            for directory in directories {
+                std::fs::create_dir_all(path.join(directory)).expect("scratch directory");
+            }
+            std::fs::create_dir_all(&path).expect("scratch root");
+            Self(path)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn a_refused_registration_is_counted_not_fatal() {
+        let tree = Scratch::with_directories("refused", &["ok", "refused", "ok/deeper"]);
+        let mut registered = HashSet::new();
+        let outcome = register_subtree(
+            &mut |directory| !directory.ends_with("refused"),
+            &mut registered,
+            &tree.0,
+            100,
+        );
+        assert_eq!(
+            outcome,
+            SubtreeOutcome {
+                refused: 1,
+                truncated: false
+            }
+        );
+        // The others still registered: the budget runs out per directory.
+        assert_eq!(registered.len(), 2, "{registered:?}");
+        assert_eq!(
+            outcome.degradations().collect::<Vec<_>>(),
+            vec![Degradation::RegistrationRefused]
+        );
+    }
+
+    #[test]
+    fn the_walk_says_when_it_stopped_at_its_limit() {
+        let tree = Scratch::with_directories("limit", &["a", "b", "c"]);
+        let (found, truncated) = watchable_directories(&tree.0, 2);
+        assert_eq!(found.len(), 2);
+        assert!(truncated, "a third directory was left out");
+
+        // Exactly at the limit is not cut short.
+        let (found, truncated) = watchable_directories(&tree.0, 3);
+        assert_eq!(found.len(), 3);
+        assert!(!truncated);
+
+        let mut registered = HashSet::new();
+        let outcome = register_subtree(&mut |_| true, &mut registered, &tree.0, 2);
+        assert_eq!(
+            outcome.degradations().collect::<Vec<_>>(),
+            vec![Degradation::DirectoryLimit]
+        );
+    }
+
+    /// Everything a test pump delivered, in order.
+    type Delivered = Arc<std::sync::Mutex<Vec<WatchEvent>>>;
+
+    fn recording_pump() -> (Pump<impl Fn(WatchEvent)>, Delivered) {
+        let delivered = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = {
+            let delivered = Arc::clone(&delivered);
+            move |event| delivered.lock().expect("lock").push(event)
+        };
+        let pump = Pump {
+            root: PathBuf::from("/ws"),
+            strategy: WatchStrategy::PerDirectory,
+            coalescer: Coalescer::new(config()),
+            stopped: Arc::new(AtomicBool::new(false)),
+            registered: HashSet::new(),
+            sink,
+            reported: BTreeSet::new(),
+            initial: BTreeSet::new(),
+        };
+        (pump, delivered)
+    }
+
+    #[test]
+    fn a_degradation_is_delivered_once_per_reason() {
+        let (mut pump, delivered) = recording_pump();
+        for _ in 0..100 {
+            pump.degrade(Degradation::DirectoryLimit);
+            pump.degrade(Degradation::RegistrationRefused);
+        }
+        pump.degrade(Degradation::DirectoryLimit);
+        assert_eq!(
+            *delivered.lock().expect("lock"),
+            vec![
+                WatchEvent::Degraded(Degradation::DirectoryLimit),
+                WatchEvent::Degraded(Degradation::RegistrationRefused),
+            ],
+            "a failing backend reports each reason once, not once per failure"
+        );
+    }
+
+    #[test]
+    fn a_rescan_event_overflows_the_batch() {
+        use notify::event::{CreateKind, Flag};
+
+        let (mut pump, _delivered) = recording_pump();
+        let mut backend = notify::recommended_watcher(|_| {}).expect("a backend");
+        let start = Instant::now();
+        let mut errors = 0;
+        // An ordinary change first, so there is a partial list to distrust.
+        pump.absorb(
+            &mut backend,
+            Ok(notify::Event::new(EventKind::Create(CreateKind::File))
+                .add_path(PathBuf::from("/ws/src/a.rs"))),
+            &mut errors,
+        );
+        pump.absorb(
+            &mut backend,
+            Ok(notify::Event::new(EventKind::Other)
+                .add_path(PathBuf::from("/ws/src"))
+                .set_flag(Flag::Rescan)),
+            &mut errors,
+        );
+        let batch = pump
+            .coalescer
+            .take_if_due(start + Duration::from_secs(5))
+            .expect("due");
+        assert!(batch.overflowed, "a rescan is not a complete list");
+        assert!(batch.directories.is_empty(), "{:?}", batch.directories);
     }
 
     #[test]
