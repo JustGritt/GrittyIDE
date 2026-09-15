@@ -1,7 +1,7 @@
 # Task T080-U — The search panel
 
 - **Phase:** 2
-- **Status:** doing
+- **Status:** review
 - **Depends on:** T080 (`search.query`, the walk), PROTO-W3 (the wire: `SearchMatchesFound`, `SearchCompletion`)
 
 ## Objective

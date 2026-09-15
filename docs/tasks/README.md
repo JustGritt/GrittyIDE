@@ -72,7 +72,7 @@ moves back. Never move a task file by hand.
 | [SIDEBAR-ICONS](docs/tasks/SIDEBAR-ICONS-section-tab-icons.md) | Sidebar section tabs as icons, for horizontal room | 2 | – | review |
 | SIDECAR-BUNDLE-CONFIG | Move externalBin to a bundle-time config so a compile never needs a staged binary | 3 | SIDECAR-FRESH-CHECKOUT | unspec |
 | SIDECAR-FRESH-CHECKOUT | A fresh clone or worktree cannot build gritty-desktop until T225's sidecar is staged by hand | 3 | T225 | review |
-| [T080-U](docs/tasks/T080-U-search-panel.md) | The search panel | 2 | PROTO-W3, T080 | doing |
+| [T080-U](T080-U-search-panel.md) | The search panel | 2 | PROTO-W3, T080 | review |
 | T101-D | The diff as an editor tab (Monaco diff editor) on git.show | 2 | T101-R | todo |
 | T101-R | gix: a paged commit walk, and a blob at a revision | 2 | T101-C | review |
 | [T102-U](T102-U-git-write-ui.md) | Staging, discard and the commit box in the Changes panel | 2 | T102-R | review |
