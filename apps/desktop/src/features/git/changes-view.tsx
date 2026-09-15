@@ -6,14 +6,24 @@ import type {
   RepositoryStatus,
   WorkspacePath,
 } from '@gritty/protocol';
+import { ConfirmDialog } from '../../components/confirm-dialog';
 import { ErrorEnvelope } from '../../components/error-envelope';
 import { FileIcon, fileIconKind } from '../../components/file-icon';
 import {
+  amendWarning,
+  type BandVerb,
+  bandVerbs,
+  type ChangeGroup,
   changeKindWord,
+  commitBlocker,
+  type DiscardPlan,
   describeEntry,
+  discardReport,
+  discardWording,
   fileDirectory,
   fileName,
   formatBytes,
+  gitRefusal,
   groupEntries,
   headLine,
   hunkHeader,
@@ -23,9 +33,40 @@ import {
   stateLabel,
   statusCode,
   upstreamLine,
+  writeUnavailableReason,
 } from './git-model';
-import type { GitState, Read } from './git-reducer';
+import {
+  type CommitDraft,
+  type GitState,
+  type Read,
+  type Write,
+  type WriteRequest,
+  writeBusy,
+} from './git-reducer';
 import { HistoryView } from './history-view';
+
+/**
+ * The write half's callbacks (T102-U), in one prop so the read half's
+ * signature did not have to grow by eleven.
+ */
+export interface WriteControls {
+  /** The write on screen is a discard refused over dirty documents. */
+  readonly canDiscardAndRetry: boolean;
+  /** A discard waiting on its confirmation, or `null`. */
+  readonly discarding: DiscardPlan | null;
+  onStage(paths: readonly WorkspacePath[]): void;
+  onUnstage(paths: readonly WorkspacePath[]): void;
+  /** Ask first: this opens the confirmation, it does not discard. */
+  onRequestDiscard(paths: readonly WorkspacePath[]): void;
+  onConfirmDiscard(): void;
+  onCancelDiscard(): void;
+  onCommit(): void;
+  onDraftChange(change: Partial<CommitDraft>): void;
+  onDiscardAndRetry(): void;
+  onRetryWrite(): void;
+  onDismissWrite(): void;
+  onCancelWrite(): void;
+}
 
 /**
  * Everything the Changes tab draws (T100-U), and nothing that reads anything.
@@ -58,6 +99,7 @@ export function ChangesView({
   onViewChange,
   onLoadMoreHistory,
   onCancelHistory,
+  writes,
 }: {
   state: GitState;
   hasWorkspace: boolean;
@@ -77,6 +119,7 @@ export function ChangesView({
   onViewChange: (view: GitView) => void;
   onLoadMoreHistory: () => void;
   onCancelHistory: () => void;
+  writes: WriteControls;
 }) {
   if (!hasWorkspace) {
     return <p className="explorer__empty">No workspace open.</p>;
@@ -139,6 +182,15 @@ export function ChangesView({
           onReloadDiff={onReloadDiff}
           onCancelStatus={onCancelStatus}
           onCancelDiff={onCancelDiff}
+          writes={writes}
+        />
+      )}
+
+      {writes.discarding !== null && (
+        <DiscardDialog
+          plan={writes.discarding}
+          onConfirm={writes.onConfirmDiscard}
+          onCancel={writes.onCancelDiscard}
         />
       )}
     </div>
@@ -198,6 +250,7 @@ function ChangesBody({
   onReloadDiff,
   onCancelStatus,
   onCancelDiff,
+  writes,
 }: {
   state: GitState;
   selectedEntry: FileStatus | null;
@@ -207,9 +260,34 @@ function ChangesBody({
   onReloadDiff: () => void;
   onCancelStatus: () => void;
   onCancelDiff: () => void;
+  writes: WriteControls;
 }) {
+  const repository = state.status.kind === 'ready' ? state.status.value : null;
+  // Why a verb cannot be used right now. Unavailable comes first because it is
+  // the one the user can do something about; a write in flight is momentary.
+  const unavailable = writeUnavailableReason(state.availability);
+  const disabledReason =
+    unavailable ?? (writeBusy(state.write) ? 'Waiting for the write in progress.' : null);
   return (
     <>
+      {repository !== null && (
+        <div className="git__writes">
+          {unavailable !== null && (
+            <p className="git__note git__note--warn" role="status">
+              Staging and committing are unavailable: {unavailable}
+            </p>
+          )}
+          <CommitBox
+            repository={repository}
+            draft={state.draft}
+            write={state.write}
+            unavailable={unavailable}
+            writes={writes}
+          />
+          <WriteFeedback write={state.write} branch={headLine(repository)} writes={writes} />
+        </div>
+      )}
+
       <div className="git__list">
         <StatusRegion
           status={state.status}
@@ -219,6 +297,8 @@ function ChangesBody({
           onLoadMore={onLoadMore}
           onRetry={onRefresh}
           onCancel={onCancelStatus}
+          disabledReason={disabledReason}
+          writes={writes}
         />
       </div>
 
@@ -254,6 +334,8 @@ function StatusRegion({
   onLoadMore,
   onRetry,
   onCancel,
+  disabledReason,
+  writes,
 }: {
   status: Read<RepositoryStatus>;
   appending: boolean;
@@ -262,6 +344,8 @@ function StatusRegion({
   onLoadMore: () => void;
   onRetry: () => void;
   onCancel: () => void;
+  disabledReason: string | null;
+  writes: WriteControls;
 }) {
   switch (status.kind) {
     case 'idle':
@@ -324,6 +408,8 @@ function StatusRegion({
           selected={selected}
           onSelect={onSelect}
           onLoadMore={onLoadMore}
+          disabledReason={disabledReason}
+          writes={writes}
         />
       );
   }
@@ -335,12 +421,16 @@ function StatusList({
   selected,
   onSelect,
   onLoadMore,
+  disabledReason,
+  writes,
 }: {
   repository: RepositoryStatus;
   appending: boolean;
   selected: WorkspacePath | null;
   onSelect: (path: WorkspacePath | null) => void;
   onLoadMore: () => void;
+  disabledReason: string | null;
+  writes: WriteControls;
 }) {
   const groups = groupEntries(repository.entries);
   return (
@@ -357,14 +447,18 @@ function StatusList({
           <h3 className="git__group-title">
             {group.label}
             <span className="badge">{group.entries.length}</span>
+            <BandActions group={group} disabledReason={disabledReason} writes={writes} />
           </h3>
           <ul className="git__files">
             {group.entries.map((entry) => (
               <ChangeRow
                 key={`${group.id}:${entry.path}`}
                 entry={entry}
+                verbs={bandVerbs(group.id)}
                 selected={entry.path === selected}
                 onSelect={onSelect}
+                disabledReason={disabledReason}
+                writes={writes}
               />
             ))}
           </ul>
@@ -392,18 +486,87 @@ function StatusList({
   );
 }
 
+const VERB_LABELS: Record<BandVerb, string> = {
+  stage: 'Stage',
+  unstage: 'Unstage',
+  discard: 'Discard',
+};
+
+/** What a verb does, for its tooltip — the button itself has room for one word. */
+const VERB_TITLES: Record<BandVerb, string> = {
+  stage: 'Copy the working tree content into the index',
+  unstage: 'Take it back out of the index; the working tree is untouched',
+  discard: 'Throw the changes away, keeping a copy (asks first)',
+};
+
+function runVerb(verb: BandVerb, paths: readonly WorkspacePath[], writes: WriteControls) {
+  switch (verb) {
+    case 'stage':
+      writes.onStage(paths);
+      return;
+    case 'unstage':
+      writes.onUnstage(paths);
+      return;
+    case 'discard':
+      writes.onRequestDiscard(paths);
+      return;
+  }
+}
+
+/**
+ * The whole band at once. The paths are the band's own, named one by one:
+ * there is no "all" on the wire (T102-C), so "Stage all" means these files and
+ * not whatever else changed a moment ago.
+ */
+function BandActions({
+  group,
+  disabledReason,
+  writes,
+}: {
+  group: ChangeGroup;
+  disabledReason: string | null;
+  writes: WriteControls;
+}) {
+  const verbs = bandVerbs(group.id);
+  if (verbs.length === 0) return null;
+  const paths = group.entries.map((entry) => entry.path);
+  return (
+    <span className="git__group-actions">
+      {verbs.map((verb) => (
+        <button
+          key={verb}
+          type="button"
+          className="git__action"
+          disabled={disabledReason !== null}
+          title={disabledReason ?? `${VERB_TITLES[verb]} — all ${paths.length} in ${group.label}`}
+          aria-label={`${VERB_LABELS[verb]} all ${paths.length} in ${group.label}`}
+          onClick={() => runVerb(verb, paths, writes)}
+        >
+          {VERB_LABELS[verb]} all
+        </button>
+      ))}
+    </span>
+  );
+}
+
 function ChangeRow({
   entry,
+  verbs,
   selected,
   onSelect,
+  disabledReason,
+  writes,
 }: {
   entry: FileStatus;
+  verbs: readonly BandVerb[];
   selected: boolean;
   onSelect: (path: WorkspacePath | null) => void;
+  disabledReason: string | null;
+  writes: WriteControls;
 }) {
   const directory = fileDirectory(entry.path);
   return (
-    <li className="git__file">
+    <li className={`git__file${selected ? ' git__file--selected' : ''}`}>
       <button
         type="button"
         className={`git__file-button${selected ? ' git__file-button--selected' : ''}`}
@@ -424,6 +587,25 @@ function ChangeRow({
         {entry.kind === 'SUBMODULE' && <span className="badge">submodule</span>}
         {entry.renamedFrom !== undefined && <span className="badge">renamed</span>}
       </button>
+      {verbs.length > 0 && (
+        // Siblings of the row's button, not children: a button inside a button
+        // is invalid, and each verb has to be reachable on its own by Tab.
+        <span className="git__row-actions">
+          {verbs.map((verb) => (
+            <button
+              key={verb}
+              type="button"
+              className="git__action"
+              disabled={disabledReason !== null}
+              title={disabledReason ?? VERB_TITLES[verb]}
+              aria-label={`${VERB_LABELS[verb]} ${entry.path}`}
+              onClick={() => runVerb(verb, [entry.path], writes)}
+            >
+              {VERB_LABELS[verb]}
+            </button>
+          ))}
+        </span>
+      )}
     </li>
   );
 }
@@ -580,5 +762,282 @@ function HunkView({ hunk }: { hunk: DiffHunk }) {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The commit box (T102-U requirements 2, 3 and 6): the message, the two
+ * options that are visible choices and never defaults, and the branch the
+ * commit lands on — in view, because a commit to the wrong branch is the
+ * mistake this box is most likely to be used to make.
+ */
+function CommitBox({
+  repository,
+  draft,
+  write,
+  unavailable,
+  writes,
+}: {
+  repository: RepositoryStatus;
+  draft: CommitDraft;
+  write: Write;
+  unavailable: string | null;
+  writes: WriteControls;
+}) {
+  const committing = writeBusy(write) && isCommit(write);
+  const blocker =
+    unavailable ??
+    (writeBusy(write) ? 'Waiting for the write in progress.' : null) ??
+    commitBlocker(repository, draft);
+  const submit = () => {
+    if (blocker === null) writes.onCommit();
+  };
+  return (
+    <form
+      className="git__commit-box"
+      aria-label="Commit"
+      onSubmit={(event) => {
+        event.preventDefault();
+        submit();
+      }}
+    >
+      <p className="git__commit-target">
+        Commit to <span className="git__head">{headLine(repository)}</span>
+      </p>
+      <textarea
+        className="git__message"
+        aria-label="Commit message"
+        placeholder="Message (⌘↩ to commit)"
+        rows={3}
+        value={draft.message}
+        // Read-only rather than disabled while a commit runs: the text stays
+        // selectable, and what was typed cannot drift from what is being
+        // committed and then be cleared by its success.
+        readOnly={committing}
+        onChange={(event) => writes.onDraftChange({ message: event.target.value })}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+            event.preventDefault();
+            submit();
+          }
+        }}
+      />
+      <label className="git__option">
+        <input
+          type="checkbox"
+          checked={draft.amend}
+          disabled={committing || repository.head === undefined}
+          onChange={(event) => writes.onDraftChange({ amend: event.target.checked })}
+        />
+        Amend the last commit
+      </label>
+      {draft.amend && <p className="git__aside git__aside--warn">{amendWarning(repository)}</p>}
+      <label className="git__option">
+        <input
+          type="checkbox"
+          checked={draft.noVerify}
+          disabled={committing}
+          onChange={(event) => writes.onDraftChange({ noVerify: event.target.checked })}
+        />
+        Skip hooks (<code>--no-verify</code>)
+      </label>
+      <p className={`git__aside${draft.noVerify ? ' git__aside--warn' : ''}`}>
+        {draft.noVerify
+          ? "This repository's pre-commit and commit-msg hooks will not run: the project's own checks are skipped."
+          : "Commits run this repository's hooks, which are the project's own code."}
+      </p>
+      <div className="git__commit-actions">
+        <button type="submit" disabled={blocker !== null} title={blocker ?? undefined}>
+          {draft.amend ? 'Amend commit' : 'Commit'}
+        </button>
+        {blocker !== null && !committing && <span className="git__aside">{blocker}</span>}
+      </div>
+      {committing && (
+        <p className="git__note" role="status">
+          {write.kind === 'pending'
+            ? draft.noVerify
+              ? 'Committing (operation)…'
+              : 'Committing: the hooks are running…'
+            : 'Committing…'}
+          {write.kind === 'pending' && (
+            <button type="button" onClick={writes.onCancelWrite}>
+              Stop
+            </button>
+          )}
+        </p>
+      )}
+    </form>
+  );
+}
+
+function isCommit(write: Write): boolean {
+  return write.kind !== 'idle' && write.request.verb === 'commit';
+}
+
+const RUNNING_WORDS: Record<WriteRequest['verb'], string> = {
+  stage: 'Staging',
+  unstage: 'Unstaging',
+  discard: 'Discarding',
+  commit: 'Committing',
+};
+
+/**
+ * What the last write said, until it is dismissed or the next one replaces it.
+ *
+ * Every refusal is an `ErrorEnvelope` (T102-U failure behaviour), and a refusal
+ * from `git` itself also shows `git`'s own output as text — the envelope's
+ * `details` is JSON, where a hook's multi-line report is unreadable.
+ */
+function WriteFeedback({
+  write,
+  branch,
+  writes,
+}: {
+  write: Write;
+  branch: string;
+  writes: WriteControls;
+}) {
+  switch (write.kind) {
+    case 'idle':
+      return null;
+    case 'running':
+    case 'pending':
+      // The commit box speaks for a commit; the other three are fast, and
+      // saying so keeps a slow index from looking like a dead button.
+      if (write.request.verb === 'commit') return null;
+      return (
+        <p className="git__note" role="status">
+          {RUNNING_WORDS[write.request.verb]} {countPaths(write.request.paths)}…
+        </p>
+      );
+    case 'failed': {
+      const refusal = gitRefusal(write.error);
+      return (
+        <div className="git__feedback">
+          <ErrorEnvelope error={write.error} onDismiss={writes.onDismissWrite} />
+          {refusal !== null && (
+            <div className="git__refusal">
+              <p className="git__aside">
+                git {refusal.subcommand} refused
+                {refusal.exitCode !== null ? ` (exit ${refusal.exitCode})` : ''}. Its output:
+              </p>
+              <pre className="git__refusal-output">{refusal.output || '(no output)'}</pre>
+            </div>
+          )}
+          {write.request.verb === 'commit' && (
+            <p className="git__aside">The message is still in the box.</p>
+          )}
+          {writes.canDiscardAndRetry && (
+            <p className="git__note" role="status">
+              Documents under the selection have unsaved changes. Save or close them first, or
+              <button type="button" onClick={writes.onDiscardAndRetry}>
+                discard them and continue
+              </button>
+            </p>
+          )}
+          {write.error.retryable && (
+            <p className="git__note">
+              <button type="button" onClick={writes.onRetryWrite}>
+                Try again
+              </button>
+            </p>
+          )}
+        </div>
+      );
+    }
+    case 'cancelled':
+      return (
+        <p className="git__note" role="status">
+          Commit stopped. The repository is read again, because a stopped commit may or may not have
+          been made.
+          <button type="button" onClick={writes.onDismissWrite}>
+            Dismiss
+          </button>
+        </p>
+      );
+    case 'done': {
+      if (write.request.verb === 'discard') {
+        return (
+          <div className="git__note git__note--column" role="status">
+            {discardReport(write.result).map((line) => (
+              <span key={line}>{withCode(line)}</span>
+            ))}
+            <button type="button" onClick={writes.onDismissWrite}>
+              Dismiss
+            </button>
+          </div>
+        );
+      }
+      if (write.request.verb === 'commit') {
+        return (
+          <p className="git__note" role="status">
+            {write.result.commit !== undefined
+              ? `Committed ${shortId(write.result.commit)} to ${branch}.`
+              : `Committed to ${branch}.`}
+            <button type="button" onClick={writes.onDismissWrite}>
+              Dismiss
+            </button>
+          </p>
+        );
+      }
+      // A stage or an unstage says what it did by moving the row.
+      return null;
+    }
+  }
+}
+
+function countPaths(paths: readonly WorkspacePath[]): string {
+  return paths.length === 1 ? fileName(paths[0] ?? '') : `${paths.length.toLocaleString()} files`;
+}
+
+/**
+ * Backticked spans as `<code>`. The wording lives in `git-model.ts` as plain
+ * strings so it can be asserted there; this is the only markup it gets, and
+ * every piece stays text — a path in the wording is repository content.
+ */
+function withCode(line: string) {
+  return line.split('`').map((part, index) =>
+    // biome-ignore lint/suspicious/noArrayIndexKey: segments of one fixed string
+    index % 2 === 1 ? <code key={index}>{part}</code> : <span key={index}>{part}</span>,
+  );
+}
+
+/** How many paths a discard confirmation lists before it counts the rest. */
+const DISCARD_LISTED = 8;
+
+function DiscardDialog({
+  plan,
+  onConfirm,
+  onCancel,
+}: {
+  plan: DiscardPlan;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const wording = discardWording(plan);
+  const listed = plan.paths.slice(0, DISCARD_LISTED);
+  return (
+    <ConfirmDialog
+      title={wording.title}
+      confirmLabel={wording.confirm}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    >
+      {wording.lines.map((line) => (
+        <p key={line}>{withCode(line)}</p>
+      ))}
+      {plan.paths.length > 1 && (
+        <ul className="git__discard-paths">
+          {listed.map((path) => (
+            <li key={path}>
+              <code>{path}</code>
+            </li>
+          ))}
+          {plan.paths.length > listed.length && (
+            <li>and {(plan.paths.length - listed.length).toLocaleString()} more</li>
+          )}
+        </ul>
+      )}
+    </ConfirmDialog>
   );
 }

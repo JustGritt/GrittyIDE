@@ -1,11 +1,18 @@
 import type { DiffHunk, FileStatus, RepositoryStatus, WorkspacePath } from '@gritty/protocol';
 import { describe, expect, it } from 'vitest';
 import {
+  amendWarning,
+  bandVerbs,
   changeKindWord,
+  commitBlocker,
   describeEntry,
+  discardPlan,
+  discardReport,
+  discardWording,
   fileDirectory,
   fileName,
   formatBytes,
+  gitRefusal,
   groupEntries,
   headLine,
   hunkHeader,
@@ -15,6 +22,7 @@ import {
   stateLabel,
   statusCode,
   upstreamLine,
+  writeUnavailableReason,
 } from './git-model';
 
 function entry(path: string, overrides: Partial<FileStatus> = {}): FileStatus {
@@ -214,5 +222,201 @@ describe('a hunk as the diff draws it', () => {
     expect(formatBytes(512)).toBe('512 B');
     expect(formatBytes(2048)).toBe('2.0 KB');
     expect(formatBytes(5 * 1024 * 1024)).toBe('5.0 MB');
+  });
+});
+
+describe('the write half (T102-U)', () => {
+  const p = (path: string) => path as WorkspacePath;
+
+  function repo(overrides: Partial<RepositoryStatus> = {}): RepositoryStatus {
+    return {
+      branch: 'main',
+      detached: false,
+      head: 'abcdef1234567890',
+      state: 'CLEAN',
+      entries: [],
+      total: 0,
+      truncated: false,
+      unrepresentable: 0,
+      ...overrides,
+    };
+  }
+
+  describe('which verbs a band offers', () => {
+    it('stages or discards changes, only unstages what is staged, and leaves conflicts alone', () => {
+      expect(bandVerbs('unstaged')).toEqual(['stage', 'discard']);
+      expect(bandVerbs('untracked')).toEqual(['stage', 'discard']);
+      expect(bandVerbs('staged')).toEqual(['unstage']);
+      expect(bandVerbs('conflicted')).toEqual([]);
+    });
+  });
+
+  describe('the discard confirmation', () => {
+    it('says a tracked change is stashed, and how to get it back', () => {
+      const plan = discardPlan([p('src/a.ts')], [entry('src/a.ts')]);
+      expect(plan.stashed).toEqual(['src/a.ts']);
+      expect(plan.trashed).toEqual([]);
+      const wording = discardWording(plan);
+      expect(wording.title).toBe('Discard changes to a.ts?');
+      expect(wording.confirm).toBe('Discard changes');
+      const text = wording.lines.join(' ');
+      expect(text).toContain('stashed');
+      expect(text).toContain('nothing is deleted');
+      expect(text).toContain('`git stash apply`');
+      expect(text).not.toContain('Trash');
+    });
+
+    it('says an untracked file goes to the Trash, because Git holds no copy of it', () => {
+      const plan = discardPlan(
+        [p('notes.md')],
+        [entry('notes.md', { index: 'UNTRACKED', worktree: 'UNTRACKED' })],
+      );
+      expect(plan.trashed).toEqual(['notes.md']);
+      const wording = discardWording(plan);
+      expect(wording.title).toBe('Move notes.md to the Trash?');
+      expect(wording.confirm).toBe('Move to Trash');
+      const text = wording.lines.join(' ');
+      expect(text).toContain('untracked');
+      expect(text).toContain('Git holds no copy');
+      expect(text).toContain('Trash');
+      expect(text).not.toContain('stash');
+    });
+
+    it('warns that a partly staged file loses its staged half to the stash too', () => {
+      const plan = discardPlan(
+        [p('src/a.ts'), p('src/b.ts')],
+        [entry('src/a.ts', { index: 'MODIFIED' }), entry('src/b.ts')],
+      );
+      expect(plan.alsoStaged).toEqual(['src/a.ts']);
+      const wording = discardWording(plan);
+      expect(wording.title).toBe('Discard changes to 2 files?');
+      expect(wording.lines.join(' ')).toContain('a.ts also has staged changes');
+    });
+
+    it('describes both dispositions when a selection holds both', () => {
+      const plan = discardPlan(
+        [p('src/a.ts'), p('notes.md')],
+        [entry('src/a.ts'), entry('notes.md', { worktree: 'UNTRACKED', index: 'UNTRACKED' })],
+      );
+      const text = discardWording(plan).lines.join(' ');
+      expect(text).toContain('stashed');
+      expect(text).toContain('Trash');
+    });
+  });
+
+  describe('what a finished discard reports', () => {
+    it('names the stash by commit, since stash@{0} goes stale as soon as anything else is stashed', () => {
+      const lines = discardReport({
+        changed: [p('a.ts')],
+        repository: repo(),
+        stash: { commit: 'f00ba1234567890', name: 'stash@{0}' },
+        trashed: [p('dir/notes.md')],
+      });
+      expect(lines[0]).toContain('stash@{0} (f00ba12)');
+      expect(lines[0]).toContain('`git stash apply f00ba12`');
+      expect(lines[1]).toBe('Moved to the Trash: notes.md.');
+    });
+
+    it('says when there was nothing to save rather than inventing a stash', () => {
+      expect(discardReport({ changed: [p('a.ts')], repository: repo(), trashed: [] })).toEqual([
+        'Nothing needed saving: there were no changes left to discard.',
+      ]);
+    });
+  });
+
+  describe('whether git can write', () => {
+    it('treats an unknown verdict as a reason, never as a yes', () => {
+      expect(writeUnavailableReason(null)).toContain('not known yet');
+    });
+
+    it('passes the probe’s own reason through, and says nothing when git is there', () => {
+      expect(
+        writeUnavailableReason({ available: false, reason: 'git was not found on PATH' }),
+      ).toBe('git was not found on PATH');
+      expect(writeUnavailableReason({ available: true, version: 'git version 2.50.1' })).toBeNull();
+    });
+  });
+
+  describe('why the commit button is disabled', () => {
+    const staged = [entry('a.ts', { index: 'MODIFIED', worktree: 'UNMODIFIED' })];
+
+    it('wants a message that is more than whitespace', () => {
+      expect(commitBlocker(repo({ entries: staged }), { message: '  \n', amend: false })).toBe(
+        'Write a commit message first.',
+      );
+      expect(commitBlocker(repo({ entries: staged }), { message: 'fix', amend: false })).toBeNull();
+    });
+
+    it('wants something staged, unless it is an amend', () => {
+      const nothing = repo({ entries: [entry('a.ts')] });
+      expect(commitBlocker(nothing, { message: 'fix', amend: false })).toBe('Nothing is staged.');
+      expect(commitBlocker(nothing, { message: 'reword', amend: true })).toBeNull();
+    });
+
+    it('does not claim nothing is staged when the list stops short of the whole repository', () => {
+      const partial = repo({ entries: [entry('a.ts')], truncated: true, total: 9000, cursor: 'c' });
+      expect(commitBlocker(partial, { message: 'fix', amend: false })).toBeNull();
+    });
+
+    it('has nothing to amend on a branch with no commits', () => {
+      expect(
+        commitBlocker(repo({ head: undefined, entries: staged }), { message: 'x', amend: true }),
+      ).toBe('There is no commit to amend yet.');
+    });
+  });
+
+  describe('the danger of an amend, stated', () => {
+    it('says when the upstream already has the commit', () => {
+      const text = amendWarning(
+        repo({ upstream: { refName: 'refs/remotes/origin/main', ahead: 0, behind: 0 } }),
+      );
+      expect(text).toContain('origin/main already has');
+      expect(text).toContain('diverge');
+      expect(text).toContain('as of the last fetch');
+    });
+
+    it('says when it has not been pushed, and when there is no upstream at all', () => {
+      expect(
+        amendWarning(
+          repo({ upstream: { refName: 'refs/remotes/origin/main', ahead: 2, behind: 0 } }),
+        ),
+      ).toContain('does not have it yet');
+      expect(amendWarning(repo())).toContain('no upstream');
+    });
+  });
+
+  describe('a refusal from git itself', () => {
+    it('carries the hook’s output out of the envelope', () => {
+      expect(
+        gitRefusal({
+          code: 'Conflict',
+          message: 'git commit refused the write',
+          retryable: false,
+          details: { subcommand: 'commit', exitCode: 1, stderr: 'pre-commit: lint failed' },
+        }),
+      ).toEqual({ subcommand: 'commit', exitCode: 1, output: 'pre-commit: lint failed' });
+    });
+
+    it('is not a dirty-document refusal, a held lock, or an envelope of another shape', () => {
+      expect(
+        gitRefusal({
+          code: 'Conflict',
+          message: 'unsaved',
+          retryable: false,
+          details: { dirtyDocuments: [{ documentId: 'd', path: 'a.ts' }] },
+        }),
+      ).toBeNull();
+      expect(
+        gitRefusal({ code: 'Conflict', message: 'index.lock is held', retryable: true }),
+      ).toBeNull();
+      expect(
+        gitRefusal({
+          code: 'Io',
+          message: 'x',
+          retryable: false,
+          details: { stderr: 'y', subcommand: 'z' },
+        }),
+      ).toBeNull();
+    });
   });
 });

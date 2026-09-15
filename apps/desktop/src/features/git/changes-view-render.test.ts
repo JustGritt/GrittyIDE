@@ -10,8 +10,9 @@ import type {
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { ChangesView, type GitView } from './changes-view';
-import type { GitState } from './git-reducer';
+import { ChangesView, type GitView, type WriteControls } from './changes-view';
+import { type DiscardPlan, discardPlan } from './git-model';
+import type { GitState, WriteRequest } from './git-reducer';
 import { initialGitState } from './git-reducer';
 
 /**
@@ -110,10 +111,30 @@ const refuse = (what: string) => () => {
   throw new Error(`nothing should ${what} while rendering`);
 };
 
+function writeControls(overrides: Partial<WriteControls> = {}): WriteControls {
+  return {
+    canDiscardAndRetry: false,
+    discarding: null,
+    onStage: refuse('stage'),
+    onUnstage: refuse('unstage'),
+    onRequestDiscard: refuse('ask to discard'),
+    onConfirmDiscard: refuse('discard'),
+    onCancelDiscard: refuse('cancel a discard'),
+    onCommit: refuse('commit'),
+    onDraftChange: refuse('change the draft'),
+    onDiscardAndRetry: refuse('replay a discard'),
+    onRetryWrite: refuse('retry a write'),
+    onDismissWrite: refuse('dismiss a write'),
+    onCancelWrite: refuse('cancel a write'),
+    ...overrides,
+  };
+}
+
 function render(
   state: Partial<GitState> = {},
   hasWorkspace = true,
   view: GitView = 'changes',
+  writes: Partial<WriteControls> = {},
 ): string {
   return renderToStaticMarkup(
     createElement(ChangesView, {
@@ -129,6 +150,7 @@ function render(
       onViewChange: refuse('switch view'),
       onLoadMoreHistory: refuse('page the history'),
       onCancelHistory: refuse('cancel the history'),
+      writes: writeControls(writes),
     }),
   );
 }
@@ -405,5 +427,290 @@ describe('repository content is untrusted input', () => {
     });
     expect(tagsOf(markup).some((tag) => tag.startsWith('<script'))).toBe(false);
     expect(markup).toContain('&lt;script&gt;');
+  });
+});
+
+// T102-U: the verbs. Rendered through the same view, because a reducer that
+// tracks a write correctly and a box that never shows it is the defect these
+// render tests exist to catch.
+describe('the write half', () => {
+  const GIT_OK = { available: true, version: 'git version 2.50.1' };
+  const STAGED = entry('src/a.ts', { index: 'MODIFIED', worktree: 'UNMODIFIED' });
+  const CHANGED = entry('src/b.ts');
+  const UNTRACKED = entry('notes.md', { index: 'UNTRACKED', worktree: 'UNTRACKED' });
+  const COMMIT: WriteRequest = {
+    verb: 'commit',
+    message: 'fix: it',
+    amend: false,
+    noVerify: false,
+  };
+
+  function withRepo(overrides: Partial<GitState> = {}, repo: Partial<RepositoryStatus> = {}) {
+    return {
+      status: {
+        kind: 'ready' as const,
+        value: repository({ entries: [STAGED, CHANGED, UNTRACKED], total: 3, ...repo }),
+      },
+      availability: GIT_OK,
+      ...overrides,
+    };
+  }
+
+  /** Every `<button …>` opening tag whose text includes `label`. */
+  function button(markup: string, label: string): string | undefined {
+    const match = markup.match(new RegExp(`<button[^>]*>(?:(?!</button>).)*${label}`));
+    return match?.[0];
+  }
+
+  describe('the commit box', () => {
+    it('shows the branch the commit lands on, and discloses that hooks run', () => {
+      const markup = render(withRepo({}, { branch: 'feature/x' }));
+      expect(markup).toContain('Commit to <span class="git__head">feature/x</span>');
+      expect(markup).toContain('Commit message');
+      expect(markup).toContain('hooks, which are the project');
+    });
+
+    it('is disabled with the reason while the message is empty', () => {
+      const markup = render(withRepo());
+      expect(button(markup, 'Commit<')).toContain('disabled');
+      expect(markup).toContain('Write a commit message first.');
+    });
+
+    it('is disabled with the reason when nothing is staged', () => {
+      const markup = render(
+        withRepo(
+          { draft: { message: 'fix', amend: false, noVerify: false } },
+          { entries: [CHANGED] },
+        ),
+      );
+      expect(button(markup, 'Commit<')).toContain('disabled');
+      expect(markup).toContain('Nothing is staged.');
+    });
+
+    it('is enabled with a message and something staged', () => {
+      const markup = render(withRepo({ draft: { message: 'fix', amend: false, noVerify: false } }));
+      expect(button(markup, 'Commit<')).not.toContain('disabled');
+    });
+
+    it('offers amend and no-verify unticked, and says what each one costs when ticked', () => {
+      const plain = render(withRepo());
+      expect(plain).not.toContain('checked');
+      const ticked = render(
+        withRepo(
+          { draft: { message: 'fix', amend: true, noVerify: true } },
+          { upstream: { refName: 'refs/remotes/origin/main', ahead: 0, behind: 0 } },
+        ),
+      );
+      expect(ticked).toContain('Amend commit');
+      expect(ticked).toContain('origin/main already has');
+      expect(ticked).toContain('the project&#x27;s own checks are skipped');
+    });
+
+    it('says the hooks are running while a commit is an operation, and offers to stop it', () => {
+      const markup = render(
+        withRepo({
+          write: { kind: 'pending', request: COMMIT, operationId: 'op-9' as OperationId },
+        }),
+      );
+      expect(markup).toContain('the hooks are running');
+      expect(button(markup, 'Stop')).toBeDefined();
+      expect(markup).toContain('readOnly');
+    });
+  });
+
+  describe('when git cannot write', () => {
+    it('shows every verb disabled with the probe’s reason, never absent', () => {
+      const markup = render(
+        withRepo({ availability: { available: false, reason: 'git was not found on PATH' } }),
+      );
+      expect(markup).toContain('Staging and committing are unavailable: git was not found on PATH');
+      for (const label of ['Stage all', 'Unstage all', 'Discard all', 'Commit<']) {
+        const tag = button(markup, label);
+        expect(tag, label).toBeDefined();
+        expect(tag, label).toContain('disabled');
+      }
+      expect(button(markup, 'Stage all')).toContain('title="git was not found on PATH"');
+    });
+
+    it('treats a verdict it has not received as unavailable rather than assuming yes', () => {
+      const markup = render(withRepo({ availability: null }));
+      expect(markup).toContain('not known yet');
+      expect(button(markup, 'Stage all')).toContain('disabled');
+    });
+  });
+
+  describe('the verbs on each band', () => {
+    it('stages or discards changes and untracked files, and only unstages the staged band', () => {
+      const markup = render(withRepo());
+      expect(markup).toContain('aria-label="Unstage src/a.ts"');
+      expect(markup).toContain('aria-label="Stage src/b.ts"');
+      expect(markup).toContain('aria-label="Discard src/b.ts"');
+      expect(markup).toContain('aria-label="Discard notes.md"');
+      expect(markup).not.toContain('aria-label="Discard src/a.ts"');
+      expect(markup).toContain('aria-label="Unstage all 1 in Staged"');
+      expect(markup).toContain('aria-label="Discard all 1 in Untracked"');
+    });
+
+    it('offers no verb on a conflicted file', () => {
+      const markup = render(
+        withRepo(
+          {},
+          { entries: [entry('src/c.ts', { conflicted: true, index: 'ADDED', worktree: 'ADDED' })] },
+        ),
+      );
+      expect(markup).not.toContain('aria-label="Stage src/c.ts"');
+      expect(markup).not.toContain('Stage all');
+    });
+
+    it('disables the verbs while a write is in flight', () => {
+      const markup = render(
+        withRepo({ write: { kind: 'running', request: { verb: 'stage', paths: [CHANGED.path] } } }),
+      );
+      expect(button(markup, 'Stage all')).toContain('disabled');
+      expect(markup).toContain('Staging b.ts…');
+    });
+  });
+
+  describe('what a write said', () => {
+    it('shows a hook’s refusal with its output, and keeps the message', () => {
+      const markup = render(
+        withRepo({
+          draft: { message: 'fix: it', amend: false, noVerify: false },
+          write: {
+            kind: 'failed',
+            request: COMMIT,
+            error: {
+              code: 'Conflict',
+              message: 'git commit refused the write',
+              retryable: false,
+              details: {
+                subcommand: 'commit',
+                exitCode: 1,
+                stderr: 'lint: 3 problems\n<script>x</script>',
+              },
+            },
+          },
+        }),
+      );
+      expect(markup).toContain('role="alert"');
+      expect(markup).toContain('git commit refused (exit 1). Its output:');
+      expect(markup).toContain('lint: 3 problems');
+      // The hook's output is the repository's text: escaped, never markup.
+      expect(tagsOf(markup).some((tag) => tag.startsWith('<script'))).toBe(false);
+      expect(markup).toContain('The message is still in the box.');
+      expect(markup).toContain('fix: it</textarea>');
+      expect(markup).not.toContain('discard them and continue');
+    });
+
+    it('offers the dirty-document replay only when the hook says the refusal is one', () => {
+      const failed = withRepo({
+        write: {
+          kind: 'failed',
+          request: { verb: 'discard', paths: [CHANGED.path], force: false },
+          error: {
+            code: 'Conflict',
+            message: 'unsaved',
+            retryable: false,
+            details: { dirtyDocuments: [{ documentId: 'd', path: 'src/b.ts' }] },
+          },
+        },
+      });
+      expect(render(failed, true, 'changes', { canDiscardAndRetry: true })).toContain(
+        'discard them and continue',
+      );
+      expect(render(failed)).not.toContain('discard them and continue');
+    });
+
+    it('offers to try again only when the core says trying again can help', () => {
+      const locked = withRepo({
+        write: {
+          kind: 'failed',
+          request: { verb: 'stage', paths: [CHANGED.path] },
+          error: { code: 'Conflict', message: 'index.lock is held', retryable: true },
+        },
+      });
+      expect(button(render(locked), 'Try again')).toBeDefined();
+    });
+
+    it('says where a discard put the work, by commit id', () => {
+      const markup = render(
+        withRepo({
+          write: {
+            kind: 'done',
+            request: { verb: 'discard', paths: [CHANGED.path], force: false },
+            result: {
+              changed: [CHANGED.path],
+              repository: repository(),
+              stash: { commit: 'f00ba1234567890', name: 'stash@{0}' },
+              trashed: [],
+            },
+          },
+        }),
+      );
+      expect(markup).toContain('Stashed as stash@{0} (f00ba12)');
+      expect(markup).toContain('<code>git stash apply f00ba12</code>');
+    });
+
+    it('names the commit it made', () => {
+      const markup = render(
+        withRepo({
+          write: {
+            kind: 'done',
+            request: COMMIT,
+            result: {
+              changed: [],
+              repository: repository(),
+              commit: 'f00ba1234567890',
+              trashed: [],
+            },
+          },
+        }),
+      );
+      expect(markup).toContain('Committed f00ba12 to main.');
+    });
+
+    it('says a stopped commit may or may not have been made', () => {
+      const markup = render(withRepo({ write: { kind: 'cancelled', request: COMMIT } }));
+      expect(markup).toContain('Commit stopped');
+      expect(markup).toContain('may or may not');
+    });
+  });
+
+  describe('the discard confirmation', () => {
+    function dialog(plan: DiscardPlan): string {
+      return render(withRepo(), true, 'changes', { discarding: plan });
+    }
+
+    it('is an alert dialog that says the change is stashed, and how to get it back', () => {
+      const markup = dialog(discardPlan([CHANGED.path], [CHANGED]));
+      expect(markup).toContain('role="alertdialog"');
+      expect(markup).toContain('Discard changes to b.ts?');
+      expect(markup).toContain('<code>git stash apply</code>');
+      expect(button(markup, 'Discard changes')).toContain('dialog__danger');
+    });
+
+    it('says an untracked file goes to the Trash instead', () => {
+      const markup = dialog(discardPlan([UNTRACKED.path], [UNTRACKED]));
+      expect(markup).toContain('Move notes.md to the Trash?');
+      expect(markup).toContain('Git holds no copy');
+      expect(button(markup, 'Move to Trash')).toBeDefined();
+    });
+
+    it('lists the files of a multi-file discard, and counts past the first few', () => {
+      const many = Array.from({ length: 10 }, (_, i) => entry(`f${i}.ts`));
+      const markup = dialog(
+        discardPlan(
+          many.map((e) => e.path),
+          many,
+        ),
+      );
+      expect(markup).toContain('<code>f0.ts</code>');
+      expect(markup).not.toContain('<code>f9.ts</code>');
+      expect(markup).toContain('and 2 more');
+    });
+
+    it('is not on screen until a discard asks for it', () => {
+      expect(render(withRepo())).not.toContain('alertdialog');
+    });
   });
 });

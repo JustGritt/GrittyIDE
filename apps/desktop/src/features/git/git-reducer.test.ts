@@ -3,6 +3,7 @@ import type {
   DiffSummary,
   EventEnvelope,
   FileStatus,
+  GitWriteResult,
   Operation,
   OperationId,
   RepositoryStatus,
@@ -19,6 +20,8 @@ import {
   LOG_OPERATION_KIND,
   STATUS_OPERATION_KIND,
   statusCursor,
+  WRITE_OPERATION_KIND,
+  type WriteRequest,
 } from './git-reducer';
 
 const WS = 'ws-1' as WorkspaceId;
@@ -463,5 +466,234 @@ describe('the history read', () => {
     state = gitReducer(state, { type: 'logReady', page: commitPage(), append: false });
     state = gitReducer(state, { type: 'workspace', workspaceId: OTHER_WS });
     expect(state.history).toEqual({ kind: 'idle' });
+  });
+});
+
+describe('the write half (T102-U)', () => {
+  const STAGE: WriteRequest = { verb: 'stage', paths: ['a.txt' as WorkspacePath] };
+  const DISCARD: WriteRequest = {
+    verb: 'discard',
+    paths: ['a.txt' as WorkspacePath],
+    force: false,
+  };
+  const COMMIT: WriteRequest = {
+    verb: 'commit',
+    message: 'fix: it',
+    amend: false,
+    noVerify: false,
+  };
+
+  function result(overrides: Partial<GitWriteResult> = {}): GitWriteResult {
+    return {
+      changed: ['a.txt' as WorkspacePath],
+      repository: repository({ entries: [entry('a.txt', { index: 'MODIFIED' })] }),
+      trashed: [],
+      ...overrides,
+    };
+  }
+
+  /** A workspace with a status on screen and a draft typed. */
+  function ready(): GitState {
+    let state = gitReducer(opened(), {
+      type: 'statusReady',
+      repository: repository(),
+      append: false,
+      write: { available: true, version: 'git version 2.50.1' },
+    });
+    state = gitReducer(state, {
+      type: 'draftChanged',
+      draft: { message: 'fix: it', noVerify: true },
+    });
+    return state;
+  }
+
+  function completed(kind: string, payloadResult: unknown): EventEnvelope {
+    return event({
+      name: 'OperationCompleted',
+      payload: { operation: operation(kind), result: payloadResult as never },
+    });
+  }
+
+  it('does not know whether git can write until a status says so, and keeps the verdict', () => {
+    expect(opened().availability).toBeNull();
+    const state = ready();
+    expect(state.availability?.available).toBe(true);
+    // A status that finished as an operation carries no verdict; that is not "no".
+    const again = gitReducer(state, {
+      type: 'statusReady',
+      repository: repository(),
+      append: false,
+    });
+    expect(again.availability?.available).toBe(true);
+  });
+
+  it('converges on the repository the write returned, with no read behind it', () => {
+    let state = gitReducer(ready(), { type: 'writeStarted', request: STAGE });
+    expect(state.write).toEqual({ kind: 'running', request: STAGE });
+    state = gitReducer(state, { type: 'writeReady', result: result() });
+    expect(state.status).toEqual({ kind: 'ready', value: result().repository });
+    expect(state.write.kind).toBe('done');
+  });
+
+  it('runs one write at a time: a second start while one is in flight is ignored', () => {
+    const running = gitReducer(ready(), { type: 'writeStarted', request: STAGE });
+    expect(gitReducer(running, { type: 'writeStarted', request: DISCARD })).toBe(running);
+    const pending = gitReducer(running, { type: 'writePending', operationId: OP });
+    expect(gitReducer(pending, { type: 'writeStarted', request: DISCARD })).toBe(pending);
+    // And nothing in flight can be dismissed out from under the user.
+    expect(gitReducer(pending, { type: 'writeDismissed' })).toBe(pending);
+  });
+
+  it('keeps the selected diff through a stage, which does not change a diff against HEAD', () => {
+    let state = gitReducer(ready(), { type: 'select', path: 'a.txt' as WorkspacePath });
+    state = gitReducer(state, { type: 'diffReady', diff: summary() });
+    state = gitReducer(state, { type: 'writeStarted', request: STAGE });
+    state = gitReducer(state, { type: 'writeReady', result: result() });
+    expect(state.diff.kind).toBe('ready');
+  });
+
+  it('reads the selected diff again after a discard of that file', () => {
+    let state = gitReducer(ready(), { type: 'select', path: 'a.txt' as WorkspacePath });
+    state = gitReducer(state, { type: 'diffReady', diff: summary() });
+    state = gitReducer(state, { type: 'writeStarted', request: DISCARD });
+    state = gitReducer(state, { type: 'writeReady', result: result() });
+    expect(state.diff).toEqual({ kind: 'idle' });
+  });
+
+  it('a refused discard keeps the request it refused, so the replay has exactly one to send', () => {
+    const error = {
+      code: 'Conflict' as const,
+      message: '1 document(s) under the selection have unsaved changes',
+      retryable: false,
+      details: { dirtyDocuments: [{ documentId: 'doc-1', path: 'a.txt' }] },
+    };
+    let state = gitReducer(ready(), { type: 'writeStarted', request: DISCARD });
+    state = gitReducer(state, { type: 'writeFailed', error });
+    expect(state.write).toEqual({ kind: 'failed', request: DISCARD, error });
+    // A new write replaces it: there is no second slot left armed.
+    state = gitReducer(state, { type: 'writeStarted', request: STAGE });
+    expect(state.write).toEqual({ kind: 'running', request: STAGE });
+  });
+
+  it('a commit that happened clears the message and both options', () => {
+    let state = gitReducer(ready(), { type: 'writeStarted', request: COMMIT });
+    state = gitReducer(state, { type: 'writeReady', result: result({ commit: 'f00ba12345' }) });
+    expect(state.draft).toEqual({ message: '', amend: false, noVerify: false });
+  });
+
+  it('a commit a hook refused leaves the message where the user left it', () => {
+    let state = gitReducer(ready(), { type: 'writeStarted', request: COMMIT });
+    state = gitReducer(state, { type: 'writePending', operationId: OP });
+    const error = {
+      code: 'Conflict' as const,
+      message: 'git commit refused the write',
+      retryable: false,
+      details: { subcommand: 'commit', exitCode: 1, stderr: 'lint failed' },
+    };
+    state = gitReducer(state, {
+      type: 'event',
+      event: event({
+        name: 'OperationFailed',
+        payload: { operation: operation(WRITE_OPERATION_KIND, 'FAILED'), error },
+      }),
+    });
+    expect(state.write).toEqual({ kind: 'failed', request: COMMIT, error });
+    expect(state.draft.message).toBe('fix: it');
+    expect(state.draft.noVerify).toBe(true);
+  });
+
+  it('a commit whose hooks outlived the budget completes on OperationCompleted', () => {
+    let state = gitReducer(ready(), { type: 'writeStarted', request: COMMIT });
+    state = gitReducer(state, { type: 'writePending', operationId: OP });
+    expect(state.write.kind).toBe('pending');
+    state = gitReducer(state, { type: 'event', event: completed(WRITE_OPERATION_KIND, result()) });
+    expect(state.write.kind).toBe('done');
+    expect(state.status).toEqual({ kind: 'ready', value: result().repository });
+    expect(state.draft.message).toBe('');
+  });
+
+  it('keeps a write completion that arrives before its pending response', () => {
+    let state = gitReducer(ready(), { type: 'writeStarted', request: COMMIT });
+    state = gitReducer(state, { type: 'event', event: completed(WRITE_OPERATION_KIND, result()) });
+    expect(state.write.kind).toBe('running');
+    state = gitReducer(state, { type: 'writePending', operationId: OP });
+    expect(state.write.kind).toBe('done');
+    expect(state.unmatched).toEqual({});
+  });
+
+  it('never routes a status completion onto a pending write', () => {
+    let state = gitReducer(ready(), { type: 'writeStarted', request: COMMIT });
+    state = gitReducer(state, { type: 'writePending', operationId: OP });
+    state = gitReducer(state, {
+      type: 'event',
+      event: completed(STATUS_OPERATION_KIND, repository()),
+    });
+    expect(state.write.kind).toBe('pending');
+  });
+
+  it('reports a write completion with no result instead of claiming it worked', () => {
+    let state = gitReducer(ready(), { type: 'writeStarted', request: COMMIT });
+    state = gitReducer(state, { type: 'writePending', operationId: OP });
+    state = gitReducer(state, { type: 'event', event: completed(WRITE_OPERATION_KIND, undefined) });
+    expect(state.write.kind).toBe('failed');
+    expect(state.draft.message).toBe('fix: it');
+  });
+
+  it('a stopped commit keeps the message and reads the repository again', () => {
+    let state = gitReducer(ready(), { type: 'select', path: 'a.txt' as WorkspacePath });
+    state = gitReducer(state, { type: 'diffReady', diff: summary() });
+    state = gitReducer(state, { type: 'writeStarted', request: COMMIT });
+    state = gitReducer(state, { type: 'writePending', operationId: OP });
+    state = gitReducer(state, {
+      type: 'event',
+      event: event({
+        name: 'OperationCancelled',
+        payload: { operation: operation(WRITE_OPERATION_KIND, 'CANCELLED') },
+      }),
+    });
+    expect(state.write).toEqual({ kind: 'cancelled', request: COMMIT });
+    expect(state.draft.message).toBe('fix: it');
+    // Whether HEAD moved before the hooks were killed is unknown, so the reads
+    // measured against it go back to idle, which is what starts them again.
+    expect(state.status).toEqual({ kind: 'idle' });
+    expect(state.diff).toEqual({ kind: 'idle' });
+  });
+
+  it('a commit puts a history already read back to idle, and leaves an unread one alone', () => {
+    const page: CommitPage = { start: 'HEAD', commits: [], truncated: false };
+    let state = gitReducer(ready(), { type: 'logReady', page, append: false });
+    state = gitReducer(state, { type: 'writeStarted', request: COMMIT });
+    state = gitReducer(state, { type: 'writeReady', result: result({ commit: 'f00ba12345' }) });
+    expect(state.history).toEqual({ kind: 'idle' });
+
+    let unread = gitReducer(ready(), { type: 'writeStarted', request: STAGE });
+    unread = gitReducer(unread, { type: 'writeReady', result: result() });
+    expect(unread.history).toEqual({ kind: 'idle' });
+  });
+
+  it('ignores a write response once the workspace it was sent for has gone', () => {
+    let state = gitReducer(ready(), { type: 'writeStarted', request: STAGE });
+    state = gitReducer(state, { type: 'workspace', workspaceId: OTHER_WS });
+    const after = gitReducer(state, { type: 'writeReady', result: result() });
+    expect(after).toBe(state);
+    expect(after.status).toEqual({ kind: 'idle' });
+  });
+
+  it('restores a kept draft message when the workspace is announced with one', () => {
+    const state = gitReducer(initialGitState, {
+      type: 'workspace',
+      workspaceId: WS,
+      message: 'half a thought',
+    });
+    expect(state.draft).toEqual({ message: 'half a thought', amend: false, noVerify: false });
+  });
+
+  it('a write to a folder that stopped being a repository says so and selects nothing', () => {
+    let state = gitReducer(ready(), { type: 'select', path: 'a.txt' as WorkspacePath });
+    state = gitReducer(state, { type: 'writeStarted', request: STAGE });
+    state = gitReducer(state, { type: 'writeNotARepository' });
+    expect(state.status).toEqual({ kind: 'notARepository' });
+    expect(state.selected).toBeNull();
+    expect(state.write).toEqual({ kind: 'idle' });
   });
 });

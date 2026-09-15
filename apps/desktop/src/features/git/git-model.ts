@@ -1,13 +1,17 @@
 import type {
   CommitSummary,
+  CoreErrorShape,
   DiffChangeKind,
   DiffHunk,
   DiffLineKind,
   FileState,
   FileStatus,
+  GitWriteAvailability,
+  GitWriteResult,
   RepositoryState,
   RepositoryStatus,
   UpstreamStatus,
+  WorkspacePath,
 } from '@gritty/protocol';
 
 /**
@@ -342,4 +346,228 @@ export function isMerge(commit: CommitSummary): boolean {
  */
 export function commitByline(commit: CommitSummary, now: number = Date.now()): string {
   return `${commit.author.name} · ${commitAge(commit.author.time, now)}`;
+}
+
+// ---------------------------------------------------------------------------
+// The write half (T102-U): which verbs a band offers, what a discard will do in
+// words, and why a button is disabled when it is.
+// ---------------------------------------------------------------------------
+
+/** A verb a row or a band header can offer. */
+export type BandVerb = 'stage' | 'unstage' | 'discard';
+
+/**
+ * The verbs each band offers, in the order they are drawn.
+ *
+ * - **Staged** unstages and does nothing else. Discarding from here would stash
+ *   the worktree half too, which is not what a reader of the Staged band is
+ *   looking at.
+ * - **Changes** and **Untracked** stage or discard.
+ * - **Conflicts** offer nothing. Staging a conflicted file is how Git records
+ *   it as resolved, and doing that from a button — with the markers possibly
+ *   still in the file — is a decision this ticket does not make on the user's
+ *   behalf.
+ */
+export function bandVerbs(band: ChangeGroupId): readonly BandVerb[] {
+  switch (band) {
+    case 'staged':
+      return ['unstage'];
+    case 'unstaged':
+    case 'untracked':
+      return ['stage', 'discard'];
+    case 'conflicted':
+      return [];
+  }
+}
+
+/**
+ * A discard, split the way the core will split it (`git/write.rs`
+ * `split_by_tracking`): untracked paths go to the Trash, everything else is
+ * stashed.
+ */
+export interface DiscardPlan {
+  readonly paths: readonly WorkspacePath[];
+  readonly stashed: readonly WorkspacePath[];
+  readonly trashed: readonly WorkspacePath[];
+  /**
+   * Stashed paths that also have staged changes. `git stash push -- <path>`
+   * saves and reverts the index *and* the worktree for a path, so the staged
+   * half goes into the stash too — a thing to say before, not discover after.
+   */
+  readonly alsoStaged: readonly WorkspacePath[];
+}
+
+export function discardPlan(
+  paths: readonly WorkspacePath[],
+  entries: readonly FileStatus[],
+): DiscardPlan {
+  const stashed: WorkspacePath[] = [];
+  const trashed: WorkspacePath[] = [];
+  const alsoStaged: WorkspacePath[] = [];
+  for (const path of paths) {
+    const entry = entries.find((candidate) => candidate.path === path);
+    if (entry !== undefined && (entry.worktree === 'UNTRACKED' || entry.index === 'UNTRACKED')) {
+      trashed.push(path);
+      continue;
+    }
+    stashed.push(path);
+    if (entry !== undefined && entry.index !== 'UNMODIFIED' && entry.index !== 'IGNORED') {
+      alsoStaged.push(path);
+    }
+  }
+  return { paths, stashed, trashed, alsoStaged };
+}
+
+/** What the discard confirmation says. */
+export interface DiscardWording {
+  readonly title: string;
+  readonly lines: readonly string[];
+  readonly confirm: string;
+}
+
+function countedFiles(paths: readonly WorkspacePath[]): string {
+  if (paths.length === 1) return fileName(paths[0] ?? '');
+  return `${paths.length.toLocaleString()} files`;
+}
+
+/**
+ * The confirmation's wording. The two dispositions are worded differently
+ * because they are different (T102-U requirement 4): a stash is Git's, named
+ * and restorable with Git; the Trash is the operating system's, and restoring
+ * from it happens outside Gritty.
+ */
+export function discardWording(plan: DiscardPlan): DiscardWording {
+  const lines: string[] = [];
+  if (plan.stashed.length > 0) {
+    lines.push(
+      `The changes to ${countedFiles(plan.stashed)} are stashed before the ` +
+        `${plan.stashed.length === 1 ? 'file is' : 'files are'} restored, so nothing is deleted: ` +
+        'the stash is listed by `git stash list`, and `git stash apply` brings the changes back.',
+    );
+  }
+  if (plan.alsoStaged.length > 0) {
+    lines.push(
+      `${countedFiles(plan.alsoStaged)} ${plan.alsoStaged.length === 1 ? 'also has' : 'also have'} ` +
+        'staged changes. Those are stashed and unstaged too.',
+    );
+  }
+  if (plan.trashed.length > 0) {
+    lines.push(
+      `${countedFiles(plan.trashed)} ${plan.trashed.length === 1 ? 'is' : 'are'} untracked, ` +
+        'so Git holds no copy. ' +
+        `${plan.trashed.length === 1 ? 'It goes' : 'They go'} to the Trash, and can be restored ` +
+        'from there.',
+    );
+  }
+  const onlyTrash = plan.stashed.length === 0;
+  const what = countedFiles(plan.paths);
+  return onlyTrash
+    ? { title: `Move ${what} to the Trash?`, lines, confirm: 'Move to Trash' }
+    : { title: `Discard changes to ${what}?`, lines, confirm: 'Discard changes' };
+}
+
+/**
+ * What a finished discard did, for the notice after it: where the work went
+ * and how to get it back, named by commit id because `stash@{0}` stops meaning
+ * this stash as soon as anything else is stashed.
+ */
+export function discardReport(result: GitWriteResult): readonly string[] {
+  const lines: string[] = [];
+  if (result.stash !== undefined) {
+    lines.push(
+      `Stashed as ${result.stash.name} (${shortId(result.stash.commit)}). ` +
+        `\`git stash apply ${shortId(result.stash.commit)}\` restores it.`,
+    );
+  }
+  if (result.trashed.length > 0) {
+    lines.push(`Moved to the Trash: ${result.trashed.map(fileName).join(', ')}.`);
+  }
+  if (lines.length === 0) {
+    // The core stashes only when the stash ref moved; `git stash push` with
+    // nothing to save exits 0 and creates nothing.
+    lines.push('Nothing needed saving: there were no changes left to discard.');
+  }
+  return lines;
+}
+
+/**
+ * Why git cannot write here, or `null` when it can. Unknown is a reason too:
+ * the verdict rides on `git.status`, and its absence is never read as "yes".
+ */
+export function writeUnavailableReason(availability: GitWriteAvailability | null): string | null {
+  if (availability === null) {
+    return 'Whether git can write here is not known yet. Refresh to check.';
+  }
+  if (availability.available) return null;
+  return availability.reason ?? 'git is not available.';
+}
+
+/** How many entries are in the Staged band of the page shown. */
+export function stagedCount(entries: readonly FileStatus[]): number {
+  return groupEntries(entries).find((group) => group.id === 'staged')?.entries.length ?? 0;
+}
+
+/**
+ * Why the commit button is disabled, or `null` when it is not.
+ *
+ * "Nothing staged" is only claimed when the page is the whole list: a
+ * truncated status may have staged files past the page, and a button disabled
+ * on a guess is the enabled-and-inert state's mirror image. Git itself refuses
+ * an empty commit, and that refusal is shown.
+ */
+export function commitBlocker(
+  repository: RepositoryStatus,
+  draft: { readonly message: string; readonly amend: boolean },
+): string | null {
+  if (draft.message.trim() === '') return 'Write a commit message first.';
+  if (draft.amend && repository.head === undefined) return 'There is no commit to amend yet.';
+  if (!draft.amend && !repository.truncated && stagedCount(repository.entries) === 0) {
+    return 'Nothing is staged.';
+  }
+  return null;
+}
+
+/**
+ * The danger of an amend, stated rather than prevented (T102-U non-goals).
+ *
+ * The upstream counts are against the local copy of the tracking ref, so this
+ * is only as fresh as the last fetch, and it says so.
+ */
+export function amendWarning(repository: RepositoryStatus): string {
+  const upstream = repository.upstream;
+  if (upstream === undefined) {
+    return 'Replaces the last commit. This branch has no upstream, so nothing pushed is known to contain it.';
+  }
+  const remote = upstream.refName.replace(/^refs\/remotes\//, '');
+  if (upstream.ahead === 0) {
+    return `Replaces the last commit, which ${remote} already has (as of the last fetch). Amending it makes the branch diverge from ${remote}.`;
+  }
+  return `Replaces the last commit. ${remote} does not have it yet (as of the last fetch).`;
+}
+
+/** A refusal from `git` itself — a hook, or git's own "nothing to commit" — with its output. */
+export interface GitRefusal {
+  readonly subcommand: string;
+  readonly exitCode: number | null;
+  readonly output: string;
+}
+
+/**
+ * The output of a refused write, when the error carries one.
+ *
+ * Read out of `details` defensively: the envelope is JSON, and a newer core
+ * could shape it differently. The output is untrusted repository-authored text
+ * and is rendered as text, never as markup.
+ */
+export function gitRefusal(error: CoreErrorShape): GitRefusal | null {
+  if (error.code !== 'Conflict') return null;
+  const details = error.details;
+  if (typeof details !== 'object' || details === null || Array.isArray(details)) return null;
+  const { subcommand, exitCode, stderr } = details as Record<string, unknown>;
+  if (typeof stderr !== 'string' || typeof subcommand !== 'string') return null;
+  return {
+    subcommand,
+    exitCode: typeof exitCode === 'number' ? exitCode : null,
+    output: stderr,
+  };
 }
