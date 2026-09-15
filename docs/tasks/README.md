@@ -68,6 +68,7 @@ moves back. Never move a task file by hand.
 | [NOTIFY-SETTING-ORPHAN](docs/tasks/NOTIFY-SETTING-ORPHAN-delete.md) | Delete the notification switch nothing mounts | maintenance | T120-U, T120-M | review |
 | [PLAN-OF-RECORD](docs/tasks/PLAN-OF-RECORD-one-project-plan.md) | One project plan replaces the founding plan, its addendum and the roadmap | docs | – | doing |
 | [RUNS-EVENT-FILTER](RUNS-EVENT-FILTER-subscription.md) | use-runs.ts subscribes to every event of every kind |  | – | review |
+| [SEARCH-CHORD](SEARCH-CHORD-find-in-files-chord.md) | ⌘⇧F opens Search and focuses the field | 2 | T080-U | review |
 | [SEARCH-WALK-TIME](SEARCH-WALK-TIME-large-repo-timing.md) | Time a search over large-repo against ADR-022's revisit trigger | 2 | T080, ADR-022 | review |
 | [SIDEBAR-ICONS](docs/tasks/SIDEBAR-ICONS-section-tab-icons.md) | Sidebar section tabs as icons, for horizontal room | 2 | – | review |
 | SIDECAR-BUNDLE-CONFIG | Move externalBin to a bundle-time config so a compile never needs a staged binary | 3 | SIDECAR-FRESH-CHECKOUT | unspec |

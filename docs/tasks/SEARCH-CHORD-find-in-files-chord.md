@@ -1,7 +1,7 @@
 # Task SEARCH-CHORD — ⌘⇧F opens Search and focuses the field
 
 - **Phase:** 2
-- **Status:** todo
+- **Status:** review
 - **Depends on:** T080-U (the search panel)
 
 ## Objective
