@@ -20,7 +20,7 @@ moves back. Never move a task file by hand.
 | ID | Task | Phase | Depends on | Status |
 |---|---|---|---|---|
 | [T097](T097-shell-integration-blocks.md) | Shell integration (OSC 133) and command blocks | 2 | T090, T095, T096 | todo |
-| [T099-S](T099-S-terminal-splits.md) | Split terminals: shells side by side in the dock | 2 | T096, T098, T046, T120-T, T120-A | todo |
+| [T099-S](T099-S-terminal-splits.md) | Split terminals: shells side by side in the dock | 2 | T096, T098, T046, T120-T, T120-A | doing |
 | [T099-E](T099-E-terminal-editor-tab.md) | A terminal as an editor tab | 2 | T099-S, T120-M | todo |
 | [T110](T110-diagnostics.md) | Diagnostics | 2 | T060, T090, T220, T325, ADR-001 | todo |
 | [T224](T224-reveal-terminal.md) | Reveal the terminal a session is running in | 3 | T220 | todo |
@@ -35,11 +35,12 @@ moves back. Never move a task file by hand.
 | T400 | Worktree isolation | 5 | T100, T325 | unspec |
 | T405 | Ownership-aware scheduler | 5 | T325, T300 | unspec |
 | T410 | Attention queue | 5 | T210, T325, T335 | unspec |
+| AGENT-CLAUDE-PROCESS-FLAKE | process.rs a_child_that_dies_mid_turn fails under load with an empty message | maintenance | – | unspec |
 | [AGENT-TURN-END](AGENT-TURN-END-roster-done-while-generating.md) | The agent roster says Done while the model is still generating | 3 | T220, T221, T223, T231 | review |
 | BOARD-ARCHIVE | Done and superseded tickets move to a generated archive, so the index lists open work | tools | – | review |
 | BOARD-DROP-DONE | drop --to done skips the reviewer rule move enforces | tools | – | unspec |
 | [BOARD-STALE-REASON](BOARD-STALE-REASON-labelled-reasons.md) | A block reason outlives its block, and show prints it as present tense | tools | – | review |
-| [CARGO-FLAKE](CARGO-FLAKE-desktop-command-tests.md) | Three desktop command tests fail under a loaded machine | 2 | – | todo |
+| [CARGO-FLAKE](CARGO-FLAKE-desktop-command-tests.md) | Three desktop command tests fail under a loaded machine | 2 | – | review |
 | CI-LINUX-DARK | Linux CI is dark until the minute allowance resets (1 Oct) or a spending limit is set |  | – | blocked |
 | CONFIRM-DIALOG | Extract a shared confirm dialog before a third copy is written | 2 | – | unspec |
 | [DOCS-TREE-FOLLOWUPS](docs/tasks/DOCS-TREE-FOLLOWUPS-stale-tree-docs.md) | Docs that still describe the tree before T070 and T042 | maintenance | FILES-PARTIAL, TRASH-FALLBACK, EXPLORER-RELIST-QUEUE | review |
@@ -84,8 +85,12 @@ moves back. Never move a task file by hand.
 | [TREE-DISCLOSURE](docs/tasks/TREE-DISCLOSURE-chevron-transition.md) | Tree chevron and expand/collapse transition | 2 | FILE-ICONS | review |
 | [TURN-START-DEQUEUE](docs/tasks/TURN-START-DEQUEUE-measure.md) | Measure whether a dequeued message should start a turn | maintenance | AGENT-TURN-END | review |
 | [TURN-START-QUEUED](docs/tasks/TURN-START-QUEUED-dequeue-and-shell.md) | A dequeued message or a ! command starts a turn | maintenance | TURN-START-DEQUEUE, AGENT-TURN-END | review |
+| WATCH-CLOSE-ORDER | A WorkspaceEntriesChanged can land just after WorkspaceClosed | maintenance | T070 | unspec |
 | [WATCH-DEGRADED](docs/tasks/WATCH-DEGRADED-report-unwatched-tree.md) | Say when part of the tree isn't being watched | maintenance | WATCH-FLAKE, FILES-PARTIAL, EXPLORER-RELIST-QUEUE | blocked |
-| [WATCH-FLAKE](WATCH-FLAKE-load-sensitive.md) | Two load-sensitive tests fail in the full-workspace run, pass alone |  | – | doing |
+| [WATCH-FLAKE](WATCH-FLAKE-load-sensitive.md) | Two load-sensitive tests fail in the full-workspace run, pass alone |  | – | review |
+| WATCH-FLAKE-CORE | gritty-core's root-removed test has the same two-closer race | maintenance | WATCH-FLAKE | unspec |
+| WATCH-FSEVENTS-STALL | The per-directory watch test sometimes sees nothing at all for 10 s on FSEvents | maintenance | WATCH-FLAKE | unspec |
+| WATCH-PERDIR-NEWDIR | Per-directory watching misses files created before a new directory is registered | maintenance | T070 | unspec |
 <!-- board:table end -->
 
 ## Dependency graph (architecture addendum §2)

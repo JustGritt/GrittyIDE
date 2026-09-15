@@ -107,6 +107,40 @@ impl Observed {
         }
     }
 
+    /// Repeat `poke` until a delivered batch satisfies `wanted`, or panic after
+    /// [`DELIVERY_TIMEOUT`] naming what was awaited and everything that arrived
+    /// instead. For a condition that holds only once the watch has absorbed
+    /// something first, where no single write can be trusted to land after it.
+    fn poke_until(
+        &self,
+        what: &str,
+        mut poke: impl FnMut(usize),
+        wanted: impl Fn(&ChangeBatch) -> bool,
+    ) -> ChangeBatch {
+        let deadline = Instant::now() + DELIVERY_TIMEOUT;
+        let mut seen = Vec::new();
+        let mut attempts = 0;
+        while Instant::now() < deadline {
+            poke(attempts);
+            attempts += 1;
+            let window = Instant::now() + Duration::from_secs(1);
+            while let Some(left) = window.checked_duration_since(Instant::now()) {
+                match self.events.recv_timeout(left) {
+                    Ok(WatchEvent::Changed(batch)) if wanted(&batch) => return batch,
+                    Ok(other) => seen.push(other),
+                    Err(RecvTimeoutError::Timeout) => break,
+                    Err(RecvTimeoutError::Disconnected) => {
+                        panic!("the watch stopped while waiting for {what}; saw {seen:?}")
+                    }
+                }
+            }
+        }
+        panic!(
+            "timed out after {DELIVERY_TIMEOUT:?} and {attempts} attempts waiting for {what}; \
+             saw {seen:?}"
+        );
+    }
+
     fn expect_silence(&self) {
         if let Ok(event) = self.events.recv_timeout(SILENCE) {
             panic!("expected nothing to be reported, got {event:?}");
@@ -126,20 +160,14 @@ fn start(tree: &TempTree, strategy: WatchStrategy) -> (gritty_workspace::Watch, 
 /// A backend needs a moment before its first event arrives; prove the watch is
 /// live with a sentinel instead of sleeping a guessed interval.
 fn settle(tree: &TempTree, observed: &Observed) {
-    tree.write(".watch-sentinel", "1");
-    let deadline = Instant::now() + DELIVERY_TIMEOUT;
-    while Instant::now() < deadline {
-        if let Ok(WatchEvent::Changed(batch)) = observed.events.recv_timeout(Duration::from_secs(1))
-            && batch.directories.contains(&WorkspacePath::root())
-        {
-            tree.remove(".watch-sentinel");
-            // Absorb the removal's own batch so the test starts from quiet.
-            let _ = observed.drain();
-            return;
-        }
-        tree.write(".watch-sentinel", "1");
-    }
-    panic!("the watch never reported the sentinel");
+    observed.poke_until(
+        "the sentinel at the root, proof the watch is live",
+        |_| tree.write(".watch-sentinel", "1"),
+        |batch| batch.directories.contains(&WorkspacePath::root()),
+    );
+    tree.remove(".watch-sentinel");
+    // Absorb the removal's own batch so the test starts from quiet.
+    let _ = observed.drain();
 }
 
 fn wire(path: &str) -> WorkspacePath {
@@ -341,13 +369,15 @@ fn a_directory_created_after_the_watch_started_is_followed() {
     settle(&tree, &observed);
 
     tree.dir("late/inner");
-    let _ = observed.drain();
-    tree.write("late/inner/file.txt", "x");
-
-    let batches = observed.drain();
-    assert!(
-        all_directories(&batches).contains(&wire("late/inner")),
-        "a directory created after the walk was never watched: {batches:?}"
+    // A write inside `late/inner` is reported only once the watch has absorbed
+    // the directory's creation and registered it, and nothing observable marks
+    // that moment: a write that lands before it is lost, not late. So keep
+    // writing until one is reported. A watch that never follows the new
+    // directory reports none of them, and this times out.
+    observed.poke_until(
+        "a write inside late/inner, a directory created after the walk",
+        |n| tree.write(&format!("late/inner/file-{n}.txt"), "x"),
+        |batch| batch.directories.contains(&wire("late/inner")),
     );
 }
 

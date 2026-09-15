@@ -246,6 +246,23 @@ impl Harness {
             .cloned()
             .collect()
     }
+
+    /// The first event with this name, polled for until `timeout`: an event
+    /// emitted from another thread (the watcher's) arrives when it arrives.
+    fn wait_for_event(&self, name: &str, timeout: Duration) -> Value {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(event) = self.events_named(name).into_iter().next() {
+                return event;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out after {timeout:?} waiting for {name}; saw {:?}",
+                self.event_names()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
 }
 
 /// A scratch application data directory removed on drop.
@@ -666,21 +683,45 @@ fn root_removed_while_open_fails_with_not_found_and_closes_the_workspace() {
     let workspace = h.open_workspace(&root.0);
     fs::remove_dir_all(&root.0).unwrap();
 
+    // Two closers race for a removed root, and either may win. The command
+    // finds the root gone and closes on the spot, saying why; or the watcher's
+    // root check (T070) got there first, and the command finds no workspace
+    // open at all. The test does not pick one: it tells them apart by the
+    // close's correlation id, and holds each to its own contract.
     let error = h.list(&workspace["id"], "").unwrap_err();
-    assert_eq!(error["code"], "NotFound");
-    assert_eq!(error["details"]["reason"], "ROOT_MISSING");
-    let closed = h.last_event("WorkspaceClosed");
-    assert_eq!(closed["payload"]["reason"], "ROOT_MISSING");
-    assert_eq!(closed["payload"]["workspaceId"], workspace["id"]);
-    assert_eq!(closed["actor"], json!({ "type": "SYSTEM" }));
+    assert_eq!(error["code"], "NotFound", "{error}");
+    // Asked before any waiting: both closers hold the workspace lock, so
+    // whichever won, it had finished before the command could fail.
     assert_eq!(
         h.invoke("workspace_current", json!({})).expect("current"),
         Value::Null
     );
+    let closed = h.wait_for_event("WorkspaceClosed", Duration::from_secs(10));
+    assert_eq!(closed["payload"]["reason"], "ROOT_MISSING");
+    assert_eq!(closed["payload"]["workspaceId"], workspace["id"]);
+    assert_eq!(closed["actor"], json!({ "type": "SYSTEM" }));
+    if closed["correlationId"] == error["correlationId"] {
+        assert_eq!(error["details"]["reason"], "ROOT_MISSING", "{error}");
+    } else {
+        assert!(
+            closed.get("correlationId").is_none(),
+            "closed by neither the failing command nor the watcher: {closed}"
+        );
+        assert!(error.get("details").is_none(), "nothing was open: {error}");
+    }
+    // Only the open and the close are counted. Other events legitimately
+    // interleave: the watcher reports the removal itself, and agent discovery
+    // is machine-wide, so a session starting elsewhere lands in this list too.
+    let lifecycle: Vec<String> = h
+        .event_names()
+        .into_iter()
+        .filter(|name| name == "WorkspaceOpened" || name == "WorkspaceClosed")
+        .collect();
     assert_eq!(
-        h.event_names(),
+        lifecycle,
         vec!["WorkspaceOpened", "WorkspaceClosed"],
-        "closed exactly once"
+        "closed exactly once, in {:?}",
+        h.event_names()
     );
 }
 

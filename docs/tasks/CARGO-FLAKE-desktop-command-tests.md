@@ -1,7 +1,7 @@
 # Task CARGO-FLAKE — three desktop command tests fail under a loaded machine
 
 - **Phase:** 2
-- **Status:** todo
+- **Status:** review
 - **Depends on:** –
 
 Sibling of `MONACO-JSDOM-FLAKE` / `MARKDOWN-BUDGET-FLAKE` and `PTY-FLAKE`, in
@@ -123,4 +123,45 @@ Whatever the diagnosis implies. Nothing to add until there is one.
 
 ## Completion report
 
-*(filled on completion)*
+Worked 2026-09-14 alongside `WATCH-FLAKE` (the two load-sensitive watcher
+tests), which owns the first of the three.
+
+- **Summary.** One of the three is diagnosed and fixed; the other two are a
+  recorded negative result.
+  - `root_removed_while_open_fails_with_not_found_and_closes_the_workspace`
+    is **the test, not the machine**, and the race exists on a quiet machine
+    too. Two closers race for a removed root and either may win: the command's
+    presence check (`WorkspaceManager::require`), or the watcher's root check
+    (T070, `close_missing_root`, every `ROOT_CHECK_INTERVAL`). The test was
+    written for T020, before the watcher existed, and assumed the command
+    always wins. Both signatures seen in the sightings reproduce **every time**
+    with an injected delay between `remove_dir_all` and `workspace.list`: 300
+    ms gives the extra `WorkspaceEntriesChanged` in the event list, and 1500 ms
+    gives `details.reason` null. Load only widened a window that is always
+    there. The environment-sensitive assertions were `details.reason ==
+    ROOT_MISSING` and the literal event list. The fix is `WATCH-FLAKE`'s.
+  - `session_recovery_round_trip_through_the_adapters` and
+    `closing_a_workspace_interrupts_the_runs_inside_it` did not fail once in
+    200 runs (below). **Load is ruled out as a sufficient cause**, up to a load
+    average of 57 from real release builds. **Space pressure is not ruled
+    out**: it was deliberately not reproduced, because this machine is shared
+    with other live sessions and a nearly full volume would have broken their
+    builds too. Sighting 2 had 396 MiB free as well as the orphaned loops, so
+    the one untested condition is one that was present.
+- **Files changed.** This file. The test change is `WATCH-FLAKE`'s.
+- **Tests actually executed.** Each test run 50× by exact name against the
+  built `commands` binary, twice:
+  - with no load added by this session (load 6–27 from other sessions):
+    `session_recovery…` 0/50 failed, `closing_a_workspace…` 0/50 failed;
+  - under a looping `cargo build --release --workspace` into a scratch target
+    directory (load 24–57): `session_recovery…` 0/50, `closing_a_workspace…`
+    0/50.
+  - Both also passed in all 10 `cargo test --workspace --no-fail-fast` runs
+    WATCH-FLAKE made under the same load (17–79).
+- **Architectural decisions.** None.
+- **Known limitations.** The two budgets that could be environment-sensitive
+  are named, not changed: `Harness::flush` gives the session writer 5 s, and
+  `run_until` gives a run 20 s. Neither tripped. Whether a nearly full volume
+  stalls the writer past 5 s is the open question if they fail again.
+- **Follow-up tasks.** None filed. If either test fails again, record the
+  free space at the time: it is the one condition left.
