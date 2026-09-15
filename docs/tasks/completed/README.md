@@ -57,6 +57,7 @@ a reopened ticket moves back the same way. Do not move files in or out by hand.
 | T310-U | The prompt box, and an owned run in the console | 4 | T310-B | done |
 | [T325](T325-workspace-ownership.md) | Workspace ownership registry | 4 | T200, T210, ADR-019 | done |
 | [T326](T326-ownership-violations.md) | Observed ownership violations | 4 | T223, T230, T325 | done |
+| T330 | Write interception (enforced ownership) | 4 | T325, ADR-018 amendment | superseded |
 | [T335](T335-agent-permissions.md) | Permissions: asked in place, answered in a queue (12a/12b) | 4 | T210, T221, T232, ADR-020 | done |
 | ADR-017 | Decide the terminal command-block contract (drafted, undecided) | 2 | – | done |
 | ADR-018A | ADR-018 amendment: a hook that may refuse a write | 4 | T326 | done |

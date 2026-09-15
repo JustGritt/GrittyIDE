@@ -26,12 +26,15 @@ moves back. Never move a task file by hand.
 | [T224](T224-reveal-terminal.md) | Reveal the terminal a session is running in | 3 | T220 | todo |
 | T305 | Agent capability model | 4 | T300 | unspec |
 | [T310-ANSWER](T310-ANSWER-host-permissions.md) | Arm the host permission verdict for an owned run | 4 | T310-B | review |
-| T310-VERDICT-EVENT | Record a permission verdict in a run's ring | 4 | T310-B | doing |
+| [T310-VERDICT-EVENT](T310-VERDICT-EVENT-verdict-in-the-ring.md) | Record a permission verdict in a run's ring | 4 | T310-ANSWER, T310-B | todo |
 | T320 | Context manifest | 4 | T300 | unspec |
 | T310-RESUME | Take over an observed session as an owned run | 4 | T310-B | unspec |
-| T310-U-FILES | Files touched, on an owned run's console | 4 | T310-U | unspec |
-| T310-U-CANCEL | Stop a run from the console it is showing in | 4 | T310-U | unspec |
-| T330 | Write interception (enforced ownership) | 4 | T325, ADR-018 amendment | unspec |
+| [T310-U-FILES](T310-U-FILES-files-touched-on-a-run.md) | Files touched, on an owned run's console | 4 | T310-RUN-PATHS, T310-U | todo |
+| [T310-U-CANCEL](T310-U-CANCEL-stop-from-the-console.md) | Stop a run from the console it is showing in | 4 | T310-U | todo |
+| [T310-RUN-PATHS](T310-RUN-PATHS-workspace-relative-run-paths.md) | A run's file paths, made workspace-relative | 4 | T310-ANSWER, T310-A | todo |
+| [T330-MEASURE](T330-MEASURE-write-refusal-probes.md) | Measure write refusal before building it | 4 | ADR-018A | todo |
+| [T330-R](T330-R-fence-matcher-refusal.md) | The fence, the matcher, and the hook's refusal | 4 | T330-MEASURE, T325, T326, T223 | todo |
+| [T330-U](T330-U-refusal-surface.md) | The refusal surface | 4 | T330-R, T326, T335 | todo |
 | T400 | Worktree isolation | 5 | T100, T325 | unspec |
 | T405 | Ownership-aware scheduler | 5 | T325, T300 | unspec |
 | T410 | Attention queue | 5 | T210, T325, T335 | unspec |
@@ -68,7 +71,7 @@ moves back. Never move a task file by hand.
 | [SIDEBAR-ICONS](docs/tasks/SIDEBAR-ICONS-section-tab-icons.md) | Sidebar section tabs as icons, for horizontal room | 2 | – | review |
 | SIDECAR-BUNDLE-CONFIG | Move externalBin to a bundle-time config so a compile never needs a staged binary | 3 | SIDECAR-FRESH-CHECKOUT | unspec |
 | SIDECAR-FRESH-CHECKOUT | A fresh clone or worktree cannot build gritty-desktop until T225's sidecar is staged by hand | 3 | T225 | review |
-| T080-U | The search panel | 2 | PROTO-W3, T080 | todo |
+| T080-U | The search panel | 2 | PROTO-W3, T080 | doing |
 | T101-D | The diff as an editor tab (Monaco diff editor) on git.show | 2 | T101-R | todo |
 | T101-R | gix: a paged commit walk, and a blob at a revision | 2 | T101-C | review |
 | [T102-U](T102-U-git-write-ui.md) | Staging, discard and the commit box in the Changes panel | 2 | T102-R | review |
@@ -77,7 +80,7 @@ moves back. Never move a task file by hand.
 | [T120-T](T120-T-theme.md) | A theme the user picks: system, light or dark | 2 | T120-C | review |
 | [T120-U](T120-U-settings-page.md) | The settings page, and retiring the three popovers | 2 | T120-C | review |
 | T222-CODEX | Codex, as one provider file | 3 | T222-SEAM | todo |
-| T222-SEAM | A provider registry, so providers stop being serial | 3 | T220 | unspec |
+| [T222-SEAM](T222-SEAM-provider-registry.md) | A provider registry, so providers stop being serial | 3 | T220, T230 | todo |
 | T300-ANSWER | Answer a decision on a run Gritty owns | 4 | T300-WIRE | unspec |
 | T300-PANEL | A run belongs on its workstream's island row, not a fourth roster | 4 | T300-WIRE | unspec |
 | T400-R | Worktree create and remove | 5 | T100 | unspec |
@@ -86,7 +89,7 @@ moves back. Never move a task file by hand.
 | [TURN-START-DEQUEUE](docs/tasks/TURN-START-DEQUEUE-measure.md) | Measure whether a dequeued message should start a turn | maintenance | AGENT-TURN-END | review |
 | [TURN-START-QUEUED](docs/tasks/TURN-START-QUEUED-dequeue-and-shell.md) | A dequeued message or a ! command starts a turn | maintenance | TURN-START-DEQUEUE, AGENT-TURN-END | review |
 | WATCH-CLOSE-ORDER | A WorkspaceEntriesChanged can land just after WorkspaceClosed | maintenance | T070 | unspec |
-| [WATCH-DEGRADED](docs/tasks/WATCH-DEGRADED-report-unwatched-tree.md) | Say when part of the tree isn't being watched | maintenance | WATCH-FLAKE, FILES-PARTIAL, EXPLORER-RELIST-QUEUE | blocked |
+| [WATCH-DEGRADED](docs/tasks/WATCH-DEGRADED-report-unwatched-tree.md) | Say when part of the tree isn't being watched | maintenance | WATCH-FLAKE, FILES-PARTIAL, EXPLORER-RELIST-QUEUE | doing |
 | [WATCH-FLAKE](WATCH-FLAKE-load-sensitive.md) | Two load-sensitive tests fail in the full-workspace run, pass alone |  | – | review |
 | WATCH-FLAKE-CORE | gritty-core's root-removed test has the same two-closer race | maintenance | WATCH-FLAKE | unspec |
 | WATCH-FSEVENTS-STALL | The per-directory watch test sometimes sees nothing at all for 10 s on FSEvents | maintenance | WATCH-FLAKE | unspec |
