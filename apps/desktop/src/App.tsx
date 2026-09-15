@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import { Splitter } from './components/splitter';
 import { boundsWithin } from './components/splitter-geometry';
 import { core } from './core/client';
+import { runConsoleKey } from './features/agents/agent-tabs-reducer';
 import { SidebarAgents } from './features/agents/agents-section';
 import {
   isPermissionQueueChord,
@@ -31,6 +32,7 @@ import { Launcher } from './features/launcher/launcher';
 import { useLastSession } from './features/launcher/use-last-session';
 import { viewModesReducer } from './features/markdown/view-modes';
 import { OperationsPanel } from './features/operations/operations-panel';
+import { RunLauncher } from './features/runs/run-launcher';
 import { RunsPanel } from './features/runs/runs-panel';
 import { useRuns } from './features/runs/use-runs';
 import { SearchPanel } from './features/search/search-panel';
@@ -225,6 +227,10 @@ export function App() {
   const lastSession = useLastSession(workspace);
   const [islandOpen, setIslandOpen] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
+  // The Agents section's New run form (RUN-LAUNCHER, ADR-035 M0): the one way
+  // a release build starts a run. Keyed by workspace where it mounts, so a
+  // draft typed against one repository is never started in another.
+  const [launcherOpen, setLauncherOpen] = useState(false);
   // Closing the workspace ends the queue with it: reopening should land in the
   // editor, not in a triage view of work you have not looked at yet.
   useEffect(() => {
@@ -495,6 +501,34 @@ export function App() {
               // The island's ⌥ chords win while it is open — there is no
               // shortcut registry to arbitrate for them.
               chords={!islandOpen}
+              onLauncherToggle={() => setLauncherOpen((current) => !current)}
+              launcher={
+                launcherOpen && (
+                  <RunLauncher
+                    key={workspace.id}
+                    deps={{
+                      workstreams: workstreams.workstreams,
+                      busy: runs.busy || workstreams.busy,
+                      createWorkstream: (title) => workstreams.create(title),
+                      startRun: (workstreamId, prompt) => runs.startClaude(workstreamId, prompt),
+                      workstreamError: workstreams.error,
+                      runError: runs.error,
+                      clearWorkstreamError: workstreams.clearError,
+                      clearRunError: runs.clearError,
+                    }}
+                    // Kept, not a preview: a run just started is the thing the
+                    // user came to watch, and the next single click on a row
+                    // must not replace it.
+                    onStarted={(run) => {
+                      const key = runConsoleKey(run.id);
+                      agentConsole.show(key);
+                      agentConsole.keep(key);
+                      setLauncherOpen(false);
+                    }}
+                    onClose={() => setLauncherOpen(false)}
+                  />
+                )
+              }
             />
             <ExplorerPanel
               explorer={explorer}

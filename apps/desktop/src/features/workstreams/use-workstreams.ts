@@ -37,7 +37,11 @@ export interface WorkstreamsController {
   clearError(): void;
   /** True while a command is in flight; the island disables its buttons. */
   readonly busy: boolean;
-  create(title: string, goal?: string): Promise<void>;
+  /**
+   * Resolves with the workstream the core created, or `undefined` when it
+   * refused — the launcher needs the id to start a run against (RUN-LAUNCHER).
+   */
+  create(title: string, goal?: string): Promise<Workstream | undefined>;
   update(workstreamId: WorkstreamId, patch: { title?: string; goal?: string }): Promise<void>;
   transition(workstreamId: WorkstreamId, to: WorkstreamState): Promise<void>;
   remove(workstreamId: WorkstreamId): Promise<void>;
@@ -179,13 +183,14 @@ export function useWorkstreams(workspace: Workspace | null): WorkstreamsControll
   const create = useCallback(
     async (title: string, goal?: string) => {
       const id = workspaceRef.current;
-      if (!id) return;
+      if (!id) return undefined;
       const workstream = await run(() =>
         core.workstreams.create(
           goal ? { workspaceId: id, title, goal } : { workspaceId: id, title },
         ),
       );
       if (workstream) dispatch({ type: 'workstream', workstream });
+      return workstream;
     },
     [run],
   );

@@ -1,5 +1,5 @@
 import type { AgentRunId, CoreError } from '@gritty/protocol';
-import { useEffect, useId, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { ErrorEnvelope } from '../../components/error-envelope';
 import { AGENTS_SECTION_CHORD_HINT, isAgentsSectionChord } from './agents-section-chords';
 import { partitionRows, type RosterRow } from './roster-model';
@@ -45,6 +45,8 @@ export function SidebarAgents({
   onRescan,
   busy,
   chords,
+  launcher,
+  onLauncherToggle,
 }: {
   rows: readonly RosterRow[];
   /** The core's total, for the header. Not derived from `rows`. */
@@ -76,6 +78,14 @@ export function SidebarAgents({
    * gated by hand.
    */
   chords: boolean;
+  /**
+   * The New run form, when it is open (RUN-LAUNCHER). An element rather than
+   * props for it, the way the explorer takes its Changes panel: this section
+   * draws rows and has no business holding the controllers a launch needs.
+   */
+  launcher?: ReactNode;
+  /** Open or fold the launcher. Absent, the bar offers no New run. */
+  onLauncherToggle?: () => void;
 }) {
   const bodyId = useId();
   const [showHidden, setShowHidden] = useState(false);
@@ -91,6 +101,17 @@ export function SidebarAgents({
       // A field is a field: ⌥G halfway through typing a name must not fold the
       // window's layout instead.
       if (event.target instanceof HTMLElement && event.target.tagName === 'INPUT') return;
+      // Nor halfway through a prompt in this section's own launcher, where
+      // folding would unmount the form and take the draft with it. Scoped to
+      // the section's fields, so ⌥G from Monaco's hidden textarea, or from a
+      // row button that kept focus after a click, still folds.
+      if (
+        event.target instanceof HTMLElement &&
+        (event.target.tagName === 'TEXTAREA' || event.target.tagName === 'SELECT') &&
+        event.target.closest('.agents-section')
+      ) {
+        return;
+      }
       // Claimed even when it changes nothing, so the character macOS composed
       // (⌥G is `©`) never reaches whatever has focus.
       event.preventDefault();
@@ -151,6 +172,17 @@ export function SidebarAgents({
           </span>
         )}
 
+        {open && onLauncherToggle && (
+          <button
+            type="button"
+            className="btn--bare"
+            aria-expanded={Boolean(launcher)}
+            onClick={onLauncherToggle}
+          >
+            New run
+          </button>
+        )}
+
         {open && (
           <button type="button" className="btn--bare" onClick={onRescan} disabled={busy}>
             {busy ? 'Scanning…' : 'Rescan'}
@@ -160,6 +192,8 @@ export function SidebarAgents({
 
       {open && (
         <div className="agents-section__body" id={bodyId}>
+          {launcher}
+
           {/* A refusal has to land somewhere. It used to land in the rail, and
               deleting the rail without this would have made a failed
               `agents.list` silent. */}
@@ -185,10 +219,14 @@ export function SidebarAgents({
             // Nothing to list. When the reveal below has something, it is the
             // whole content — an empty `<ul>` above it would be a list element
             // standing for no list.
-            hidden.length === 0 && (
+            // Not while the launcher is open: the form is already the answer to
+            // "no agents here", and the sentence under it would repeat the offer.
+            hidden.length === 0 &&
+            !launcher && (
               <p className="agents-section__empty">
                 No agents here. Gritty lists the coding agents running in this workspace — the ones
                 in your own terminals, and the runs it started itself.
+                {onLauncherToggle && ' Start one with New run.'}
               </p>
             )
           ) : (

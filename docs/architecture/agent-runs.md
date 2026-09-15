@@ -245,6 +245,24 @@ attention queue would break the one-roster-one-count rule those three already
 follow, and would give T410 two queues to aggregate instead of one. That is a
 designed change with no ticket yet; it is recorded rather than taken.
 
+### Starting a run in a release build (RUN-LAUNCHER)
+
+The panel above is still the only place a *fake* run starts. A real one starts
+from the sidebar: the Agents section's bar offers **New run**, which opens
+`run-launcher.tsx` at the top of the section. It takes a prompt and where the
+run belongs — an existing workstream that is not `DONE` or `ABANDONED`, or a new
+one titled from the prompt's first line — and says before starting that the run
+uses the person's own Claude account in this workspace, and that tools their
+Claude settings do not already allow will ask here first (ADR-020).
+
+It adds no command. `launchRun` is two existing ones in order,
+`workstreams.create` then `runs.start`, with no transaction between them: a
+refused start after a created workstream leaves the workstream, reports it, and
+points the form's retry at it rather than creating a second. On success the
+run's console opens as a kept tab. Nothing is optimistic; the row and the
+console come from the run the core returned. This is ADR-035's M0 step: before
+it, `runs.start` had no caller outside `import.meta.env.DEV`.
+
 ## The console, and the one thing that crosses (T310-U)
 
 An owned run is drawn in the editor area, beside the consoles for the sessions

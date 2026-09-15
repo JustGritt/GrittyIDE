@@ -40,7 +40,7 @@ function controller(overrides: Partial<RunsController> = {}): RunsController {
     clearError: () => {},
     busy: false,
     startFake: async () => {},
-    startClaude: async () => {},
+    startClaude: async () => undefined,
     prompt: async () => {},
     answerPermission: async () => {},
     answering: null,

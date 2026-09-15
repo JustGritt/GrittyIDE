@@ -83,6 +83,9 @@ function render(
     selectedKey?: string | null;
     processEvidence?: boolean;
     showElsewhere?: boolean;
+    /** Offer New run (RUN-LAUNCHER); off by default, as before it existed. */
+    launchable?: boolean;
+    launcher?: string;
   } = {},
 ): string {
   const roster: AgentRoster = {
@@ -109,9 +112,43 @@ function render(
       // The chord listener is an effect, which `renderToStaticMarkup` never
       // runs; off anyway, so the test cannot depend on that staying true.
       chords: false,
+      ...(options.launchable ? { onLauncherToggle: refuse('toggle the launcher') } : {}),
+      ...(options.launcher !== undefined
+        ? { launcher: createElement('form', { className: 'stub-launcher' }, options.launcher) }
+        : {}),
     }),
   );
 }
+
+describe('New run (RUN-LAUNCHER)', () => {
+  it('is offered on the open bar when the app can launch', () => {
+    const markup = render([], [], { launchable: true });
+    expect(markup).toContain('>New run</button>');
+    expect(markup).toMatch(/aria-expanded="false"[^>]*>New run</);
+  });
+
+  it('is not offered folded, beside the rest of the open-only controls', () => {
+    expect(render([], [], { launchable: true, open: false })).not.toContain('New run');
+  });
+
+  it('is not offered by a caller that cannot launch', () => {
+    expect(render([], [])).not.toContain('New run');
+  });
+
+  it('points the empty section at itself', () => {
+    expect(render([], [], { launchable: true })).toContain('Start one with New run.');
+    expect(render([], [])).not.toContain('Start one with New run.');
+  });
+
+  it('draws the form above the rows, marks the button expanded, and drops the empty text', () => {
+    const markup = render([run()], [], { launchable: true, launcher: 'the form' });
+    expect(markup).toMatch(/aria-expanded="true"[^>]*>New run</);
+    expect(markup.indexOf('stub-launcher')).toBeLessThan(markup.indexOf('agents-section__list'));
+    expect(render([], [], { launchable: true, launcher: 'the form' })).not.toContain(
+      'No agents here',
+    );
+  });
+});
 
 describe('the section draws both kinds of agent', () => {
   it('shows a run Gritty owns and a session it only watches, together', () => {

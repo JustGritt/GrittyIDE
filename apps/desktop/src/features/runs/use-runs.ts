@@ -22,8 +22,12 @@ export interface RunsController {
   /** True while a command is in flight; the panel disables its buttons. */
   readonly busy: boolean;
   startFake(workstreamId: WorkstreamId, script?: string): Promise<void>;
-  /** Start a real Claude Code run (T310-B). */
-  startClaude(workstreamId: WorkstreamId, prompt?: string): Promise<void>;
+  /**
+   * Start a real Claude Code run (T310-B). Resolves with the run the core
+   * created, or `undefined` when it refused, so the launcher can open the run's
+   * console on success and keep its form on a refusal (RUN-LAUNCHER).
+   */
+  startClaude(workstreamId: WorkstreamId, prompt?: string): Promise<AgentRun | undefined>;
   /**
    * Say something to a run that is already running.
    *
@@ -154,7 +158,7 @@ export function useRuns(workspace: Workspace | null): RunsController {
   const startClaude = useCallback(
     async (workstreamId: WorkstreamId, prompt?: string) => {
       const id = workspaceRef.current;
-      if (!id) return;
+      if (!id) return undefined;
       const started = await run(() =>
         core.runs.start({
           workspaceId: id,
@@ -164,6 +168,7 @@ export function useRuns(workspace: Workspace | null): RunsController {
         }),
       );
       if (started) dispatch({ type: 'run', run: started });
+      return started;
     },
     [run],
   );
