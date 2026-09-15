@@ -1,12 +1,18 @@
 # AGENTS.md — working in the Gritty repository
 
-This file is the contract for every coding agent and human contributor. It
-condenses the two planning documents; when in doubt, read them:
+This file is the contract for every coding agent and human contributor. When in
+doubt, read, in this order of authority:
 
-1. `docs/Gritty IDE Architecture Refinements.md` (contracts, dependency graph,
-   failure semantics; wins where more specific)
-2. `docs/Gritty IDE Project Plan.md` (product thesis, architecture, roadmap)
-3. `docs/decisions/` (ADRs), `docs/architecture/`, and the task file you were given
+1. `docs/decisions/` (ADRs): an accepted ADR wins where it is more specific.
+   ADR-035 owns the forward sequence.
+2. `docs/plans/project-plan.md`, the plan of record: product definition,
+   architecture as built, contract gates, phase status, the canonical dependency
+   graph and the open decisions.
+3. `docs/architecture/`, and the task file you were given.
+
+The founding `docs/Gritty IDE Project Plan.md` and `docs/Gritty IDE Architecture
+Refinements.md` are frozen history. Cite their sections; do not follow them over
+the three above.
 
 ## What Gritty is
 
@@ -204,13 +210,17 @@ T000 Bootstrap
          │   └─ T050 Markdown
          ├─ T070 File watcher
          └─ T080 Search
-T060 Persistence, T090 Terminal, T100 Git, T110 Diagnostics → Phase 2 dogfood
+T060 Persistence, T090 Terminal, T100 Git, T110 Diagnostics
+T100 Git → T400-R worktree create/remove → T400 a workstream owns a worktree (also T200)
 T200 Workstream model (Gate C) → T210 UI
-  ├─ T300 Agent protocol + fake agent (Gate D) → T305 capabilities → T310 real agent
-  │    → T315 live activity (built early by T220-T232), T320 context manifest, T335 decisions
-  └─ T325 Workspace ownership (observed) → T330 write interception, T400 worktrees,
+  ├─ T220 Observed sessions → T230 timeline → T221 hook bridge → T335 permission verdicts
+  ├─ T300 Agent run + fake agent (Gate D) → T310 Claude Code adapter (did not wait for T305);
+  │    T305 capabilities, T320 context manifest (both deferred by ADR-035)
+  └─ T325 Workspace ownership (observed, Gate O) → T330-* write interception,
        T405 ownership-aware scheduling, T410 attention queue
 ```
+
+The full graph, with the ADR-035 milestone tickets, is `docs/plans/project-plan.md` §9.
 
 Freeze points: after Phase 0, the command/event/error envelopes, operation model,
 workspace path representation, document identity and migration conventions are

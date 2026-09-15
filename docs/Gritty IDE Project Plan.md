@@ -1,3 +1,8 @@
+> **Superseded on 2026-09-15 by `docs/plans/project-plan.md`** (PLAN-OF-RECORD,
+> one project plan replaces the founding plan, its addendum and the roadmap).
+> Kept unchanged below because code, ADRs and task files cite its section
+> numbers. It is history, not instructions. Do not edit.
+
 GRITTY IDE
 
 Project Definition, Architecture & Execution Plan

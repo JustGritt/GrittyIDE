@@ -4,18 +4,36 @@ Agent-native desktop development environment. A dependable code editor first; an
 orchestration cockpit for supervised coding agents when they are available, and
 still fully useful when they are not.
 
-**Status:** Phase 0 (architecture spike). Nothing here is usable as an editor yet.
-See `docs/plans/roadmap.md` for where this is going and `docs/plans/phase-0-spike.md`
-for the current checklist.
+**Status:** pre-release, built and run from source on macOS. Unsigned, with no
+release build published. On `main` today:
+
+- a Monaco editor with tabs, split panes and crash recovery for unsaved buffers;
+- Markdown preview;
+- a file explorer with create, rename, move and delete to the Trash;
+- quick open;
+- a terminal dock;
+- Git status, history, staging and commit;
+- a settings page;
+- workstreams with decisions and an attention queue;
+- a view of the Claude Code sessions already running on the machine, with
+  their timelines and permission prompts.
+
+Some of this is still at review. Runs that Gritty starts itself are available
+only in development builds. Linux is unverified while its CI is dark.
+
+The goal is parity with Orca on the core loop (task as worktree, agent in a
+terminal, review, pull request). Where this is going, and in what order:
+`docs/plans/project-plan.md` and ADR-035. What is being built right now:
+`scripts/agent-board.py list`.
 
 ## Stack
 
 | Layer | Technology | Location |
 |---|---|---|
 | Desktop shell | Tauri 2 (Rust) | `apps/desktop/src-tauri` (thin composition root) |
-| UI | React 19 + TypeScript + Vite 8, Monaco from T040 | `apps/desktop/src`, `packages/*` |
+| UI | React 19 + TypeScript + Vite 8, Monaco, xterm | `apps/desktop/src`, `packages/*` |
 | Core domain | Rust workspace crates, UI-agnostic | `crates/*` |
-| Platforms | macOS first (dogfood), Linux continuously buildable in CI, Windows deferred | |
+| Platforms | macOS first; Linux built in CI when CI runs (dark until 1 Oct 2026); Windows deferred (ADR-002) | |
 
 ## Prerequisites
 
@@ -47,21 +65,26 @@ Logging: `GRITTY_LOG=debug pnpm dev` (a `tracing` env filter).
 ```
 apps/desktop/          Tauri app: React frontend (src/) + Rust shell (src-tauri/)
 crates/gritty-core/    Application core; never depends on Tauri
-crates/*               Further domain crates arrive with their tasks (workspace, persistence, terminal, ...)
+crates/*               Domain crates: workspace, persistence, terminal, git, git-write, search,
+                       settings, agents, agent-hook, agent-fake, agent-claude
 packages/protocol/     Typed core client; src/generated is written by `cargo test -p gritty-core`
-packages/*             Further frontend packages arrive with their tasks (editor, markdown, ...)
-docs/                  Planning docs, architecture, ADRs, plans, task specs, test matrices
-.github/workflows/     CI (Linux always, macOS gated)
+packages/editor/       Monaco binding
+packages/markdown/     Markdown rendering and link resolution
+fixtures/              Deterministic test repositories
+docs/                  Plan of record, architecture, ADRs, task specs, test matrices
+.github/workflows/     CI (Linux on every push; macOS on a self-hosted runner, on demand)
 ```
 
 ## Documentation
 
-- `docs/Gritty IDE Project Plan.md`: product definition, architecture, delivery plan.
-- `docs/Gritty IDE Architecture Refinements.md`: contracts, dependency graph and
-  failure semantics; wins over the plan where it is more specific.
-- `docs/architecture/`: runtime boundaries and the security model.
-- `docs/decisions/`: architecture decision records.
-- `docs/plans/`: roadmap and the executable Phase 0 checklist.
+- `docs/plans/project-plan.md`: the plan of record. Product definition,
+  architecture as built, contract gates, phase status, dependency graph and open
+  decisions.
+- `docs/decisions/`: architecture decision records; an accepted ADR wins over the
+  plan where it is more specific (ADR-035 owns the forward sequence).
+- `docs/architecture/`: runtime boundaries, domain models and the security model.
+- `docs/Gritty IDE Project Plan.md`, `docs/Gritty IDE Architecture Refinements.md`:
+  the founding documents of 2 September 2026, frozen as history.
 - `docs/tasks/`: task specs for coding agents, one file per task.
 - `AGENTS.md`: the rules every coding agent (and human) follows in this repo.
 

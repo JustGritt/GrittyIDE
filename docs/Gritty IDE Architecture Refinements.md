@@ -1,5 +1,11 @@
 # Gritty IDE --- Architecture Refinements & Agent Execution Addendum
 
+> **Superseded on 2026-09-15 by `docs/plans/project-plan.md`** (PLAN-OF-RECORD,
+> one project plan replaces the founding plan, its addendum and the roadmap).
+> Kept unchanged below because code, ADRs and task files cite its section
+> numbers. It is history, not instructions: the "agents should follow this
+> document" note below no longer applies. Do not edit.
+
 **Status:** Pre-implementation architecture addendum\
 **Date:** 2 September 2026\
 **Applies to:** `Gritty IDE Project Plan.md`\

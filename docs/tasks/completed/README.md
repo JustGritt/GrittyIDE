@@ -69,6 +69,7 @@ a reopened ticket moves back the same way. Do not move files in or out by hand.
 | ADR-032 | Record the UI framework decision (React 19) | 0 | – | done |
 | ADR-033 | What [profile.dev] should be: debuginfo and split-debuginfo on macOS | 2 | – | done |
 | ADR-034 | What "ignored" means across the explorer, the watcher and search | 2 | ADR-022 | done |
+| ADR-035 | Orca parity: the core loop comes after cleanup and before Phases 3–4 | docs | ADR-007 | done |
 | CI-COST | CI: self-hosted macOS runner, and stop burning metered minutes |  | – | done |
 | [CI-RUNNER-GC](CI-RUNNER-GC-disk-retention.md) | Self-hosted runner never cleans up: target/ and stale bundles grow unbounded on the dev Mac |  | – | done |
 | [EVENT-LISTEN-GAP](EVENT-LISTEN-GAP-startup-events.md) | An event emitted before the WebView is listening reaches nobody | 1 | T010 | done |

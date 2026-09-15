@@ -1,5 +1,13 @@
 # Execution board
 
+> **Historical snapshot, 2026-09-06.** The waves and lanes below planned Phases
+> 2–5 as they stood then, and several of their statements have since been
+> overtaken: ADR-001 is accepted, the CI outage is a spent minute allowance, and
+> T233 was built. Live status is `scripts/agent-board.py list`; lease scopes are
+> `AGENT-LEASES.md`; the plan of record is `docs/plans/project-plan.md`, whose
+> forward sequence follows ADR-035. Kept for its reasoning about shared files and
+> merge order.
+
 `roadmap.md` says what Gritty builds and in what order. This file says **who can
 build it at the same time without two sessions editing the same file**, and what
 each of them may touch. It is the scheduling layer over the roadmap, and it is
